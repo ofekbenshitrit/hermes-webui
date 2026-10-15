@@ -63,8 +63,14 @@ def _font_stack_offenders(css):
     return offenders
 
 
+def test_google_sans_is_loaded():
+    assert 'font-family:"Google Sans"' in CSS
+    assert 'src:url("fonts/GoogleSans.ttf")' in CSS
+    assert 'src:url("fonts/GoogleSans-Italic.ttf")' in CSS
+
+
 def test_typography_root_tokens_are_defined():
-    assert '--font-ui:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;' in CSS
+    assert '--font-ui:"Google Sans",system-ui,sans-serif;' in CSS
     assert '--font-conversation:var(--font-ui);' in CSS
     assert '--font-mono:ui-monospace,"SFMono-Regular","SF Mono",Menlo,Consolas,"Liberation Mono",monospace;' in CSS
 
@@ -96,23 +102,19 @@ def test_no_skin_redefines_font_conversation():
             raise AssertionError(f'Unexpected skin-level --font-conversation: {selector}')
 
 
-def test_nous_skin_keeps_monospace_ui_default():
+def test_nous_skin_uses_google_sans():
     assert _get_root_skin_block(CSS, "nous")
-    assert re.search(
-        r'--font-ui:"SF Mono","Roboto Mono","Courier New",monospace;',
-        _get_root_skin_block(CSS, "nous"),
-        re.S,
-    )
+    assert '--font-ui:"Google Sans",system-ui,sans-serif;' in _get_root_skin_block(CSS, "nous")
 
 
 def test_geist_and_neon_skins_set_expected_font_ui_tokens():
     geist_block = _get_root_skin_block(CSS, "geist-contrast")
     assert geist_block
-    assert "--font-ui:\"Geist\",\"Geist Sans\",-apple-system,BlinkMacSystemFont,\"Segoe UI\",Helvetica,Arial,sans-serif;" in geist_block
+    assert "--font-ui:\"Google Sans\",system-ui,sans-serif;" in geist_block
     for skin in ("neon", "neon-soft", "neon-paint"):
         block = _get_root_skin_block(CSS, skin)
         assert block, f"Missing {skin} root skin block"
-        assert "--font-ui:system-ui,-apple-system,sans-serif;" in block
+        assert "--font-ui:\"Google Sans\",system-ui,sans-serif;" in block
 
 
 def test_no_stale_var_mono_usage_or_literal_monospace_font_family_stacks():

@@ -11965,8 +11965,10 @@ _LOGIN_PAGE_HTML = """<!doctype html>
 <html lang="{{LANG}}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{BOT_NAME}} — {{LOGIN_TITLE}}</title>
 <style>
+@font-face{font-family:"Google Sans";src:url("/static/fonts/GoogleSans.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:swap}
+@font-face{font-family:"Google Sans";src:url("/static/fonts/GoogleSans-Italic.ttf") format("truetype");font-weight:100 900;font-style:italic;font-display:swap}
 *{box-sizing:border-box;margin:0;padding:0}
-body{background:#1a1a2e;color:#e8e8f0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+body{background:#1a1a2e;color:#e8e8f0;font-family:"Google Sans",system-ui,sans-serif;font-optical-sizing:auto;
   height:100vh;display:flex;align-items:center;justify-content:center}
 .card{background:#16213e;border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:36px 32px;
   width:320px;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,.3)}
@@ -11975,6 +11977,7 @@ body{background:#1a1a2e;color:#e8e8f0;font-family:-apple-system,BlinkMacSystemFo
   margin:0 auto 12px;box-shadow:0 2px 12px rgba(233,69,96,.3)}
 h1{font-size:18px;font-weight:600;margin-bottom:4px}
 .sub{font-size:12px;color:#8888aa;margin-bottom:24px}
+input,button{font-family:inherit}
 input{width:100%;padding:10px 14px;border-radius:10px;border:1px solid rgba(255,255,255,.1);
   background:rgba(255,255,255,.04);color:#e8e8f0;font-size:14px;outline:none;margin-bottom:14px;
   transition:border-color .15s}
@@ -13696,8 +13699,9 @@ _SHELL_ERROR_HTML = """<!doctype html>
   <meta charset=\"utf-8\">
   <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
   <title>Hermes is restarting</title>
+  <style>@font-face{font-family:\"Google Sans\";src:url(\"/static/fonts/GoogleSans.ttf\") format(\"truetype\");font-weight:100 900;font-style:normal;font-display:swap}</style>
 </head>
-<body style=\"margin:0;padding:2rem;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#111827;color:#e5e7eb;\">
+<body style=\"margin:0;padding:2rem;font-family:\"Google Sans\",system-ui,sans-serif;font-optical-sizing:auto;background:#111827;color:#e5e7eb;\">
   <main style=\"max-width:40rem;margin:10vh auto;line-height:1.5;\">
     <h1 style=\"font-size:1.5rem;margin:0 0 0.75rem;\">Hermes is restarting…</h1>
     <p style=\"margin:0;color:#cbd5e1;\">The WebUI shell could not load cleanly. Refresh in a moment if this page does not update automatically.</p>

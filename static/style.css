@@ -1,3 +1,17 @@
+@font-face{
+  font-family:"Google Sans";
+  src:url("fonts/GoogleSans.ttf") format("truetype");
+  font-weight:100 900;
+  font-style:normal;
+  font-display:swap;
+}
+@font-face{
+  font-family:"Google Sans";
+  src:url("fonts/GoogleSans-Italic.ttf") format("truetype");
+  font-weight:100 900;
+  font-style:italic;
+  font-display:swap;
+}
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   /* ── Typography contract ──
      --font-ui: shell chrome, controls, composer, labels, and ordinary UI.
@@ -19,12 +33,12 @@
     --font-size-xs:11px;--font-size-sm:12px;--font-size-md:14px;
     --message-body-font-size:14px;--message-body-line-height:1.75;--message-code-font-size:12.5px;--message-pre-code-font-size:13px;--message-table-font-size:12px;
     --file-tree-toggle-width:10px;
-    --font-ui:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;
+    --font-ui:"Google Sans",system-ui,sans-serif;
     --font-conversation:var(--font-ui);
     --font-mono:ui-monospace,"SFMono-Regular","SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
     --surface-subtle:rgba(0,0,0,.025);--surface-subtle-hover:rgba(0,0,0,.045);
     --border-subtle:rgba(0,0,0,.08);--border-muted:rgba(0,0,0,.12);
-    font-family:var(--font-ui);font-size:14px;line-height:1.6;
+    font-family:var(--font-ui);font-optical-sizing:auto;font-size:14px;line-height:1.6;
   }
   button,input,select,textarea{font-family:var(--font-ui);}
   /* ── Font size modifiers ── */
@@ -148,7 +162,7 @@
     --error:#D44D4D;--success:#0F8F70;--warning:#B87916;--info:#55564F;
     --user-bubble-bg:#EFEFEF;--user-bubble-border:#DEDEDE;--user-bubble-text:#242424;--user-bubble-placeholder:#707070;
     --user-selection-bg:rgba(0,0,0,0.16);--user-selection-text:#111111;
-    --font-ui:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    --font-ui:"Google Sans",system-ui,sans-serif;
     font-family:var(--font-ui);
   }
   :root.dark[data-skin="graphite"]{
@@ -274,7 +288,7 @@
     --error:#D92D20;--success:#2E7A60;--warning:#B87916;--info:#4D8DFF;
     --user-bubble-bg:#EBEBEB;--user-bubble-border:#D9D9D9;--user-bubble-text:#252523;--user-bubble-placeholder:#6A6A68;
     --user-selection-bg:rgba(46,122,96,0.20);--user-selection-text:#0D0D0D;
-    --font-ui:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    --font-ui:"Google Sans",system-ui,sans-serif;
     font-family:var(--font-ui);
   }
   :root.dark[data-skin="codex"]{
@@ -400,7 +414,7 @@
     --error:#C15F3C;--success:#6EA100;--warning:#B87916;--info:#6396D6;
     --user-bubble-bg:#F0EEE6;--user-bubble-border:#E2DED2;--user-bubble-text:#30302E;--user-bubble-placeholder:#87867F;
     --user-selection-bg:rgba(217,119,87,0.24);--user-selection-text:#141413;
-    --font-ui:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    --font-ui:"Google Sans",system-ui,sans-serif;
     font-family:var(--font-ui);
   }
   :root.dark[data-skin="terracotta"]{
@@ -526,7 +540,7 @@
     --error:#D1242F;--success:#1A7F37;--warning:#9A6700;--info:#0969DA;
     --user-bubble-bg:#EFEFEF;--user-bubble-border:#DEDEDE;--user-bubble-text:#242424;--user-bubble-placeholder:#707070;
     --user-selection-bg:rgba(0,0,0,0.16);--user-selection-text:#111111;
-    --font-ui:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    --font-ui:"Google Sans",system-ui,sans-serif;
     font-family:var(--font-ui);
   }
   :root.dark[data-skin="github"]{
@@ -815,7 +829,7 @@
     --accent-hover:#3A6E9A;--accent-bg:rgba(70,130,180,0.06);--accent-bg-strong:rgba(70,130,180,0.12);--accent-text:#2C5F88;
     --error:#C62828;--success:#3D8B40;--warning:#E68A00;--info:#4682B4;
     --radius-sm:1px;--radius-md:2px;--radius-card:2px;--radius-lg:4px;
-    --font-ui:"SF Mono","Roboto Mono","Courier New",monospace;
+    --font-ui:"Google Sans",system-ui,sans-serif;
     --surface-subtle:rgba(0,0,0,.025);--surface-subtle-hover:rgba(0,0,0,.045);
     --border-subtle:rgba(0,0,0,.08);--border-muted:rgba(0,0,0,.12);
     font-family:var(--font-ui);font-size:14.5px;line-height:1.7;
@@ -892,7 +906,7 @@
     --input-bg:#ffffff;--hover-bg:#f5f5f5;--code-bg:#fafafa;--code-inline-bg:#f5f5f5;--code-text:#111111;--pre-text:#111111;
     --error:#e5484d;--success:#007a45;--warning:#b45309;--info:#0070f3;
     --radius-sm:4px;--radius-md:6px;--radius-card:8px;--radius-lg:10px;
-    --font-ui:"Geist","Geist Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    --font-ui:"Google Sans",system-ui,sans-serif;
   }
   :root.dark[data-skin="geist-contrast"]{
     color-scheme:dark;
@@ -1086,7 +1100,7 @@
     --accent-hover:#7E22CE;--accent-bg:rgba(147,51,234,0.06);--accent-bg-strong:rgba(147,51,234,0.12);--accent-text:#6D28D9;
     --error:#DC2626;--success:#059669;--warning:#D97706;--info:#7C3AED;
     --radius-sm:2px;--radius-md:4px;--radius-card:4px;--radius-lg:6px;
-    --font-ui:system-ui,-apple-system,sans-serif;
+    --font-ui:"Google Sans",system-ui,sans-serif;
     --surface-subtle:rgba(147,51,234,.025);--surface-subtle-hover:rgba(147,51,234,.05);
     --border-subtle:rgba(147,51,234,.08);--border-muted:rgba(147,51,234,.12);
     --purple:#9333EA;
@@ -1166,7 +1180,7 @@
     --accent-hover:#7E22CE;--accent-bg:rgba(147,51,234,0.06);--accent-bg-strong:rgba(147,51,234,0.12);--accent-text:#6D28D9;
     --error:#DC2626;--success:#059669;--warning:#D97706;--info:#7C3AED;
     --radius-sm:2px;--radius-md:4px;--radius-card:4px;--radius-lg:6px;
-    --font-ui:system-ui,-apple-system,sans-serif;
+    --font-ui:"Google Sans",system-ui,sans-serif;
     --surface-subtle:rgba(147,51,234,.025);--surface-subtle-hover:rgba(147,51,234,.05);
     --border-subtle:rgba(147,51,234,.08);--border-muted:rgba(147,51,234,.12);
     --purple:#9333EA;
@@ -1232,7 +1246,7 @@
     --accent-hover:#E91E80;--accent-bg:rgba(255,45,149,0.06);--accent-bg-strong:rgba(255,45,149,0.12);--accent-text:#C2185B;
     --error:#FF1744;--success:#00E676;--warning:#FFB300;--info:#00E5FF;
     --radius-sm:2px;--radius-md:4px;--radius-card:4px;--radius-lg:6px;
-    --font-ui:system-ui,-apple-system,sans-serif;
+    --font-ui:"Google Sans",system-ui,sans-serif;
     --surface-subtle:rgba(255,45,149,.025);--surface-subtle-hover:rgba(255,45,149,.05);
     --border-subtle:rgba(255,45,149,.08);--border-muted:rgba(255,45,149,.12);
     --purple:#FF2D95;
@@ -2929,6 +2943,11 @@
   .preview-pdf-frame{width:100%;height:100%;min-height:70vh;border:none;background:#fff;}
   /* Markdown rendered preview */
   .preview-md{font-size:13px;line-height:1.7;color:var(--text);flex:1;overflow-y:auto;min-height:0;}
+  .preview-format-bar{display:none;align-items:center;gap:4px;flex-wrap:wrap;margin:0 0 8px;}
+  .preview-format-bar.is-on{display:flex;}
+  .preview-format-bar button{border:1px solid var(--border2);background:transparent;color:var(--text);border-radius:7px;min-width:28px;padding:4px 8px;font:inherit;font-size:12px;font-weight:650;line-height:1.2;cursor:pointer;}
+  .preview-format-bar button:hover{background:var(--hover-bg);}
+  .preview-md[contenteditable="true"]{cursor:text;caret-color:var(--text);outline:none;min-height:40vh;}
   .preview-md p{margin-bottom:10px;}.preview-md p:last-child{margin-bottom:0;}
   .preview-md h1,.preview-md h2,.preview-md h3,.preview-md h4,.preview-md h5,.preview-md h6{font-weight:700;color:var(--strong,var(--text));line-height:1.3;}
   .preview-md h1{font-size:24px;margin:24px 0 12px;border-bottom:1px solid var(--border);padding-bottom:6px;}
@@ -2937,7 +2956,7 @@
   .preview-md h4{font-size:15px;margin:18px 0 8px;}
   .preview-md h5{font-size:14px;margin:16px 0 6px;text-transform:uppercase;letter-spacing:0.04em;}
   .preview-md h6{font-size:13px;margin:14px 0 6px;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;}
-  .preview-md ul,.preview-md ol{margin:4px 0 10px 18px;}.preview-md li{margin-bottom:3px;}
+  .preview-md ul,.preview-md ol{margin:4px 0 10px;margin-inline-start:18px;}.preview-md li{margin-bottom:3px;}
   .preview-md code{font-family:var(--font-mono);font-size:11.5px;background:var(--code-inline-bg);padding:1px 5px;border-radius:4px;color:var(--code-text);}
   .preview-md pre{background:var(--code-bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;overflow-x:auto;margin:8px 0;}
   .preview-md pre code{background:none;padding:0;color:var(--pre-text);font-size:11.5px;line-height:1.55;}
@@ -2945,13 +2964,13 @@
   .preview-md pre[class*="language-"],.preview-md pre code[class*="language-"]{background:var(--code-bg) !important;}
   /* Fix #1463: Prism YAML grammar collapses newlines inside token spans — force pre */
   .preview-md pre code.language-yaml .token{white-space:pre !important;}
-  .preview-md blockquote{border-left:3px solid var(--blue);padding-left:12px;color:var(--muted);font-style:italic;margin:8px 0;}
+  .preview-md blockquote{border-inline-start:3px solid var(--blue);padding-inline-start:12px;color:var(--muted);font-style:italic;margin:8px 0;}
   .preview-md blockquote p{margin:0;}
   .preview-md strong{color:var(--strong);font-weight:600;}.preview-md em{color:var(--em);}
   .preview-md a{color:var(--blue);text-decoration:underline;}
   .preview-md hr{border:none;border-top:1px solid var(--border);margin:12px 0;}
   .preview-md table{border-collapse:collapse;width:100%;margin:8px 0;font-size:12px;}
-  .preview-md th{background:var(--hover-bg);padding:6px 10px;text-align:left;font-weight:600;border:1px solid var(--border2);}
+  .preview-md th{background:var(--hover-bg);padding:6px 10px;text-align:start;font-weight:600;border:1px solid var(--border2);}
   .preview-md td{padding:5px 10px;border:1px solid var(--border2);}
   .preview-md tr:nth-child(even){background:var(--code-inline-bg);}
   /* #486: inline code inside table cells needs scaled sizing to avoid overflow/clipping */
@@ -7214,6 +7233,78 @@ main.main.showing-logs > #mainLogs{display:flex;}
 [data-live-assistant="1"]:last-child .msg-body.stream-fade-active > :last-child::after,
 [data-live-assistant="1"]:last-child .msg-body.stream-fade-active:not(:has(> *))::after{display:none;content:none;}
 
+/* Automatic bidirectional chat text.
+   Each paragraph (and each composer line) takes its base direction from the
+   first strong character, so Hebrew and Arabic start on the right while
+   English stays on the left. This does not flip the sidebar or other panels.
+   The Settings → Preferences "Right-to-left chat layout" toggle still forces
+   the whole chat area RTL; these rules step aside while that class is on.
+   Code, math, diffs, CSV, and file paths stay left-to-right inside RTL prose. */
+html:not(.chat-content-rtl) .msg-body,
+html:not(.chat-content-rtl) .msg-body p,
+html:not(.chat-content-rtl) .msg-body li,
+html:not(.chat-content-rtl) .msg-body h1,
+html:not(.chat-content-rtl) .msg-body h2,
+html:not(.chat-content-rtl) .msg-body h3,
+html:not(.chat-content-rtl) .msg-body h4,
+html:not(.chat-content-rtl) .msg-body h5,
+html:not(.chat-content-rtl) .msg-body h6,
+html:not(.chat-content-rtl) .msg-body blockquote,
+html:not(.chat-content-rtl) .msg-body dd,
+html:not(.chat-content-rtl) textarea#msg,
+html:not(.chat-content-rtl) .msg-edit-area{
+  unicode-bidi:plaintext;
+  text-align:start;
+}
+.msg-body pre,
+.msg-body code,
+.msg-body kbd,
+.msg-body samp,
+.msg-body tt,
+.msg-body .hljs,
+.msg-body .code-block,
+.preview-md pre,
+.preview-md code,
+.preview-md kbd,
+.preview-md samp,
+.preview-md tt,
+.preview-md .hljs,
+.preview-md .code-block{
+  direction:ltr;
+  unicode-bidi:isolate;
+  text-align:left;
+}
+.msg-body .katex,
+.msg-body .katex-display,
+.msg-body .diff-block,
+.msg-body .csv-table,
+.msg-body .skill-file-path,
+.preview-md .katex,
+.preview-md .katex-display,
+.preview-md .diff-block,
+.preview-md .skill-file-path{
+  direction:ltr;
+  unicode-bidi:isolate;
+}
+
+.preview-md,
+.preview-md p,
+.preview-md li,
+.preview-md h1,
+.preview-md h2,
+.preview-md h3,
+.preview-md h4,
+.preview-md h5,
+.preview-md h6,
+.preview-md blockquote,
+.preview-md dd,
+.preview-md td,
+.preview-md th,
+#previewEditArea{
+  unicode-bidi:plaintext;
+  text-align:start;
+}
+
 /* ── RTL chat layout (salvaged from PR #1721 by @malulian) ────────────────────
  * Triggered by .chat-content-rtl on <html>. Affects ONLY the chat messages
  * area and composer input, not the sidebar, workspace panel, settings panel,
@@ -7393,3 +7484,100 @@ html[data-conversation-outline="enabled"] #outlineToggleBtn:not([hidden]){displa
 /* Settings field highlight (mirrors msg-question-highlight / _highlightQuestionRow pattern) */
 .settings-field-highlight { animation: settings-field-pulse 1.6s ease-out; }
 @keyframes settings-field-pulse { 0% { box-shadow: 0 0 0 0 var(--focus-ring); } 35% { box-shadow: 0 0 0 4px var(--focus-ring); } 100% { box-shadow: 0 0 0 0 rgba(0, 0, 0, 0); } }
+
+/* mono-product-design */
+:root,
+:root.dark,
+:root[data-skin],
+:root.dark[data-skin] {
+  --bg: #1f1f1f !important;
+  --sidebar: #252525 !important;
+  --surface: #252525 !important;
+  --surface-subtle: #313131 !important;
+  --surface-subtle-hover: #3a3a3a !important;
+  --border: #313131 !important;
+  --border2: #313131 !important;
+  --border-subtle: #313131 !important;
+  --border-muted: #414141 !important;
+  --text: #ffffff !important;
+  --strong: #ffffff !important;
+  --muted: #717171 !important;
+  --em: #717171 !important;
+  --accent: #414141 !important;
+  --accent-hover: #525252 !important;
+  --accent-text: #bce8ff !important;
+  --accent-bg: #242729 !important;
+  --accent-bg-strong: #35393b !important;
+  --input-bg: transparent !important;
+  --hover-bg: #313131 !important;
+  --main-bg: #1f1f1f !important;
+  --topbar-bg: #1f1f1f !important;
+  --code-bg: #252525 !important;
+  --pre-text: #ffffff !important;
+  --user-bubble-bg: #313131 !important;
+  --user-bubble-border: #313131 !important;
+  --user-bubble-text: #ffffff !important;
+  --user-bubble-placeholder: #717171 !important;
+  --focus-ring: rgba(65, 65, 65, 0.55) !important;
+  --focus-glow: transparent !important;
+}
+:root .sidebar,
+:root[data-skin] .sidebar,
+:root.dark[data-skin] .sidebar {
+  background: #252525 !important;
+  border-right: 0.7px solid #313131 !important;
+  box-shadow: none !important;
+}
+:root .composer-wrap,
+:root[data-skin] .composer-wrap,
+:root.dark[data-skin] .composer-wrap {
+  background: #1f1f1f !important;
+  border-color: #313131 !important;
+  box-shadow: none !important;
+}
+:root .composer-box,
+:root[data-skin] .composer-box,
+:root.dark[data-skin] .composer-box {
+  background: #252525 !important;
+  border: 0.7px solid #313131 !important;
+  border-radius: 15px !important;
+  box-shadow: none !important;
+}
+:root .composer-box:focus-within,
+:root[data-skin] .composer-box:focus-within,
+:root.dark[data-skin] .composer-box:focus-within {
+  border-color: #414141 !important;
+  box-shadow: none !important;
+}
+:root textarea#msg,
+:root[data-skin] textarea#msg {
+  color: #ffffff !important;
+}
+:root textarea#msg::placeholder,
+:root[data-skin] textarea#msg::placeholder {
+  color: #717171 !important;
+}
+:root .msg-row[data-role="user"] .msg-body,
+:root[data-skin] .msg-row[data-role="user"] .msg-body,
+:root.dark[data-skin] .msg-row[data-role="user"] .msg-body {
+  background: #313131 !important;
+  border-color: #313131 !important;
+  border-radius: 13px !important;
+  color: #ffffff !important;
+}
+:root button.send-btn,
+:root[data-skin] button.send-btn,
+:root.dark[data-skin] button.send-btn,
+:root button.send-btn:not(:disabled),
+:root[data-skin] button.send-btn:not(:disabled),
+:root.dark[data-skin] button.send-btn:not(:disabled) {
+  background: #313131 !important;
+  border: 0.7px solid #414141 !important;
+  color: #ffffff !important;
+  box-shadow: none !important;
+}
+:root button.send-btn:not(:disabled):hover,
+:root[data-skin] button.send-btn:not(:disabled):hover,
+:root.dark[data-skin] button.send-btn:not(:disabled):hover {
+  background: #414141 !important;
+}
