@@ -54,6 +54,17 @@ def test_rtl_css_scoped_to_chat_only():
     assert ".chat-content-rtl html{" not in css
 
 
+def test_rtl_list_markers_stay_with_the_text():
+    """Outside markers stay in the left gutter while Hebrew text aligns right."""
+    css = STYLE.read_text(encoding="utf-8")
+    start = css.index(".chat-content-rtl .msg-body ul,")
+    section = css[start:css.index(".chat-content-rtl .msg-body blockquote{")]
+    assert "list-style-position:inside" in section
+    assert "unicode-bidi:isolate" in section
+    assert "direction:rtl" in section
+    assert "margin-left:0" in section
+
+
 def test_rtl_code_blocks_stay_ltr():
     """Critical: Arabic users still write English code. Code blocks must NOT flip."""
     css = STYLE.read_text(encoding="utf-8")
