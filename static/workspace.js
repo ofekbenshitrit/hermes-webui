@@ -1146,6 +1146,7 @@ function setLargeMarkdownForceRenderVisible(visible){
 function renderMarkdownPreviewContent(data){
   const target=data&&data.el?data.el:$('previewMd');
   if(!data||!data.el) showPreview('md');
+  target.dir='auto';
   target.innerHTML=renderMd(data.content);
   requestAnimationFrame(()=>{if(typeof renderKatexBlocks==='function')renderKatexBlocks();});
 }
@@ -1185,10 +1186,12 @@ function renderCsvPreviewContent(path, content){
     _previewRawContentPath = path;
   }
   if(preview.html){
+    $('previewMd').dir='ltr';
     $('previewMd').innerHTML=preview.html;
     return true;
   }
   if(preview.errorKey&&typeof _csvPreviewErrorHtml==='function'){
+    $('previewMd').dir='ltr';
     $('previewMd').innerHTML=_csvPreviewErrorHtml(path, preview.errorKey);
     return true;
   }
@@ -1199,7 +1202,7 @@ function forceRenderMarkdownPreview(){
   // #3378 review (Codex): don't force-render from a dirty/open editor — the
   // cached raw content would not reflect the unsaved edit. Require a saved,
   // non-dirty state and cached content that belongs to the current file.
-  if(_previewDirty || $('previewEditArea').style.display!=='none') return;
+  if(_previewDirty || $('previewEditArea').style.display!=='none' || _markdownFormattedEditing()) return;
   if(!_previewRawContent || _previewRawContentPath!==_previewCurrentPath) return;
   openFile(_previewCurrentPath,{forceRichMarkdown:true});
   setStatus('Markdown rendered for this file.');
@@ -1228,6 +1231,7 @@ function _previewOpenOwned(gen, sid, wsGen){
 }
 
 function showPreview(mode){
+  _exitFormattedMarkdownEdit();
   // mode: 'code' | 'csv' | 'image' | 'md' | 'html' | 'pdf' | 'audio' | 'video'
   $('previewCode').style.display     = mode==='code'  ? '' : 'none';
   $('previewImgWrap').style.display  = mode==='image' ? '' : 'none';
@@ -1256,15 +1260,272 @@ function updateEditBtn(){
       ? (_previewCurrentMode==='code'||_previewCurrentMode==='md'||_previewCurrentMode==='csv')
       : !!_previewServerEditable);
   btn.style.display = editable?'':'none';
-  const editing = $('previewEditArea').style.display!=='none';
+  const editing = _previewEditorOpen();
   btn.innerHTML = editing ? `&#128190; ${t('save')}` : `&#9998; ${t('edit')}`;
   btn.title = editing ? t('save_title') : t('edit_title');
   btn.style.color = editing ? 'var(--blue)' : '';
   if(_previewDirty) btn.innerHTML = '&#128190; Save*';
 }
 
+/* FORMATTED_MD_EDIT_START
+   Markdown Edit shows the same rendered preview and saves markdown back out.
+   Code and CSV files keep the plain textarea. */
+function _markdownFormattedEditing(){
+  const el=$('previewMd');
+  return !!(el && el.getAttribute('contenteditable')==='true');
+}
+function _previewEditorOpen(){
+  const area=$('previewEditArea');
+  return !!((area && area.style.display!=='none') || _markdownFormattedEditing());
+}
+function _mdWrap(marker, text){
+  const m=String(text||'').match(/^(\s*)([\s\S]*?)(\s*)$/);
+  if(!m || !m[2]) return text||'';
+  return m[1]+marker+m[2]+marker+m[3];
+}
+function _mdInline(node){
+  let out='';
+  node.childNodes.forEach(child=>{
+    if(child.nodeType===3){
+      out+=child.textContent.replace(/\u00a0/g,' ');
+      return;
+    }
+    if(child.nodeType!==1) return;
+    const tag=child.tagName.toLowerCase();
+    if(tag==='br'){ out+='\n'; return; }
+    if(tag==='strong'||tag==='b'){ out+=_mdWrap('**', _mdInline(child)); return; }
+    if(tag==='em'||tag==='i'){ out+=_mdWrap('*', _mdInline(child)); return; }
+    if(tag==='del'||tag==='s'||tag==='strike'){ out+=_mdWrap('~~', _mdInline(child)); return; }
+    if(tag==='code'){ out+='`'+child.textContent.replace(/[`\n]/g,'')+'`'; return; }
+    if(tag==='a'){
+      const label=_mdInline(child).replace(/\s+/g,' ').trim();
+      const href=child.getAttribute('href')||'';
+      out+=label ? '['+label+']('+href+')' : '';
+      return;
+    }
+    if(tag==='img'){
+      out+='!['+(child.getAttribute('alt')||'')+']('+(child.getAttribute('src')||'')+')';
+      return;
+    }
+    out+=_mdInline(child);
+  });
+  return out;
+}
+function _mdIsBlock(tag){
+  return /^(h[1-6]|p|div|ul|ol|pre|hr|blockquote|table)$/.test(tag);
+}
+function _mdFence(el){
+  const code=el.querySelector('code')||el;
+  const lang=((code.className||'').match(/language-([\w+-]+)/)||[])[1]||'';
+  const text=code.textContent.replace(/\n$/,'');
+  return '```'+lang+'\n'+text+'\n```';
+}
+function _mdList(el, depth){
+  const ordered=el.tagName==='OL';
+  let n=1;
+  const lines=[];
+  el.querySelectorAll(':scope > li').forEach(li=>{
+    const indent='  '.repeat(depth);
+    const marker=ordered ? ((li.getAttribute('value')||n)+'. ') : '- ';
+    const nested=[...li.querySelectorAll(':scope > ul, :scope > ol')];
+    const clone=li.cloneNode(true);
+    clone.querySelectorAll('ul,ol').forEach(node=>node.remove());
+    const done=clone.querySelector('.task-done');
+    const todo=clone.querySelector('.task-todo');
+    if(done) done.remove();
+    if(todo) todo.remove();
+    let text=_mdInline(clone).replace(/\s+/g,' ').trim();
+    if(done) text='[x] '+text;
+    else if(todo) text='[ ] '+text;
+    lines.push(indent+marker+text);
+    nested.forEach(sub=>lines.push(_mdList(sub, depth+1)));
+    n++;
+  });
+  return lines.join('\n');
+}
+function _mdQuote(el){
+  const inner=_mdBlocksFrom(el);
+  if(!inner.trim()) return '';
+  return inner.split('\n').map(line=>line.trim() ? '> '+line : '>').join('\n');
+}
+function _mdTable(el){
+  const rows=[...el.querySelectorAll('tr')];
+  if(!rows.length) return '';
+  const cells=tr=>[...tr.children].filter(td=>td.tagName==='TD'||td.tagName==='TH').map(td=>_mdInline(td).replace(/\|/g,'\\|').replace(/\s+/g,' ').trim());
+  const header=cells(rows[0]);
+  if(!header.length) return '';
+  const body=rows.slice(1).map(cells);
+  const fmt=cols=>'| '+cols.join(' | ')+' |';
+  return [fmt(header), fmt(header.map(()=>'---')), ...body.map(fmt)].join('\n');
+}
+function _mdRenderBlock(el){
+  const tag=el.tagName.toLowerCase();
+  if(/^h[1-6]$/.test(tag)){
+    const text=_mdInline(el).replace(/\n+/g,' ').trim();
+    return text ? '#'.repeat(+tag[1])+' '+text : '';
+  }
+  if(tag==='hr') return '---';
+  if(tag==='pre') return _mdFence(el);
+  if(tag==='ul'||tag==='ol') return _mdList(el, 0);
+  if(tag==='blockquote') return _mdQuote(el);
+  if(tag==='table') return _mdTable(el);
+  if(tag==='div' && el.querySelector(':scope > ul, :scope > ol, :scope > pre, :scope > blockquote, :scope > table, :scope > hr, :scope > h1, :scope > h2, :scope > h3, :scope > h4, :scope > h5, :scope > h6, :scope > p, :scope > div')){
+    return _mdBlocksFrom(el);
+  }
+  return _mdInline(el).replace(/[ \t]+\n/g,'\n').trim();
+}
+function _mdBlocksFrom(parent){
+  const blocks=[];
+  const buf=[];
+  const flush=()=>{
+    if(!buf.length) return;
+    const holder=document.createElement('div');
+    buf.forEach(n=>holder.appendChild(n.cloneNode(true)));
+    buf.length=0;
+    const text=_mdInline(holder).replace(/[ \t]+\n/g,'\n').trim();
+    if(text) blocks.push(text);
+  };
+  parent.childNodes.forEach(node=>{
+    if(node.nodeType===3){
+      if(node.textContent.trim()) buf.push(node);
+      return;
+    }
+    if(node.nodeType!==1) return;
+    const tag=node.tagName.toLowerCase();
+    if(_mdIsBlock(tag)){
+      flush();
+      const rendered=_mdRenderBlock(node);
+      if(rendered && rendered.trim()) blocks.push(rendered.trim());
+    }else if(tag==='br'){
+      buf.push(node);
+    }else{
+      buf.push(node);
+    }
+  });
+  flush();
+  return blocks.join('\n\n');
+}
+function _markdownFromPreview(root){
+  const text=_mdBlocksFrom(root).replace(/\n{3,}/g,'\n\n').trim();
+  return text ? text+'\n' : '';
+}
+function _onFormattedPreviewInput(){
+  _previewDirty=true;
+  updateEditBtn();
+}
+function _onFormattedPreviewKeydown(e){
+  if(e.key==='Escape'){ e.preventDefault(); cancelEditMode(); }
+  if((e.metaKey||e.ctrlKey) && (e.key==='s'||e.key==='S')){ e.preventDefault(); toggleEditMode(); }
+}
+function _onFormattedPreviewPaste(e){
+  const text=(e.clipboardData && e.clipboardData.getData('text/plain')) || '';
+  if(!text) return;
+  e.preventDefault();
+  const sel=window.getSelection();
+  if(!sel || !sel.rangeCount) return;
+  const range=sel.getRangeAt(0);
+  range.deleteContents();
+  const frag=document.createDocumentFragment();
+  let last=null;
+  text.replace(/\r\n/g,'\n').replace(/\r/g,'\n').split('\n').forEach((line,i)=>{
+    if(i){
+      last=document.createElement('br');
+      frag.appendChild(last);
+    }
+    if(line){
+      last=document.createTextNode(line);
+      frag.appendChild(last);
+    }
+  });
+  range.insertNode(frag);
+  if(last){
+    range.setStartAfter(last);
+    range.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+  _onFormattedPreviewInput();
+}
+function _onFormattedPreviewClick(e){
+  const a=e.target && e.target.closest && e.target.closest('a');
+  if(a) e.preventDefault();
+}
+function _setPreviewFormatBar(on){
+  const bar=$('previewFormatBar');
+  if(bar) bar.classList.toggle('is-on', !!on);
+}
+function _bindPreviewFormatBar(){
+  const bar=$('previewFormatBar');
+  if(!bar || bar.dataset.bound==='1') return;
+  bar.dataset.bound='1';
+  bar.querySelectorAll('[data-fmt]').forEach(btn=>{
+    btn.addEventListener('mousedown', ev=>ev.preventDefault());
+    btn.addEventListener('click', ()=>_applyPreviewFormat(btn.getAttribute('data-fmt')));
+  });
+}
+function _applyPreviewFormat(kind){
+  const el=$('previewMd');
+  if(!el) return;
+  el.focus();
+  try{ document.execCommand('defaultParagraphSeparator', false, 'p'); }catch(_){}
+  if(kind==='bold') document.execCommand('bold');
+  else if(kind==='italic') document.execCommand('italic');
+  else if(kind==='h1') document.execCommand('formatBlock', false, 'H1');
+  else if(kind==='h2') document.execCommand('formatBlock', false, 'H2');
+  else if(kind==='h3') document.execCommand('formatBlock', false, 'H3');
+  else if(kind==='p') document.execCommand('formatBlock', false, 'P');
+  else if(kind==='ul') document.execCommand('insertUnorderedList');
+  else if(kind==='quote') document.execCommand('formatBlock', false, 'BLOCKQUOTE');
+  else if(kind==='hr') document.execCommand('insertHorizontalRule');
+  _onFormattedPreviewInput();
+}
+function _bindFormattedPreviewEditing(el){
+  el.addEventListener('input', _onFormattedPreviewInput);
+  el.addEventListener('keydown', _onFormattedPreviewKeydown);
+  el.addEventListener('paste', _onFormattedPreviewPaste);
+  el.addEventListener('click', _onFormattedPreviewClick);
+}
+function _unbindFormattedPreviewEditing(el){
+  el.removeEventListener('input', _onFormattedPreviewInput);
+  el.removeEventListener('keydown', _onFormattedPreviewKeydown);
+  el.removeEventListener('paste', _onFormattedPreviewPaste);
+  el.removeEventListener('click', _onFormattedPreviewClick);
+}
+function _exitFormattedMarkdownEdit(){
+  const el=$('previewMd');
+  _setPreviewFormatBar(false);
+  if(!el || el.getAttribute('contenteditable')!=='true') return;
+  el.removeAttribute('contenteditable');
+  _unbindFormattedPreviewEditing(el);
+}
+function _placeCaretAtStart(el){
+  const sel=window.getSelection();
+  if(!sel) return;
+  const range=document.createRange();
+  range.selectNodeContents(el);
+  range.collapse(true);
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+function _enterFormattedMarkdownEdit(text){
+  renderMarkdownPreviewContent({content:text||''});
+  const el=$('previewMd');
+  if(!el) return;
+  try{ document.execCommand('defaultParagraphSeparator', false, 'p'); }catch(_){}
+  el.contentEditable='true';
+  el.spellcheck=true;
+  _bindFormattedPreviewEditing(el);
+  _bindPreviewFormatBar();
+  _setPreviewFormatBar(true);
+  $('previewEditArea').style.display='none';
+  el.style.display='';
+  el.focus();
+  _placeCaretAtStart(el);
+}
+/* FORMATTED_MD_EDIT_END */
+
 async function toggleEditMode(){
-  const editing = $('previewEditArea').style.display!=='none';
+  const editing = _previewEditorOpen();
   if(_workspacePathIsReadOnly(_previewCurrentPath)){
     showToast(t('external_link_read_only'), 2000);
     return;
@@ -1276,7 +1537,8 @@ async function toggleEditMode(){
   if(editing){
     // Save
     if(!S.session||!_previewCurrentPath)return;
-    const content=$('previewEditArea').value;
+    const content=_markdownFormattedEditing()?_markdownFromPreview($('previewMd')):$('previewEditArea').value;
+    _exitFormattedMarkdownEdit();
     try{
       const saved=await api(_previewSaveRoute||'/api/file/save',{method:'POST',body:JSON.stringify({
         session_id:S.session.session_id, path:_previewCurrentPath, content
@@ -1307,14 +1569,17 @@ async function toggleEditMode(){
     const currentText = _previewCurrentMode==='code'
       ? $('previewCode').textContent
       : _previewRawContent||'';
-    $('previewEditArea').value=currentText;
-    $('previewEditArea').style.display='';
-    if(_previewCurrentMode==='code') $('previewCode').style.display='none';
-    else $('previewMd').style.display='none';
-    // Escape cancels the edit without saving
-    $('previewEditArea').onkeydown=e=>{
-      if(e.key==='Escape'){e.preventDefault();cancelEditMode();}
-    };
+    if(_previewCurrentMode==='md'){
+      _enterFormattedMarkdownEdit(currentText);
+    }else{
+      $('previewEditArea').value=currentText;
+      $('previewEditArea').style.display='';
+      if(_previewCurrentMode==='code') $('previewCode').style.display='none';
+      else $('previewMd').style.display='none';
+      $('previewEditArea').onkeydown=e=>{
+        if(e.key==='Escape'){e.preventDefault();cancelEditMode();}
+      };
+    }
   }
   updateEditBtn();
 }
@@ -1323,10 +1588,12 @@ let _previewRawContent = '';  // raw text for md files (to populate editor)
 let _previewRawContentPath = '';  // path that _previewRawContent belongs to (#3378 force-render cache guard)
 
 function cancelEditMode(){
-  // Discard changes and return to read-only view
+  const formatted=_markdownFormattedEditing();
   $('previewEditArea').style.display='none';
   $('previewEditArea').onkeydown=null;
+  _exitFormattedMarkdownEdit();
   if(_previewCurrentMode==='code') $('previewCode').style.display='';
+  else if(formatted) renderMarkdownPreviewContent({content:_previewRawContent||''});
   else $('previewMd').style.display='';
   _previewDirty=false;
   updateEditBtn();

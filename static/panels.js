@@ -5081,7 +5081,7 @@ function _stripYamlFrontmatter(content) {
 }
 
 function _skillMarkdownHtml(markdown) {
-  return `<div class="preview-md">${renderMd(markdown || '')}</div>`;
+  return `<div class="preview-md" dir="auto">${renderMd(markdown || '')}</div>`;
 }
 
 function _enhanceSkillMarkdown(root) {
@@ -5486,7 +5486,7 @@ function _renderExternalNotesSources() {
       ? `<div class="notes-search-results">${_notesSearchResults.map(note => `<button type="button" class="notes-result-card" onclick="previewExternalNote(${jsArg(note.source||_notesSelectedSource)},${jsArg(note.id||'')})"><strong>${esc(note.title||'Untitled')}</strong>${note.snippet?`<span>${esc(note.snippet)}</span>`:''}</button>`).join('')}</div>`
       : `<div class="memory-empty">${esc(t('external_notes_search_empty'))}</div>`;
     const previewHtml = _notesPreviewNote
-      ? `<section class="notes-source-card notes-preview-card"><div class="notes-source-card-head"><strong>${esc(_notesPreviewNote.title||'Untitled')}</strong><span class="detail-badge">${esc(_notesPreviewNote.source||_notesSelectedSource)}</span></div><div class="memory-content preview-md">${renderMd(_notesPreviewNote.body||'')}</div></section>`
+      ? `<section class="notes-source-card notes-preview-card"><div class="notes-source-card-head"><strong>${esc(_notesPreviewNote.title||'Untitled')}</strong><span class="detail-badge">${esc(_notesPreviewNote.source||_notesSelectedSource)}</span></div><div class="memory-content preview-md" dir="auto">${renderMd(_notesPreviewNote.body||'')}</div></section>`
       : '';
     const cards = sources.map(src => {
       const status = src.active ? t('source_active') : (src.status || t('source_configured'));
@@ -5549,7 +5549,7 @@ function _renderMemoryDetail(section) {
     ? `<div class="memory-detail-mtime">${esc(shadowed.map(item => `${item.name || 'Context file'} present, shadowed by ${item.shadowed_by || fileName || 'active context'}`).join('; '))}</div>`
     : '';
   const inner = content
-    ? `<div class="memory-content preview-md">${renderMd(content)}</div>`
+    ? `<div class="memory-content preview-md" dir="auto">${renderMd(content)}</div>`
     : `<div class="memory-empty">${esc(_memorySectionEmpty(meta))}</div>`;
   body.innerHTML = `<div class="main-view-content">${pathHtml}${mtimeHtml}${shadowedHtml}${inner}</div>`;
   body.style.display = '';

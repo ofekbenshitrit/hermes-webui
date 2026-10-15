@@ -125,3 +125,44 @@ def test_rtl_localized_in_all_locales():
     # Count occurrences — should match the 11 locale blocks
     assert js.count("settings_label_rtl:") == 15
     assert js.count("settings_desc_rtl:") == 15
+
+
+def test_chat_text_is_bidirectional_without_the_layout_toggle():
+    """Hebrew/Arabic paragraphs and the composer follow their own direction
+    even when the whole-chat RTL layout toggle is off. Code stays LTR."""
+    css = STYLE.read_text(encoding="utf-8")
+    assert "html:not(.chat-content-rtl) .msg-body," in css
+    assert "html:not(.chat-content-rtl) .msg-body p," in css
+    assert "html:not(.chat-content-rtl) textarea#msg," in css
+    assert "html:not(.chat-content-rtl) .msg-edit-area{" in css
+    block_start = css.index("html:not(.chat-content-rtl) .msg-body,")
+    block_end = css.index("}", block_start)
+    block = css[block_start:block_end]
+    assert "unicode-bidi:plaintext" in block
+    assert "text-align:start" in block
+    section_start = css.index("/* Automatic bidirectional chat text.")
+    section_end = css.index("/* ── RTL chat layout", section_start)
+    section = css[section_start:section_end]
+    code_start = section.index(".msg-body pre,")
+    code_end = section.index("}", code_start)
+    code = section[code_start:code_end]
+    assert "direction:ltr" in code
+    assert "unicode-bidi:isolate" in code
+    assert "text-align:left" in code
+    html = INDEX.read_text(encoding="utf-8")
+    assert '<textarea id="msg" dir="auto"' in html
+    js = (REPO_ROOT / "static" / "ui.js").read_text(encoding="utf-8")
+    assert "ta.dir = 'auto';" in js
+    assert ".preview-md,\n.preview-md p," in css
+    assert "#previewEditArea{" in css
+    preview_start = css.index(".preview-md,\n.preview-md p,")
+    preview_end = css.index("}", preview_start)
+    preview = css[preview_start:preview_end]
+    assert "unicode-bidi:plaintext" in preview
+    assert "text-align:start" in preview
+    assert ".preview-md pre," in css
+    assert ".preview-md code," in css
+    assert 'dir="auto"' in html and 'id="previewEditArea"' in html
+    workspace = (REPO_ROOT / "static" / "workspace.js").read_text(encoding="utf-8")
+    assert "target.dir='auto';" in workspace
+    assert "$('previewMd').dir='ltr';" in workspace

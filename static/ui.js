@@ -21176,6 +21176,7 @@ function editMessage(btn) {
   // Replace msg-body with an editable textarea
   const ta = document.createElement('textarea');
   ta.className = 'msg-edit-area';
+  ta.dir = 'auto';
   ta.value = originalText;
   body.replaceWith(ta);
   // Resize after DOM insertion so scrollHeight is correct
