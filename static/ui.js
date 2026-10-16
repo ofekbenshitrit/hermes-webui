@@ -9083,6 +9083,30 @@ function renderMd(raw){
   return s;
 }
 
+// Lists, quotes, headings, and table cells need a real direction so their
+// marker, quote bar, and start edge follow Hebrew/Arabic text. Plaintext
+// alignment alone leaves that chrome on the left. dir="auto" on a parent
+// ignores descendants that have their own dir, so a quote or list owns the
+// direction and its children inherit it. Nested lists still pick their own.
+// Code, diffs, math, and CSV stay left-to-right. Idempotent.
+function applyBidiAutoDir(root){
+  if(!root||!root.querySelectorAll) return;
+  const nodes=root.querySelectorAll('p,h1,h2,h3,h4,h5,h6,ul,ol,li,blockquote,th,td');
+  for(let i=0;i<nodes.length;i++){
+    const el=nodes[i];
+    if(el.closest&&el.closest('pre,code,.csv-table,.diff-block,.katex,.katex-block,.katex-display')) continue;
+    const tag=el.tagName;
+    const quote=el.closest('blockquote');
+    const list=el.closest('ul,ol');
+    const nestedList=tag==='UL'||tag==='OL';
+    if((quote&&quote!==el)||(list&&list!==el&&!nestedList)){
+      if(el.getAttribute('dir')==='auto') el.removeAttribute('dir');
+      continue;
+    }
+    if(!el.getAttribute('dir')) el.setAttribute('dir','auto');
+  }
+}
+
 function _stripAttachedFilesMarkerForDisplay(text){
   return String(text||'').replace(/\n\n\[Attached files: [^\]]+\]$/,'').trim();
 }
@@ -14137,6 +14161,7 @@ function _renderWorklogReasonInto(row, text){
   if(!row) return;
   const html=_worklogReasonHtmlFromText(text);
   row.innerHTML=html;
+  if(typeof applyBidiAutoDir==='function') applyBidiAutoDir(row);
 }
 function _worklogReasonNodeFromText(text, attrs){
   if(window._showThinking===false) return null;
@@ -14199,6 +14224,7 @@ function _syncWorklogReasonFromAnchor(group, anchor, displayTextOverride){
     list.appendChild(reason);
   }
   reason.innerHTML=html;
+  if(typeof applyBidiAutoDir==='function') applyBidiAutoDir(reason);
   if(anchor){
     anchor.classList.add('assistant-segment-worklog-source');
     anchor.setAttribute('aria-hidden','true');
@@ -14548,6 +14574,7 @@ function _anchorSceneNodeForRow(row, opts){
       node.setAttribute('data-anchor-scene-prose','1');
       node.dataset.rawText=text;
       node.innerHTML=`<div class="msg-body">${renderMd?renderMd(text):esc(text)}</div>`;
+      if(typeof applyBidiAutoDir==='function') applyBidiAutoDir(node);
     }
   }else if(row.role==='thinking'){
     if(window._showThinking===false) return null;
@@ -20069,6 +20096,9 @@ function renderMessages(options){
   if(typeof _syncExtensionMessageActionSlots==='function') _syncExtensionMessageActionSlots(inner);
   // Snapshot only when this render can be cached (same gate as the .set below): mid-stream
   // and transient-card renders must not pay a whole-transcript serialization they discard.
+  // Stamp dir="auto" before the cache snapshot and before paint, so a restored
+  // transcript keeps Hebrew list markers and quote bars on the right.
+  if(typeof applyBidiAutoDir==='function') applyBidiAutoDir(inner);
   let cacheHtml='';
   if(sid&&!INFLIGHT[sid]&&!hasTransientTranscriptUi){ cacheHtml=inner.innerHTML; }
   // Synchronously highlight code blocks, initialize structured tree views, and attach
@@ -21331,6 +21361,7 @@ function _postProcessWithAnchorSuppression(container){
   }
 }
 function postProcessRenderedMessages(container) {
+  if(typeof applyBidiAutoDir==='function') applyBidiAutoDir(container);
   highlightCode(container);
   addCopyButtons(container);
   loadDiffInline(container);

@@ -166,3 +166,29 @@ def test_chat_text_is_bidirectional_without_the_layout_toggle():
     workspace = (REPO_ROOT / "static" / "workspace.js").read_text(encoding="utf-8")
     assert "target.dir='auto';" in workspace
     assert "$('previewMd').dir='ltr';" in workspace
+
+
+def test_structural_formatting_follows_the_paragraph_direction():
+    """Lists, quotes, and table cells take dir=auto so Hebrew markers and the
+    quote bar sit on the right. A quote or list owns that direction; children
+    inherit it, because dir=auto on a parent ignores descendants that have
+    their own dir. Code stays LTR."""
+    css = STYLE.read_text(encoding="utf-8")
+    quote = css[css.index("  .msg-body blockquote{"):css.index("  .msg-body blockquote{") + 220]
+    assert "border-inline-start:3px solid var(--blue)" in quote
+    assert "padding-inline-start:14px" in quote
+    assert "border-left:" not in quote
+    lists = css[css.index("  .msg-body ul,.msg-body ol{"):css.index("  .msg-body ul,.msg-body ol{") + 160]
+    assert "margin-inline-start:20px" in lists
+    assert "text-align:start" in css[css.index("  .msg-body th{"):css.index("  .msg-body th{") + 160]
+    ui = (REPO_ROOT / "static" / "ui.js").read_text(encoding="utf-8")
+    start = ui.index("function applyBidiAutoDir(root)")
+    fn = ui[start:ui.index("\nfunction ", start + 1)]
+    assert "closest('blockquote')" in fn
+    assert "closest('ul,ol')" in fn
+    assert "removeAttribute('dir')" in fn
+    assert "setAttribute('dir','auto')" in fn
+    assert "applyBidiAutoDir(inner)" in ui
+    messages = (REPO_ROOT / "static" / "messages.js").read_text(encoding="utf-8")
+    assert "node.setAttribute('dir','auto')" in messages
+    assert "node.closest('blockquote')" in messages

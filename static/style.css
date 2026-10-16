@@ -2323,7 +2323,7 @@
   .msg-body{font-family:var(--font-conversation);font-size:var(--message-body-font-size);line-height:var(--message-body-line-height);color:var(--text);padding-left:30px;max-width:680px;overflow-wrap:anywhere;}
   .msg-body p{margin-bottom:10px;}.msg-body p:last-child{margin-bottom:0;}
   .msg-body td p,.msg-body th p{margin:0;}
-  .msg-body ul,.msg-body ol{margin:6px 0 10px 20px;}.msg-body li{margin-bottom:3px;}
+  .msg-body ul,.msg-body ol{margin:6px 0 10px;margin-inline-start:20px;}.msg-body li{margin-bottom:3px;}
   .msg-body h1,.msg-body h2,.msg-body h3,.msg-body h4,.msg-body h5,.msg-body h6{font-weight:700;color:var(--strong,var(--text));line-height:1.3;}
   .msg-body h1{font-size:24px;margin:24px 0 12px;border-bottom:1px solid var(--border);padding-bottom:6px;}
   .msg-body h2{font-size:20px;margin:22px 0 10px;border-bottom:1px solid var(--border);padding-bottom:4px;}
@@ -2423,17 +2423,17 @@
   .tree-null{color:var(--muted);font-style:italic;}
   .tree-comma{color:var(--muted);}
   .tree-item{line-height:1.6;}
-  .msg-body blockquote{border-left:3px solid var(--blue);padding-left:14px;color:var(--muted);font-style:italic;margin:10px 0;}
+  .msg-body blockquote{border-inline-start:3px solid var(--blue);padding-inline-start:14px;color:var(--muted);font-style:italic;margin:10px 0;}
   .msg-body blockquote p{margin:0;}
   .msg-body a{color:var(--blue);text-decoration:underline;}
   .msg-body hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
   .msg-body table{border-collapse:collapse;width:100%;margin:8px 0;font-size:12px;}
-  .msg-body th{background:rgba(255,255,255,.07);padding:6px 10px;text-align:left;font-weight:600;border:1px solid var(--border2);}
+  .msg-body th{background:rgba(255,255,255,.07);padding:6px 10px;text-align:start;font-weight:600;border:1px solid var(--border2);}
   .msg-body td{padding:5px 10px;border:1px solid rgba(255,255,255,.06);}
   .msg-body tr:nth-child(even){background:rgba(255,255,255,.03);}
   .markdown-table-filter{display:block;width:min(260px,100%);margin:8px 0 4px;padding:5px 8px;border:1px solid var(--border2);border-radius:6px;background:var(--input-bg);color:var(--text);font:inherit;font-family:var(--font-ui);font-size:12px;}
   .markdown-table-filter:focus{outline:1px solid var(--accent);outline-offset:1px;}
-  .markdown-table-sort{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;min-height:20px;padding:0;border:0;background:transparent;color:inherit;font:inherit;font-weight:inherit;text-align:left;cursor:pointer;}
+  .markdown-table-sort{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;min-height:20px;padding:0;border:0;background:transparent;color:inherit;font:inherit;font-weight:inherit;text-align:start;cursor:pointer;}
   .markdown-table-sort:focus-visible{outline:1px solid var(--accent);outline-offset:2px;}
   .markdown-table-sort-label{min-width:0;}
   .markdown-table-sort-indicator{flex:0 0 10px;color:var(--muted);font-size:10px;line-height:1;text-align:center;}
@@ -4068,12 +4068,12 @@ body.resizing .sidebar{transition:none!important;}
 .wl-reason ul,
 .wl-reason ol{
   margin:6px 0 6px 0;
-  padding-left:1.35em;
+  padding-inline-start:1.35em;
   list-style-position:outside;
 }
 .wl-reason li{
   margin:2px 0;
-  padding-left:.15em;
+  padding-inline-start:.15em;
 }
 .assistant-segment-worklog-source{
   display:none!important;
@@ -7293,7 +7293,10 @@ main.main.showing-logs > #mainLogs{display:flex;}
 /* Automatic bidirectional chat text.
    Each paragraph (and each composer line) takes its base direction from the
    first strong character, so Hebrew and Arabic start on the right while
-   English stays on the left. This does not flip the sidebar or other panels.
+   English stays on the left. Lists, quotes, headings, and table cells carry
+   dir="auto" as well, and their markers, quote bar, and cell alignment use
+   logical edges so that chrome sits on the same side as the text. This does
+   not flip the sidebar or other panels.
    The Settings → Preferences "Right-to-left chat layout" toggle still forces
    the whole chat area RTL; these rules step aside while that class is on.
    Code, math, diffs, CSV, and file paths stay left-to-right inside RTL prose. */

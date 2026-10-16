@@ -1148,6 +1148,7 @@ function renderMarkdownPreviewContent(data){
   if(!data||!data.el) showPreview('md');
   target.dir='auto';
   target.innerHTML=renderMd(data.content);
+  if(typeof applyBidiAutoDir==='function') applyBidiAutoDir(target);
   requestAnimationFrame(()=>{if(typeof renderKatexBlocks==='function')renderKatexBlocks();});
 }
 

@@ -39,6 +39,7 @@ function _shareRenderMessages(messages){
       `<div class="msg-body share-message-body">${bodyHtml}</div>`;
     wrap.appendChild(row);
   });
+  if(typeof applyBidiAutoDir==='function') applyBidiAutoDir(wrap);
   if(typeof highlightCode==='function') highlightCode(wrap);
 }
 

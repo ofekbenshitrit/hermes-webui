@@ -4626,6 +4626,7 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
     const baseEndToken=renderer.end_token;
     const baseAddText=renderer.add_text;
     const tokenStack=[];
+    const bidiDirTag=/^(?:P|H[1-6]|UL|OL|LI|BLOCKQUOTE|TH|TD)$/;
     renderer.add_token=(data,token)=>{
       if(token===window.smd.ITALIC_UND||token===window.smd.STRONG_UND){
         const marker=token===window.smd.STRONG_UND?'__':'_';
@@ -4635,6 +4636,23 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
       }
       tokenStack.push(null);
       baseAddToken(data,token);
+      // Live markdown is built node-by-node, before the settled renderMd()
+      // pass. Give lists, quotes, headings, and cells dir="auto" as they are
+      // created so Hebrew markers and the quote bar do not stay on the left
+      // for the whole stream.
+      const node=data&&data.nodes&&data.nodes[data.index];
+      if(!node||!node.tagName||!bidiDirTag.test(node.tagName)) return;
+      if(node.closest&&node.closest('pre,code,.csv-table,.diff-block,.katex,.katex-block')) return;
+      const tag=node.tagName;
+      const quote=node.closest&&node.closest('blockquote');
+      const list=node.closest&&node.closest('ul,ol');
+      const nestedList=tag==='UL'||tag==='OL';
+      if((quote&&quote!==node)||(list&&list!==node&&!nestedList)){
+        if(node.getAttribute&&node.getAttribute('dir')==='auto') node.removeAttribute('dir');
+        return;
+      }
+      if(node.hasAttribute&&node.hasAttribute('dir')) return;
+      if(node.setAttribute) node.setAttribute('dir','auto');
     };
     renderer.end_token=(data)=>{
       const marker=tokenStack.pop();
@@ -5457,6 +5475,7 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
         _smdWrite(next.text,true);
       }else{
         assistantBody.innerHTML=renderMd ? renderMd(next.text||'') : esc(next.text||'');
+        if(typeof applyBidiAutoDir==='function') applyBidiAutoDir(assistantBody);
         _sanitizeSmdLinks(assistantBody);
       }
       _streamFadeDomText=String(next.text||'');
@@ -5547,6 +5566,7 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
       if(_smdParser) _smdWrite(displayText);
     } else if(renderMd){
       assistantBody.innerHTML=renderMd(displayText);
+      if(typeof applyBidiAutoDir==='function') applyBidiAutoDir(assistantBody);
     } else {
       assistantBody.innerHTML=esc(displayText);
     }
@@ -5912,6 +5932,7 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
               ? parsed.displayText
               : _stripXmlToolCalls(assistantText.slice(segmentStart));
             assistantBody.innerHTML = renderMd ? renderMd(fallbackText) : esc(fallbackText);
+            if(typeof applyBidiAutoDir==='function') applyBidiAutoDir(assistantBody);
           }
         }
         if(typeof _syncLiveWorklogReasonsForAnchor==='function') _syncLiveWorklogReasonsForAnchor(assistantRow, displayText);
@@ -9960,7 +9981,10 @@ function attachBtwStream(parentSid, streamId, question){
     try{answer+=JSON.parse(e.data).text||'';}catch(_){}
     _ensureBtwRow();
     const ansEl=btwRow&&btwRow.querySelector('.msg-btw-answer');
-    if(ansEl) ansEl.innerHTML=renderMd(answer);
+    if(ansEl){
+      ansEl.innerHTML=renderMd(answer);
+      if(typeof applyBidiAutoDir==='function') applyBidiAutoDir(ansEl);
+    }
   });
   src.addEventListener('done',e=>{
     _streamDone=true;
@@ -9972,7 +9996,10 @@ function attachBtwStream(parentSid, streamId, question){
     if(S.session&&S.session.session_id===parentSid) _ensureBtwRow();
     if(btwRow&&btwRow.isConnected){
       const ansEl=btwRow.querySelector('.msg-btw-answer');
-      if(ansEl) ansEl.innerHTML=renderMd(answer||t('btw_no_answer'));
+      if(ansEl){
+        ansEl.innerHTML=renderMd(answer||t('btw_no_answer'));
+        if(typeof applyBidiAutoDir==='function') applyBidiAutoDir(ansEl);
+      }
     }
     showToast(t('btw_done'));
   });

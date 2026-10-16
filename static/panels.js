@@ -5088,6 +5088,7 @@ function _enhanceSkillMarkdown(root) {
   if (!root) return;
   requestAnimationFrame(() => {
     const mdRoot = root.querySelector('.preview-md') || root;
+    if (typeof applyBidiAutoDir === 'function') applyBidiAutoDir(mdRoot);
     if (typeof highlightCode === 'function') highlightCode(mdRoot);
     if (typeof renderKatexBlocks === 'function') renderKatexBlocks(mdRoot);
   });
@@ -5514,6 +5515,7 @@ function _renderExternalNotesSources() {
       ${resultHtml}
     </section>`;
     body.innerHTML = `<div class="main-view-content">${recall}${scopeNotice}${recentAiHtml}${searchUi}${previewHtml}${cards}</div>`;
+    if (typeof applyBidiAutoDir === 'function') applyBidiAutoDir(body);
   }
   body.style.display = '';
   if (empty) empty.style.display = 'none';
@@ -5552,6 +5554,7 @@ function _renderMemoryDetail(section) {
     ? `<div class="memory-content preview-md" dir="auto">${renderMd(content)}</div>`
     : `<div class="memory-empty">${esc(_memorySectionEmpty(meta))}</div>`;
   body.innerHTML = `<div class="main-view-content">${pathHtml}${mtimeHtml}${shadowedHtml}${inner}</div>`;
+  if (typeof applyBidiAutoDir === 'function') applyBidiAutoDir(body);
   body.style.display = '';
   if (empty) empty.style.display = 'none';
   _memoryMode = 'read';
