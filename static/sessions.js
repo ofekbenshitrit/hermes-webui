@@ -8755,6 +8755,92 @@ function _attachProjectQuickCreateButton(chip, project){
 }
 
 
+const PROJECT_CHIP_ALL_COLOR='#c3eaff';
+const PROJECT_CHIP_UNASSIGNED_COLOR='#d4c4a8';
+
+function _projectChipInk(hex){
+  const raw=String(hex||'').replace('#','').trim();
+  const h=raw.length===3?raw.replace(/./g,'$&$&'):raw;
+  if(!/^[0-9a-fA-F]{6}$/.test(h)) return '#252525';
+  const r=parseInt(h.slice(0,2),16), g=parseInt(h.slice(2,4),16), b=parseInt(h.slice(4,6),16);
+  return ((r*299+g*587+b*114)/1000)>160?'#252525':'#fff';
+}
+
+function _applyProjectChipColor(chip, color){
+  const hex=String(color||'').trim();
+  if(!hex) return;
+  chip.style.setProperty('--project-chip-color', hex);
+  chip.style.setProperty('--project-chip-ink', _projectChipInk(hex));
+}
+
+function _pinnedGroupTitle(){
+  let scope='All';
+  if(typeof _activeProject!=='undefined'&&_activeProject){
+    if(typeof NO_PROJECT_FILTER!=='undefined'&&_activeProject===NO_PROJECT_FILTER) scope='Unassigned';
+    else{
+      const project=(_allProjects||[]).find(item=>item&&item.project_id===_activeProject);
+      scope=project&&project.name?project.name:'Project';
+    }
+  }
+  const pinned=typeof t==='function'?t('sidebar_pinned'):'Pinned';
+  return (pinned&&pinned!=='sidebar_pinned'?pinned:'Pinned')+' ('+scope+')';
+}
+
+function _sidebarToolLabel(key, fallback){
+  const value=typeof t==='function'?t(key):fallback;
+  return value&&value!==key?value:fallback;
+}
+
+function _renderSidebarListTools(){
+  const wrap=document.createElement('div');
+  const tools=document.createElement('div');
+  tools.className='sidebar-list-tools';
+  tools.setAttribute('aria-hidden','true');
+  const line=document.createElement('span');
+  line.className='sidebar-list-tools-line';
+  tools.appendChild(line);
+  const tidy=document.createElement('span');
+  tidy.className='sidebar-list-tool';
+  tidy.innerHTML='<svg viewBox="0 0 6 6" fill="none" aria-hidden="true"><path d="M4.55194 0.454455L3.26172 3.2425M3.26172 3.2425L2.47897 2.88027M3.26172 3.2425L4.04447 3.60474" stroke="currentColor" stroke-width="0.7" stroke-linecap="round"/><path fill-rule="evenodd" clip-rule="evenodd" d="M3.45593 5.72845C3.47741 5.79351 3.52489 5.84676 3.58707 5.87554C3.73514 5.94406 3.90786 5.85313 3.93517 5.69226L4.09333 4.76045C4.11585 4.62777 4.12711 4.56143 4.1136 4.502C4.10168 4.44956 4.0762 4.40116 4.03971 4.36166C3.99836 4.31689 3.93729 4.28863 3.81515 4.23211L2.14903 3.46108C2.02689 3.40456 1.96583 3.3763 1.90494 3.37375C1.8512 3.37151 1.79782 3.38341 1.75013 3.40826C1.69609 3.43643 1.6528 3.48795 1.56624 3.59099L0.958292 4.31466C0.85334 4.43959 0.89581 4.63011 1.04389 4.69863C1.10607 4.72741 1.17739 4.72913 1.24089 4.70339L1.43381 4.62519C1.59209 4.56103 1.77164 4.64412 1.82518 4.80631C1.87872 4.9685 2.05827 5.05159 2.21656 4.98742C2.37484 4.92326 2.55439 5.00635 2.60793 5.16854C2.66147 5.33073 2.84102 5.41382 2.9993 5.34966C3.15759 5.28549 3.33714 5.36858 3.39068 5.53077L3.45593 5.72845Z" fill="currentColor"/></svg>';
+  const tidyLabel=document.createElement('span');
+  tidyLabel.textContent=_sidebarToolLabel('sidebar_tidy','Tidy');
+  tidy.appendChild(tidyLabel);
+  tools.appendChild(tidy);
+  const rule1=document.createElement('span');
+  rule1.className='sidebar-list-tool-rule';
+  tools.appendChild(rule1);
+  const clear=document.createElement('span');
+  clear.className='sidebar-list-tool';
+  clear.innerHTML='<svg viewBox="0 0 6 6" fill="none" aria-hidden="true"><path d="M0.771433 3.26001L3.00001 5.60001L5.22858 3.26001M3.00001 5.60001L3.00001 0.400006" stroke="currentColor" stroke-width="0.7" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  const clearLabel=document.createElement('span');
+  clearLabel.textContent=_sidebarToolLabel('clear','Clear');
+  clear.appendChild(clearLabel);
+  tools.appendChild(clear);
+  const rule2=document.createElement('span');
+  rule2.className='sidebar-list-tool-rule';
+  tools.appendChild(rule2);
+  const archive=document.createElement('span');
+  archive.className='sidebar-list-tool';
+  archive.textContent=_sidebarToolLabel('sidebar_archive','Archive');
+  tools.appendChild(archive);
+  wrap.appendChild(tools);
+  const neu=document.createElement('button');
+  neu.type='button';
+  neu.className='sidebar-new-chat';
+  neu.innerHTML='<svg width="16" height="16" viewBox="0 0 10 10" fill="none" aria-hidden="true"><path d="M5.00001 0.349998C3.46119 0.349998 2.69178 0.349998 2.09403 0.625569C1.44533 0.924622 0.924629 1.44532 0.625577 2.09402C0.350006 2.69178 0.350006 3.46118 0.350006 5C0.350006 6.53881 0.350006 7.30822 0.625577 7.90598C0.924629 8.55467 1.44533 9.07538 2.09403 9.37443C2.69178 9.65 3.46119 9.65 5.00001 9.65C6.53882 9.65 7.30823 9.65 7.90599 9.37443C8.55468 9.07538 9.07538 8.55467 9.37444 7.90598C9.65001 7.30822 9.65001 6.53881 9.65001 5M4.18128 5.01997L4.70514 4.18178C4.75939 4.09498 4.78652 4.05157 4.81646 4.01022C4.84306 3.97348 4.87132 3.93795 4.90115 3.90377C4.93471 3.8653 4.9709 3.82911 5.04328 3.75672L8.20148 0.598527C8.36061 0.439397 8.57643 0.349998 8.80148 0.349998C9.27011 0.349998 9.65001 0.729897 9.65001 1.19853C9.65001 1.42357 9.56061 1.6394 9.40148 1.79853L6.36511 4.83489C6.24735 4.95265 6.18847 5.01153 6.12392 5.06323C6.06658 5.10915 6.00593 5.1508 5.94248 5.18784C5.87106 5.22953 5.79497 5.26335 5.64279 5.33098L4.78326 5.713C4.3515 5.90489 4.13561 6.00084 4.02219 5.95994C3.9242 5.92461 3.85155 5.84097 3.83027 5.739C3.80565 5.62097 3.93086 5.42064 4.18128 5.01997Z" stroke="currentColor" stroke-width="0.7" stroke-linecap="round"/></svg>';
+  const neuLabel=document.createElement('span');
+  neuLabel.textContent=_sidebarToolLabel('sidebar_new_chat','New chat');
+  neu.appendChild(neuLabel);
+  neu.addEventListener('click',function(e){
+    e.preventDefault();
+    e.stopPropagation();
+    const btn=$('btnNewChat');
+    if(btn) btn.click();
+  });
+  wrap.appendChild(neu);
+  return wrap;
+}
+
 function renderSessionListFromCache(){
   // #4671: while a profile-switch skeleton is up, bail — _allSessions still holds the
   // PREVIOUS profile's rows until /api/sessions resolves, so any unrelated caller
@@ -8777,6 +8863,11 @@ function renderSessionListFromCache(){
   // interrupted streams. (#2066)
   _purgeStaleInflightEntries();
   const searchQueryRaw=($('sessionSearch').value||'').trim();
+  if(searchQueryRaw){
+    const searchWrap=document.querySelector('#panelChat .session-search');
+    if(searchWrap) searchWrap.classList.add('is-open');
+    document.querySelectorAll('.sidebar-search-toggle').forEach(function(btn){btn.classList.add('is-search-open');});
+  }
   const q=searchQueryRaw.toLowerCase();
   const activeSidForSidebar=_activeSessionIdForSidebar();
   const sidebarRows=_sessionRowsWithActiveEphemeralSession(_allSessions);
@@ -8875,8 +8966,9 @@ function renderSessionListFromCache(){
     bar.className='project-bar';
     // "All" chip
     const allChip=document.createElement('span');
-    allChip.className='project-chip'+(!_activeProject?' active':'');
+    allChip.className='project-chip project-chip-all'+(!_activeProject?' active':'');
     allChip.textContent='All';
+    _applyProjectChipColor(allChip, PROJECT_CHIP_ALL_COLOR);
     allChip.onclick=()=>{_setActiveProjectFilter(null);};
     bar.appendChild(allChip);
     // "Unassigned" chip — only when there are sessions with no project to
@@ -8886,6 +8978,7 @@ function renderSessionListFromCache(){
       const noneChip=document.createElement('span');
       noneChip.className='project-chip no-project'+(_activeProject===NO_PROJECT_FILTER?' active':'');
       noneChip.textContent='Unassigned';
+      _applyProjectChipColor(noneChip, PROJECT_CHIP_UNASSIGNED_COLOR);
       noneChip.title='Show conversations not yet assigned to a project';
       noneChip.onclick=()=>{_setActiveProjectFilter(NO_PROJECT_FILTER);};
       bar.appendChild(noneChip);
@@ -8894,12 +8987,8 @@ function renderSessionListFromCache(){
     for(const p of _allProjects){
       const chip=document.createElement('span');
       chip.className='project-chip'+(p.project_id===_activeProject?' active':'');
-      if(p.color){
-        const dot=document.createElement('span');
-        dot.className='color-dot';
-        dot.style.background=p.color;
-        chip.appendChild(dot);
-      }
+      const chipColor=p.color||(typeof PROJECT_COLORS!=='undefined'?PROJECT_COLORS[_allProjects.indexOf(p)%PROJECT_COLORS.length]:'');
+      _applyProjectChipColor(chip, chipColor);
       const nameSpan=document.createElement('span');
       nameSpan.textContent=p.name;
       chip.appendChild(nameSpan);
@@ -9141,7 +9230,14 @@ function renderSessionListFromCache(){
   // current session-row window plus top/bottom spacers inside each group body;
   // headers remain real DOM so pin/archive/date grouping and clicks survive.
   let globalSessionRowIndex=0;
+  let sidebarToolsInserted=false;
+  const insertSidebarTools=()=>{
+    if(sidebarToolsInserted||_sessionSelectMode) return;
+    sidebarToolsInserted=true;
+    list.appendChild(_renderSidebarListTools());
+  };
   for(const g of groups){
+    if(!g.isPinned) insertSidebarTools();
     const wrapper=document.createElement('div');
     wrapper.className='session-date-group';
     const hdr=document.createElement('div');
@@ -9150,7 +9246,7 @@ function renderSessionListFromCache(){
     caret.className='session-date-caret';
     caret.textContent='\u25BE'; // down when expanded; rotated right when collapsed
     const label=document.createElement('span');
-    label.textContent=g.label;
+    label.textContent=g.isPinned?_pinnedGroupTitle():g.label;
     hdr.appendChild(caret);hdr.appendChild(label);
     const body=document.createElement('div');
     body.className='session-date-body';
@@ -9181,6 +9277,7 @@ function renderSessionListFromCache(){
     wrapper.appendChild(body);
     list.appendChild(wrapper);
   }
+  insertSidebarTools();
   if(virtualAnchorScrollTop!==null){
     list.scrollTop=virtualAnchorScrollTop;
   }else if(listScrollTopBeforeRender>0){
@@ -10380,6 +10477,7 @@ async function deleteSession(sid, beforeDelete=null){
     }else{
       _settleEmptyComposerModelAfterFinalSessionDelete(modelPickRevisionAtDelete);
       const _tt=$('topbarTitle');if(_tt)_tt.textContent=assistantDisplayName();
+      const _cht=$('chatHeaderTitle');if(_cht)_cht.textContent=assistantDisplayName();
       const _tm=$('topbarMeta');if(_tm)_tm.textContent='Start a new conversation';
       $('msgInner').innerHTML='';
       $('emptyState').style.display='';

@@ -133,7 +133,7 @@ Use almost no shadows in the transcript. Shadows are reserved for popovers, drop
 
 - Rows/list items: `4–8px` radius.
 - Cards/panels: `8–12px` radius.
-- Pills: only true chips/badges use `999px`.
+- Pills: chips and badges use `999px`. A one-line user bubble is also a pill; its radius is half of that one-line box and stays fixed once the text wraps, so a multi-line bubble reads as a rounded box.
 - Avoid stacks of nested rounded rectangles. If a card contains another card, one of them is probably unnecessary.
 
 ## Components

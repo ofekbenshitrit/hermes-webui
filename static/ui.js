@@ -12455,6 +12455,7 @@ function syncTopbar(){
   }
   const sessionTitle=S.session.title||t('untitled');
   const _topbarTitle=$('topbarTitle');if(_topbarTitle)_topbarTitle.textContent=sessionTitle;
+  const _chatHeaderTitle=$('chatHeaderTitle');if(_chatHeaderTitle)_chatHeaderTitle.textContent=sessionTitle;
   document.title=sessionTitle+' \u2014 '+assistantDisplayName();
   if(typeof activeSessionHasPendingPromptAttention==='function'&&activeSessionHasPendingPromptAttention()){
     document.title='● '+document.title;
@@ -23536,7 +23537,8 @@ function renderTray(){ // non-media files use paperclip chip
       }
     } else {
       chip.classList.add('attach-chip--file');
-      chip.innerHTML=`<span class="attach-chip-file">${li('paperclip',12)}<span class="attach-chip-name">${esc(f.name)}</span></span><button title="${t('remove_title')}">${li('x',12)}</button>`;
+      const ext=((f.name||'').split('.').pop()||'FILE').toUpperCase();
+      chip.innerHTML=`<span class="attach-chip-name">${esc(f.name)}</span><span class="attach-chip-ext">${esc(ext)}</span><button title="${t('remove_title')}">${li('x',12)}</button>`;
     }
     chip.querySelector('button').onclick=()=>{
       // Revoke blob URL to avoid memory leak before removing

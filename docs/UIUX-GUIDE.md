@@ -19,7 +19,7 @@ browser, no build step, no bundler, and no frontend framework.
 
 The primary layout is three-panel:
 
-- left sidebar for sessions and navigation,
+- left sidebar for sessions and navigation. Search, Kanban, and Actions stay on the column; Actions opens the other destinations, including Settings. Tidy, Clear, and Archive are drawn on the conversation list and are not wired up yet.
 - center panel for chat,
 - right panel for workspace file browsing and previews.
 
@@ -51,7 +51,9 @@ must notice and respond to them.
 
 A chat turn should read as one coherent story:
 
-1. User message: right-aligned, compact bubble.
+1. User message: right-aligned, compact bubble. A single line is a pill — the
+   corner radius is half of that one-line box. Wrapped text keeps the same
+   radius, so the bubble reads as a rounded box rather than a taller capsule.
 2. Assistant content: left-aligned, prose-first, not a heavy bubble.
 3. Tool, thinking, progress, and context traces: quiet disclosure rows inside or
    adjacent to the assistant turn.
@@ -131,7 +133,7 @@ subtle border or a subtle tint, not aggressive combinations of both.
 
 Avoid stacks of nested rounded rectangles. Rows and list items should feel
 compact; panels and cards may be slightly rounder; true pills are reserved for
-chips and badges.
+chips, badges, and one-line user bubbles.
 
 ## Composer and controls
 

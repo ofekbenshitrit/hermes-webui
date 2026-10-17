@@ -825,6 +825,132 @@ function toggleSidebar(forceState){
   _syncSidebarAria();
 }
 
+function closeSidebarActions(){
+  const menu=$('sidebarActionsMenu');
+  if(menu) menu.hidden=true;
+  document.querySelectorAll('[aria-controls="sidebarActionsMenu"]').forEach(function(btn){
+    btn.setAttribute('aria-expanded','false');
+  });
+}
+
+function _sidebarActionLabel(source){
+  return source.getAttribute('data-tooltip')||source.getAttribute('aria-label')||source.dataset.panel||'';
+}
+
+function _fillSidebarActionsMenu(){
+  const menu=$('sidebarActionsMenu');
+  const rail=document.querySelector('.rail');
+  if(!menu||!rail) return;
+  menu.replaceChildren();
+  Array.from(rail.querySelectorAll('.nav-tab.rail-overflow')).forEach(function(source){
+    if(source.classList.contains('nav-tab-hidden')) return;
+    if(source.hasAttribute('data-dashboard-link')&&!source.classList.contains('dashboard-link-visible')) return;
+    const btn=document.createElement('button');
+    btn.type='button';
+    btn.className='sidebar-actions-item'+(source.classList.contains('active')?' active':'');
+    btn.setAttribute('role','menuitem');
+    const icon=source.querySelector('svg');
+    if(icon) btn.appendChild(icon.cloneNode(true));
+    const label=document.createElement('span');
+    label.textContent=_sidebarActionLabel(source);
+    btn.appendChild(label);
+    const badge=source.querySelector('.auth-warning-badge');
+    if(badge&&badge.style.display!=='none'){
+      const dot=document.createElement('span');
+      dot.className='sidebar-actions-badge';
+      btn.appendChild(dot);
+    }
+    btn.addEventListener('click',function(e){
+      e.preventDefault();
+      e.stopPropagation();
+      closeSidebarActions();
+      expandSidebar();
+      if(source.hasAttribute('data-dashboard-link')){
+        if(typeof openHermesDashboard==='function') openHermesDashboard(e);
+        return;
+      }
+      if(typeof switchPanel==='function') switchPanel(source.dataset.panel);
+    });
+    menu.appendChild(btn);
+  });
+}
+
+function toggleSidebarActions(event){
+  if(event){
+    event.preventDefault();
+    event.stopPropagation();
+  }
+  const menu=$('sidebarActionsMenu');
+  if(!menu) return;
+  if(!menu.hidden){
+    closeSidebarActions();
+    return;
+  }
+  _fillSidebarActionsMenu();
+  menu.hidden=false;
+  const trigger=event&&event.currentTarget;
+  document.querySelectorAll('[aria-controls="sidebarActionsMenu"]').forEach(function(btn){
+    btn.setAttribute('aria-expanded', btn===trigger?'true':'false');
+  });
+  if(!trigger||!trigger.getBoundingClientRect) return;
+  const rect=trigger.getBoundingClientRect();
+  const width=Math.max(210, menu.offsetWidth||210);
+  let left=rect.left;
+  if(left+width>window.innerWidth-8) left=Math.max(8, window.innerWidth-width-8);
+  let top=rect.bottom+6;
+  menu.style.left=left+'px';
+  menu.style.top=top+'px';
+  requestAnimationFrame(function(){
+    const height=menu.offsetHeight||0;
+    if(top+height>window.innerHeight-8){
+      const above=rect.top-6-height;
+      menu.style.top=(above>8?above:8)+'px';
+    }
+  });
+}
+
+function openSidebarSearch(){
+  closeSidebarActions();
+  if(typeof switchPanel==='function') switchPanel('chat');
+  expandSidebar();
+  const wrap=document.querySelector('#panelChat .session-search');
+  if(wrap) wrap.classList.add('is-open');
+  document.querySelectorAll('.sidebar-search-toggle').forEach(function(btn){btn.classList.add('is-search-open');});
+  const input=$('sessionSearch');
+  if(input) setTimeout(function(){try{input.focus();}catch(_){}} ,0);
+}
+
+function closeSidebarSearchIfEmpty(input){
+  if(!input||String(input.value||'').trim()) return;
+  const wrap=input.closest&&input.closest('.session-search');
+  if(wrap) wrap.classList.remove('is-open');
+  document.querySelectorAll('.sidebar-search-toggle').forEach(function(btn){btn.classList.remove('is-search-open');});
+}
+
+function openSidebarKanban(){
+  closeSidebarActions();
+  if(typeof switchPanel==='function') switchPanel('kanban');
+  expandSidebar();
+}
+
+function sidebarNewChat(){
+  closeSidebarActions();
+  if(typeof switchPanel==='function') switchPanel('chat');
+  expandSidebar();
+  const btn=$('btnNewChat');
+  if(btn) btn.click();
+}
+
+document.addEventListener('click',function(e){
+  const menu=$('sidebarActionsMenu');
+  if(!menu||menu.hidden) return;
+  if(e.target&&e.target.closest&&(e.target.closest('#sidebarActionsMenu')||e.target.closest('[aria-controls="sidebarActionsMenu"]'))) return;
+  closeSidebarActions();
+});
+document.addEventListener('keydown',function(e){
+  if(e.key==='Escape') closeSidebarActions();
+});
+
 function expandSidebar(){
   if(_isSidebarCollapsed())toggleSidebar(false);
 }
@@ -3564,6 +3690,8 @@ function applyBotName(){
   if(logo) logo.textContent=name.charAt(0).toUpperCase();
   const topbarTitle=$('topbarTitle');
   if(topbarTitle && (!S.session)) topbarTitle.textContent=name;
+  const chatHeaderTitle=$('chatHeaderTitle');
+  if(chatHeaderTitle && (!S.session)) chatHeaderTitle.textContent=name;
   const msg=$('msg');
   if(msg) msg.placeholder='Message '+name+'\u2026';
   if(typeof _applyBusyComposerPlaceholder==='function') _applyBusyComposerPlaceholder();

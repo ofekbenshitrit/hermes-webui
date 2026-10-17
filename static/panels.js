@@ -78,6 +78,8 @@ function syncAppTitlebar() {
   if (_renamingAppTitlebar) return;
 
   titleEl.textContent = mainText;
+  const chatHeaderTitle = document.getElementById('chatHeaderTitle');
+  if (chatHeaderTitle) chatHeaderTitle.textContent = mainText;
   if (panel !== 'chat') {
     const bot = typeof assistantDisplayName === 'function' ? assistantDisplayName() : '';
     document.title = bot ? mainText + ' \u2014 ' + bot : mainText;
