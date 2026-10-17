@@ -7677,6 +7677,14 @@ html[data-conversation-outline="enabled"] #outlineToggleBtn:not([hidden]){displa
   border-right: 0.7px solid #313131 !important;
   box-shadow: none !important;
 }
+:root .sidebar .panel-view,
+:root[data-skin] .sidebar .panel-view,
+:root.dark[data-skin] .sidebar .panel-view,
+:root .sidebar-chrome,
+:root[data-skin] .sidebar-chrome,
+:root.dark[data-skin] .sidebar-chrome {
+  background: #252525 !important;
+}
 :root .composer-wrap,
 :root[data-skin] .composer-wrap,
 :root.dark[data-skin] .composer-wrap {
