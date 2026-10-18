@@ -44,6 +44,8 @@ const LOCALES = {
     session_new_tab_other_profile: 'This session belongs to another profile. Open it from the current tab instead.',
     sessions_source_webui: 'WebUI sessions ({0})',
     sessions_source_cli: 'CLI sessions ({0})',
+    sessions_source_webui_short: 'WebUI',
+    sessions_source_cli_short: 'CLI',
     import_failed: 'Import failed: ',
     import_invalid_json: 'Invalid JSON',
     image_pasted: 'Image pasted: ',

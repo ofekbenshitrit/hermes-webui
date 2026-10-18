@@ -647,6 +647,13 @@
               </svg>
             </button>
             <div class="composer-divider" aria-hidden="true"></div>
+            <div class="composer-session-wrap" id="composerSessionWrap">
+              <button class="composer-session-chip" id="composerSessionChip" type="button" onclick="toggleComposerSessionMenu(event)" title="Model and thinking level" aria-label="Model and thinking level" aria-haspopup="menu" aria-expanded="false" aria-controls="composerSessionMenu">
+                <span class="composer-session-model" id="composerSessionModel"></span>
+                <span class="composer-session-effort" id="composerSessionEffort"></span>
+                <span class="composer-session-chevron" aria-hidden="true"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
+              </button>
+            </div>
             <button class="yolo-pill" id="yoloPill" type="button" onclick="cmdYolo()" style="display:none" title="YOLO mode — click to disable" data-i18n-title="yolo_pill_title_active">
               <span class="yolo-pill-icon" aria-hidden="true">⚡</span>
               <span class="yolo-pill-label" data-i18n="yolo_pill_label">YOLO</span>
@@ -810,6 +817,28 @@
             </div>
           </div>
           <div class="model-dropdown" id="composerModelDropdown"></div>
+          <div class="composer-session-menu" id="composerSessionMenu" role="menu" aria-label="Model, thinking, profile, and workspace" hidden>
+            <button class="composer-session-row" id="composerSessionProfileRow" type="button" role="menuitem" data-session-action="profile" aria-haspopup="menu" aria-expanded="false" onclick="openComposerSessionAction(event,'profile')">
+              <span class="composer-session-row-label">Profile</span>
+              <span class="composer-session-row-value" id="composerSessionProfileValue"></span>
+              <span class="composer-session-row-chevron" aria-hidden="true">›</span>
+            </button>
+            <button class="composer-session-row" id="composerSessionWorkspaceRow" type="button" role="menuitem" data-session-action="workspace" aria-haspopup="menu" aria-expanded="false" onclick="openComposerSessionAction(event,'workspace')">
+              <span class="composer-session-row-label">Workspace</span>
+              <span class="composer-session-row-value" id="composerSessionWorkspaceValue"></span>
+              <span class="composer-session-row-chevron" aria-hidden="true">›</span>
+            </button>
+            <button class="composer-session-row" id="composerSessionThinkingRow" type="button" role="menuitem" data-session-action="thinking" aria-haspopup="menu" aria-expanded="false" onclick="openComposerSessionAction(event,'thinking')">
+              <span class="composer-session-row-label">Thinking</span>
+              <span class="composer-session-row-value" id="composerSessionThinkingValue"></span>
+              <span class="composer-session-row-chevron" aria-hidden="true">›</span>
+            </button>
+            <button class="composer-session-row" id="composerSessionModelRow" type="button" role="menuitem" data-session-action="model" aria-haspopup="menu" aria-expanded="false" onclick="openComposerSessionAction(event,'model')">
+              <span class="composer-session-row-label">Model</span>
+              <span class="composer-session-row-value" id="composerSessionModelValue"></span>
+              <span class="composer-session-row-chevron" aria-hidden="true">›</span>
+            </button>
+          </div>
         </div>
         <div class="upload-bar-wrap" id="uploadBarWrap"><div class="upload-bar" id="uploadBar"></div></div>
       </div>

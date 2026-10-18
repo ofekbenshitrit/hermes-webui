@@ -4517,6 +4517,7 @@ function syncModelChip(){
   const displayText=_formatGatewayModelLabel(sel.value||'',compactText,gatewayRouting)||compactText;
   label.textContent=displayText;
   if(mobileLabel) mobileLabel.textContent=displayText;
+  if(typeof syncComposerSessionChip==='function') syncComposerSessionChip();
   chip.title=gatewayRouting?`${sel.value||'Conversation model'} ${_gatewayRoutingLabel(gatewayRouting)}`:(sel.value||'Conversation model');
   chip.classList.toggle('active',!!(dd&&dd.classList.contains('open')));
   if(mobileAction) mobileAction.classList.toggle('active',!!(dd&&dd.classList.contains('open')));
@@ -4558,9 +4559,13 @@ function _positionModelDropdown(){
   const footer=document.querySelector('.composer-footer');
   if(!dd||!footer) return;
   const panel=$('composerMobileConfigPanel');
-  const anchor=(panel&&panel.classList.contains('open')&&mobileAction)?mobileAction:(chip&&chip.offsetParent?chip:mobileAction);
+  const sessionRow=$('composerSessionModelRow');
+  const sessionMenu=$('composerSessionMenu');
+  const sessionAnchor=sessionMenu&&!sessionMenu.hidden&&sessionRow?sessionRow:null;
+  const anchor=sessionAnchor||((panel&&panel.classList.contains('open')&&mobileAction)?mobileAction:(chip&&chip.offsetParent?chip:mobileAction));
   if(!anchor) return;
   const isPhone=typeof window.matchMedia==='function'&&window.matchMedia('(max-width:640px)').matches;
+  if(!isPhone&&sessionAnchor&&typeof _composerSessionFlyoutAction!=='undefined'&&_composerSessionFlyoutAction==='model'&&typeof _positionSessionFlyout==='function'&&_positionSessionFlyout(dd,sessionAnchor)) return;
   if(isPhone){
     // #6080: .composer-footer sets container-type:inline-size (and a
     // backdrop-filter under the Geist Contrast skin) — both establish a fixed
@@ -4613,6 +4618,7 @@ function _positionModelDropdown(){
   // case a prior phone open moved it to <body>) and clear the phone inline
   // styles so the desktop CSS anchor is byte-for-byte identical to master.
   _restoreModelDropdownHome();
+  if(typeof _clearSessionFlyoutLayout==='function') _clearSessionFlyoutLayout(dd);
   const anchorRect=anchor.getBoundingClientRect();
   const footerRect=footer.getBoundingClientRect();
   let left=anchorRect.left-footerRect.left;
@@ -5396,6 +5402,309 @@ function renderModelDropdown(){
   _filterModels('');
 }
 
+function syncComposerSessionChip(){
+  const modelEl=$('composerSessionModel');
+  const effortEl=$('composerSessionEffort');
+  const modelValue=$('composerSessionModelValue');
+  const thinkingValue=$('composerSessionThinkingValue');
+  const profileValue=$('composerSessionProfileValue');
+  const workspaceValue=$('composerSessionWorkspaceValue');
+  const thinkingRow=$('composerSessionThinkingRow');
+  const modelLabel=$('composerModelLabel');
+  const effortLabel=$('composerReasoningLabel');
+  const wrap=$('composerReasoningWrap');
+  const modelText=(modelLabel&&modelLabel.textContent)||'';
+  const effortShown=!!(wrap&&wrap.style.display!=='none');
+  const effortText=effortShown?((effortLabel&&effortLabel.textContent)||''):'';
+  if(modelEl) modelEl.textContent=modelText;
+  if(effortEl) effortEl.textContent=effortText;
+  if(modelValue) modelValue.textContent=modelText;
+  if(thinkingValue) thinkingValue.textContent=effortText;
+  if(thinkingRow) thinkingRow.hidden=!effortShown;
+  if(profileValue){
+    const profile=$('profileChipLabel');
+    profileValue.textContent=(profile&&profile.textContent)||'';
+  }
+  if(workspaceValue){
+    const workspace=$('composerWorkspaceLabel');
+    workspaceValue.textContent=(workspace&&workspace.textContent)||'';
+  }
+}
+
+function _positionComposerSessionMenu(){
+  const menu=$('composerSessionMenu');
+  const chip=$('composerSessionChip');
+  const footer=document.querySelector('.composer-footer');
+  if(!menu||!chip||!footer) return;
+  const chipRect=chip.getBoundingClientRect();
+  const footerRect=footer.getBoundingClientRect();
+  const width=menu.offsetWidth||280;
+  let left=chipRect.left-footerRect.left;
+  left=Math.max(0, Math.min(left, Math.max(0, footer.clientWidth-width)));
+  menu.style.left=left+'px';
+}
+
+// Side flyouts for the composer session menu. Hovering a row opens its
+// submenu to the right of the parent, or to the left when that side has
+// more room. Phone layout keeps the existing above-footer anchors.
+let _composerSessionFlyoutGen=0;
+let _composerSessionFlyoutAction=null;
+let _composerSessionHoverAction=null;
+let _composerSessionFlyoutOpenTimer=0;
+let _composerSessionFlyoutDismissTimer=0;
+
+function _sessionFlyoutBounds(){
+  const main=document.querySelector('.main');
+  if(main&&typeof main.getBoundingClientRect==='function'){
+    const rect=main.getBoundingClientRect();
+    if(rect&&rect.width>0&&rect.height>0) return rect;
+  }
+  const vv=window.visualViewport;
+  const width=Math.max(1,Number(vv&&vv.width)||window.innerWidth||1);
+  const height=Math.max(1,Number(vv&&vv.height)||window.innerHeight||1);
+  const left=Math.max(0,Number(vv&&vv.offsetLeft)||0);
+  const top=Math.max(0,Number(vv&&vv.offsetTop)||0);
+  return {left:left,top:top,right:left+width,bottom:top+height,width:width,height:height};
+}
+
+function _sessionFlyoutIsFixed(dd){
+  if(!dd) return false;
+  if(dd.id==='profileDropdown') return true;
+  if(dd.classList&&dd.classList.contains('model-dropdown--floating')) return true;
+  if(typeof getComputedStyle==='function'){
+    try{
+      if(getComputedStyle(dd).position==='fixed') return true;
+    }catch(_){}
+  }
+  return false;
+}
+
+function _clearSessionFlyoutLayout(dd){
+  if(!dd) return;
+  dd.classList.remove('composer-session-flyout','composer-session-flyout-left');
+  if(dd.dataset) delete dd.dataset.flyoutSide;
+  if(dd.id!=='composerModelDropdown'){
+    dd.style.maxWidth='';
+    dd.style.maxHeight='';
+  }
+}
+
+function _positionSessionFlyout(dd, row){
+  const menu=$('composerSessionMenu');
+  const footer=document.querySelector('.composer-footer');
+  if(!dd||!row||!menu||menu.hidden||!footer) return false;
+  if(typeof window.matchMedia==='function'&&window.matchMedia('(max-width:640px)').matches) return false;
+  const gap=8;
+  const margin=8;
+  const bounds=_sessionFlyoutBounds();
+  const menuRect=menu.getBoundingClientRect();
+  const rowRect=row.getBoundingClientRect();
+  const footerRect=footer.getBoundingClientRect();
+  dd.style.maxWidth='';
+  dd.style.maxHeight='';
+  let ddW=Math.max(dd.offsetWidth||0,1);
+  let ddH=Math.max(dd.offsetHeight||0,1);
+  const spaceRight=bounds.right-menuRect.right-margin;
+  const spaceLeft=menuRect.left-bounds.left-margin;
+  const placeLeft=(spaceRight<ddW+gap)&&(spaceLeft>spaceRight);
+  const room=Math.max(120,(placeLeft?spaceLeft:spaceRight)-gap);
+  if(ddW>room){
+    dd.style.maxWidth=Math.floor(room)+'px';
+    ddW=Math.max(dd.offsetWidth||room,1);
+    ddH=Math.max(dd.offsetHeight||ddH,1);
+  }
+  const roomH=Math.max(120,bounds.bottom-bounds.top-margin*2);
+  if(ddH>roomH){
+    dd.style.maxHeight=Math.floor(roomH)+'px';
+    ddH=Math.max(dd.offsetHeight||roomH,1);
+  }
+  let viewLeft=placeLeft?(menuRect.left-gap-ddW):(menuRect.right+gap);
+  viewLeft=Math.max(bounds.left+margin, Math.min(viewLeft, bounds.right-margin-ddW));
+  let viewTop=rowRect.top;
+  const active=dd.querySelector('.model-opt.active, .reasoning-option.selected, .ws-opt.active, .profile-opt.active');
+  if(active&&typeof active.getBoundingClientRect==='function'){
+    const activeRect=active.getBoundingClientRect();
+    if(activeRect.height>0) viewTop+=rowRect.top-activeRect.top;
+  }
+  viewTop=Math.max(bounds.top+margin, Math.min(viewTop, bounds.bottom-margin-ddH));
+  dd.style.right='auto';
+  dd.style.bottom='auto';
+  if(_sessionFlyoutIsFixed(dd)){
+    dd.style.left=viewLeft+'px';
+    dd.style.top=viewTop+'px';
+  }else{
+    dd.style.left=(viewLeft-footerRect.left)+'px';
+    dd.style.top=(viewTop-footerRect.top)+'px';
+  }
+  dd.classList.add('composer-session-flyout');
+  dd.classList.toggle('composer-session-flyout-left',placeLeft);
+  if(dd.dataset) dd.dataset.flyoutSide=placeLeft?'left':'right';
+  return true;
+}
+
+function _composerSessionUsesHover(){
+  return typeof window.matchMedia==='function'&&window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+}
+
+function _markComposerSessionRow(action){
+  document.querySelectorAll('.composer-session-row.active').forEach(function(el){
+    el.classList.remove('active');
+    el.setAttribute('aria-expanded','false');
+  });
+  const row=action?document.querySelector('.composer-session-row[data-session-action="'+action+'"]'):null;
+  if(row){
+    row.classList.add('active');
+    row.setAttribute('aria-expanded','true');
+  }
+  return row;
+}
+
+function _composerSessionFlyoutIsOpen(action){
+  if(action==='model') return !!($('composerModelDropdown')&&$('composerModelDropdown').classList.contains('open'));
+  if(action==='thinking') return !!($('composerReasoningDropdown')&&$('composerReasoningDropdown').classList.contains('open'));
+  if(action==='workspace') return !!($('composerWsDropdown')&&$('composerWsDropdown').classList.contains('open'));
+  if(action==='profile') return !!($('profileDropdown')&&$('profileDropdown').classList.contains('open'));
+  return false;
+}
+
+function _dismissComposerSessionFlyouts(){
+  _composerSessionFlyoutAction=null;
+  _composerSessionHoverAction=null;
+  _composerSessionFlyoutGen++;
+  _markComposerSessionRow(null);
+  if(typeof closeModelDropdown==='function') closeModelDropdown();
+  if(typeof closeReasoningDropdown==='function') closeReasoningDropdown();
+  if(typeof closeWsDropdown==='function') closeWsDropdown();
+  const profileRow=$('composerSessionProfileRow');
+  if(profileRow&&typeof _profileDropdownTrigger!=='undefined'&&_profileDropdownTrigger===profileRow&&typeof closeProfileDropdown==='function'){
+    closeProfileDropdown();
+  }
+}
+
+function showComposerSessionFlyout(action){
+  const menu=$('composerSessionMenu');
+  if(!menu||menu.hidden||!action) return;
+  _composerSessionFlyoutGen++;
+  _composerSessionFlyoutAction=action;
+  _composerSessionHoverAction=action;
+  clearTimeout(_composerSessionFlyoutDismissTimer);
+  _markComposerSessionRow(action);
+  if(_composerSessionFlyoutIsOpen(action)){
+    if(action==='model') _positionModelDropdown();
+    else if(action==='thinking') _positionReasoningDropdown();
+    else if(action==='workspace'&&typeof _positionComposerWsDropdown==='function') _positionComposerWsDropdown();
+    else if(action==='profile'&&typeof _positionProfileDropdown==='function') _positionProfileDropdown();
+    return;
+  }
+  const row=document.querySelector('.composer-session-row[data-session-action="'+action+'"]');
+  if(action==='profile'&&typeof toggleProfileDropdown==='function') toggleProfileDropdown({currentTarget:row});
+  else if(action==='workspace'&&typeof toggleComposerWsDropdown==='function') toggleComposerWsDropdown();
+  else if(action==='thinking'&&typeof toggleReasoningDropdown==='function') toggleReasoningDropdown();
+  else if(action==='model') toggleModelDropdown();
+}
+
+function _scheduleComposerSessionFlyout(action){
+  clearTimeout(_composerSessionFlyoutOpenTimer);
+  clearTimeout(_composerSessionFlyoutDismissTimer);
+  _composerSessionFlyoutOpenTimer=setTimeout(function(){ showComposerSessionFlyout(action); }, 40);
+}
+
+function _scheduleComposerSessionFlyoutDismiss(){
+  clearTimeout(_composerSessionFlyoutOpenTimer);
+  clearTimeout(_composerSessionFlyoutDismissTimer);
+  _composerSessionFlyoutDismissTimer=setTimeout(function(){
+    const menu=$('composerSessionMenu');
+    if(menu&&menu.matches&&menu.matches(':hover')) return;
+    const openFly=document.querySelector('#composerModelDropdown.open:hover,#composerReasoningDropdown.open:hover,#composerWsDropdown.open:hover,#profileDropdown.open:hover');
+    if(openFly) return;
+    _dismissComposerSessionFlyouts();
+  }, 180);
+}
+
+function _bindComposerSessionHoverFlyouts(){
+  const menu=$('composerSessionMenu');
+  if(!menu||menu._sessionFlyoutBound) return;
+  menu._sessionFlyoutBound=true;
+  menu.addEventListener('mouseover',function(e){
+    if(!_composerSessionUsesHover()) return;
+    const row=e.target&&e.target.closest&&e.target.closest('.composer-session-row');
+    if(!row||row.hidden||!menu.contains(row)) return;
+    const action=row.getAttribute('data-session-action');
+    if(!action||action===_composerSessionHoverAction) return;
+    _composerSessionHoverAction=action;
+    _scheduleComposerSessionFlyout(action);
+  });
+  menu.addEventListener('mouseleave',function(){
+    if(!_composerSessionUsesHover()) return;
+    _scheduleComposerSessionFlyoutDismiss();
+  });
+  ['composerModelDropdown','composerReasoningDropdown','composerWsDropdown','profileDropdown'].forEach(function(id){
+    const el=$(id);
+    if(!el) return;
+    el.addEventListener('mouseenter',function(){
+      clearTimeout(_composerSessionFlyoutDismissTimer);
+    });
+    el.addEventListener('mouseleave',function(){
+      if(!_composerSessionUsesHover()) return;
+      const openMenu=$('composerSessionMenu');
+      if(!openMenu||openMenu.hidden) return;
+      _scheduleComposerSessionFlyoutDismiss();
+    });
+  });
+}
+
+function closeComposerSessionMenu(){
+  const menu=$('composerSessionMenu');
+  const chip=$('composerSessionChip');
+  const wasOpen=!!(menu&&!menu.hidden);
+  clearTimeout(_composerSessionFlyoutOpenTimer);
+  clearTimeout(_composerSessionFlyoutDismissTimer);
+  if(menu) menu.hidden=true;
+  if(chip){
+    chip.classList.remove('active');
+    chip.setAttribute('aria-expanded','false');
+  }
+  document.querySelectorAll('.composer-session-row.active').forEach(function(el){ el.classList.remove('active'); });
+  if(wasOpen) _dismissComposerSessionFlyouts();
+}
+
+function toggleComposerSessionMenu(e){
+  if(e){ e.preventDefault(); e.stopPropagation(); }
+  const menu=$('composerSessionMenu');
+  const chip=$('composerSessionChip');
+  if(!menu||!chip) return;
+  if(!menu.hidden){ closeComposerSessionMenu(); return; }
+  if(typeof closeProfileDropdown==='function') closeProfileDropdown();
+  if(typeof closeWsDropdown==='function') closeWsDropdown();
+  closeModelDropdown();
+  if(typeof closeReasoningDropdown==='function') closeReasoningDropdown();
+  syncComposerSessionChip();
+  menu.hidden=false;
+  chip.classList.add('active');
+  chip.setAttribute('aria-expanded','true');
+  _positionComposerSessionMenu();
+  _bindComposerSessionHoverFlyouts();
+}
+
+function openComposerSessionAction(e, action){
+  if(e){ e.preventDefault(); e.stopPropagation(); }
+  showComposerSessionFlyout(action);
+}
+
+_bindComposerSessionHoverFlyouts();
+
+document.addEventListener('click',function(e){
+  if(
+    e.target.closest('#composerSessionChip')||
+    e.target.closest('#composerSessionMenu')||
+    e.target.closest('#composerModelDropdown')||
+    e.target.closest('#composerReasoningDropdown')||
+    e.target.closest('#composerWsDropdown')||
+    e.target.closest('#profileDropdown')
+  ) return;
+  closeComposerSessionMenu();
+});
+
 async function selectModelFromDropdown(value){
   const preferredProviderId=arguments[1];
   const sel=$('modelSelect');
@@ -5440,6 +5749,8 @@ async function toggleModelDropdown(){
   _positionModelDropdown();
   const activeRow=dd.querySelector('.model-opt.active');
   if(activeRow&&typeof activeRow.scrollIntoView==='function') activeRow.scrollIntoView({block:'nearest'});
+  const sessionMenu=$('composerSessionMenu');
+  if(sessionMenu&&!sessionMenu.hidden) _positionModelDropdown();
   chip.classList.add('active');
   const mobileAction=$('composerMobileModelAction');
   if(mobileAction) mobileAction.classList.add('active');
@@ -5449,7 +5760,10 @@ function closeModelDropdown(){
   const dd=$('composerModelDropdown');
   const chip=$('composerModelChip');
   const mobileAction=$('composerMobileModelAction');
-  if(dd) dd.classList.remove('open');
+  if(dd){
+    dd.classList.remove('open');
+    if(typeof _clearSessionFlyoutLayout==='function') _clearSessionFlyoutLayout(dd);
+  }
   if(chip) chip.classList.remove('active');
   if(mobileAction) mobileAction.classList.remove('active');
   // If the phone path reparented the menu onto <body>, put it back in the
@@ -5557,6 +5871,7 @@ function mountSettingsModelPicker(){
 document.addEventListener('click',e=>{
   if(
     !e.target.closest('#composerModelChip') &&
+    !e.target.closest('#composerSessionMenu') &&
     !e.target.closest('#composerMobileModelAction') &&
     !e.target.closest('#composerModelDropdown')
   ) closeModelDropdown();
@@ -5827,6 +6142,7 @@ function _applyReasoningChip(eff){
   const text=_formatReasoningEffortLabel(effort);
   label.textContent=text;
   if(mobileLabel) mobileLabel.textContent=text;
+  if(typeof syncComposerSessionChip==='function') syncComposerSessionChip();
   if(chip){
     const inactive=!effort||effort==='none';
     chip.classList.toggle('inactive',inactive);
@@ -5947,7 +6263,15 @@ function _positionReasoningDropdown(){
   const footer=document.querySelector('.composer-footer');
   if(!dd||!chip||!footer) return;
   const panel=$('composerMobileConfigPanel');
-  const anchor=(panel&&panel.classList.contains('open')&&mobileAction)?mobileAction:chip;
+  const sessionRow=$('composerSessionThinkingRow');
+  const sessionMenu=$('composerSessionMenu');
+  const sessionAnchor=sessionMenu&&!sessionMenu.hidden&&sessionRow?sessionRow:null;
+  const anchor=sessionAnchor||((panel&&panel.classList.contains('open')&&mobileAction)?mobileAction:chip);
+  if(sessionAnchor&&typeof _composerSessionFlyoutAction!=='undefined'&&_composerSessionFlyoutAction==='thinking'&&typeof _positionSessionFlyout==='function'&&_positionSessionFlyout(dd,sessionAnchor)) return;
+  if(typeof _clearSessionFlyoutLayout==='function') _clearSessionFlyoutLayout(dd);
+  dd.style.top='';
+  dd.style.bottom='';
+  dd.style.right='';
   const chipRect=anchor.getBoundingClientRect();
   const footerRect=footer.getBoundingClientRect();
   let left=chipRect.left-footerRect.left;
@@ -5960,7 +6284,13 @@ function closeReasoningDropdown(){
   const dd=$('composerReasoningDropdown');
   const chip=$('composerReasoningChip');
   const mobileAction=$('composerMobileReasoningAction');
-  if(dd) dd.classList.remove('open');
+  if(dd){
+    dd.classList.remove('open');
+    if(typeof _clearSessionFlyoutLayout==='function') _clearSessionFlyoutLayout(dd);
+    dd.style.top='';
+    dd.style.bottom='';
+    dd.style.right='';
+  }
   if(chip) chip.classList.remove('active');
   if(mobileAction) mobileAction.classList.remove('active');
 }
@@ -5968,6 +6298,7 @@ function closeReasoningDropdown(){
 document.addEventListener('click',function(e){
   if(
     !e.target.closest('#composerReasoningChip') &&
+    !e.target.closest('#composerSessionMenu') &&
     !e.target.closest('#composerMobileReasoningAction') &&
     !e.target.closest('#composerReasoningDropdown')
   ) closeReasoningDropdown();

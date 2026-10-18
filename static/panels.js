@@ -5893,8 +5893,16 @@ function _positionComposerWsDropdown(){
   const panel=$('composerMobileConfigPanel');
   const footer=document.querySelector('.composer-footer');
   // While the mobile config panel is open, anchor to #composerMobileWorkspaceAction instead of only the desktop workspace chip.
-  const anchor=(panel&&panel.classList.contains('open')&&mobileAction)?mobileAction:chip;
+  const sessionRow=(typeof $==='function')?$('composerSessionWorkspaceRow'):null;
+  const sessionMenu=(typeof $==='function')?$('composerSessionMenu'):null;
+  const sessionAnchor=sessionMenu&&!sessionMenu.hidden&&sessionRow?sessionRow:null;
+  const anchor=sessionAnchor||((panel&&panel.classList.contains('open')&&mobileAction)?mobileAction:chip);
   if(!dd||!anchor||!footer)return;
+  if(sessionAnchor&&typeof _composerSessionFlyoutAction!=='undefined'&&_composerSessionFlyoutAction==='workspace'&&typeof _positionSessionFlyout==='function'&&_positionSessionFlyout(dd,sessionAnchor)) return;
+  if(typeof _clearSessionFlyoutLayout==='function') _clearSessionFlyoutLayout(dd);
+  dd.style.top='';
+  dd.style.bottom='';
+  dd.style.right='';
   const chipRect=anchor.getBoundingClientRect();
   const footerRect=footer.getBoundingClientRect();
   let left=chipRect.left-footerRect.left;
@@ -5905,8 +5913,12 @@ function _positionComposerWsDropdown(){
 
 function _positionProfileDropdown(){
   const dd=$('profileDropdown');
-  const trigger=_profileDropdownTrigger||$('profileChip');
+  const sessionMenu=$('composerSessionMenu');
+  const sessionRow=$('composerSessionProfileRow');
+  const trigger=(sessionMenu&&!sessionMenu.hidden&&sessionRow)?sessionRow:(_profileDropdownTrigger||$('profileChip'));
   if(!dd||!trigger)return;
+  if(sessionMenu&&!sessionMenu.hidden&&sessionRow&&typeof _composerSessionFlyoutAction!=='undefined'&&_composerSessionFlyoutAction==='profile'&&typeof _positionSessionFlyout==='function'&&_positionSessionFlyout(dd,sessionRow)) return;
+  if(typeof _clearSessionFlyoutLayout==='function') _clearSessionFlyoutLayout(dd);
   const rect=trigger.getBoundingClientRect();
   const gap=4;
   const ddW=dd.offsetWidth||260;
@@ -6044,14 +6056,25 @@ function toggleComposerWsDropdown(){
   const mobileAction=$('composerMobileWorkspaceAction');
   const panel=$('composerMobileConfigPanel');
   const usingMobileAction=!!(panel&&panel.classList.contains('open')&&mobileAction);
-  if(!dd||(!usingMobileAction&&(!chip||chip.disabled)))return;
+  const sessionMenu=$('composerSessionMenu');
+  const usingSession=!!(sessionMenu&&!sessionMenu.hidden);
+  if(!dd||(!usingMobileAction&&!usingSession&&(!chip||chip.disabled)))return;
   const open=dd.classList.contains('open');
-  if(open){closeWsDropdown();}
+  if(open){
+    if(usingSession && typeof _composerSessionFlyoutAction!=='undefined' && _composerSessionFlyoutAction==='workspace'){
+      _positionComposerWsDropdown();
+      return;
+    }
+    closeWsDropdown();
+  }
   else{
+    const fromSessionFlyout=usingSession && typeof _composerSessionFlyoutAction!=='undefined' && _composerSessionFlyoutAction==='workspace';
+    const flyoutGen=(typeof _composerSessionFlyoutGen==='number')?_composerSessionFlyoutGen:0;
     closeProfileDropdown();
     if(typeof closeModelDropdown==='function') closeModelDropdown();
     if(typeof closeReasoningDropdown==='function') closeReasoningDropdown();
     loadWorkspaceList().then(data=>{
+      if(fromSessionFlyout && (flyoutGen!==_composerSessionFlyoutGen || _composerSessionFlyoutAction!=='workspace')) return;
       renderWorkspaceDropdownInto(dd, data.workspaces, S.session?.workspace||S._profileDefaultWorkspace||data.last||'');
       _setWorkspaceDropdownOpenState(dd,true);
       _positionComposerWsDropdown();
@@ -6073,7 +6096,13 @@ function closeWsDropdown(){
   const composerChip=$('composerWorkspaceChip');
   const mobileAction=$('composerMobileWorkspaceAction');
   if(dd)_setWorkspaceDropdownOpenState(dd,false);
-  if(composerDd)_setWorkspaceDropdownOpenState(composerDd,false);
+  if(composerDd){
+    _setWorkspaceDropdownOpenState(composerDd,false);
+    if(typeof _clearSessionFlyoutLayout==='function') _clearSessionFlyoutLayout(composerDd);
+    composerDd.style.top='';
+    composerDd.style.bottom='';
+    composerDd.style.right='';
+  }
   if(composerChip){
     composerChip.classList.remove('active');
     composerChip.setAttribute('aria-expanded','false');
@@ -6086,6 +6115,7 @@ function closeWsDropdown(){
 document.addEventListener('click',e=>{
   if(
     !e.target.closest('#composerWorkspaceChip') &&
+    !e.target.closest('#composerSessionMenu') &&
     !e.target.closest('#composerMobileWorkspaceAction') &&
     !e.target.closest('#composerWsDropdown')
   ) closeWsDropdown();
@@ -7006,7 +7036,18 @@ function renderProfileDropdown(data) {
 function toggleProfileDropdown(e) {
   const dd = $('profileDropdown');
   if (!dd) return;
-  if (dd.classList.contains('open')) { closeProfileDropdown(); return; }
+  const sessionMenu=$('composerSessionMenu');
+  const usingSession=!!(sessionMenu&&!sessionMenu.hidden);
+  if (dd.classList.contains('open')) {
+    if(usingSession && typeof _composerSessionFlyoutAction!=='undefined' && _composerSessionFlyoutAction==='profile'){
+      _positionProfileDropdown();
+      return;
+    }
+    closeProfileDropdown();
+    return;
+  }
+  const fromSessionFlyout=usingSession && typeof _composerSessionFlyoutAction!=='undefined' && _composerSessionFlyoutAction==='profile';
+  const flyoutGen=(typeof _composerSessionFlyoutGen==='number')?_composerSessionFlyoutGen:0;
   closeWsDropdown(); // close workspace dropdown if open
   if(typeof closeModelDropdown==='function') closeModelDropdown();
   // Track which element triggered the dropdown for positioning
@@ -7024,6 +7065,7 @@ function toggleProfileDropdown(e) {
 
   _profileDropdownFetchFresh().then(data => {
     if(openGen !== _profileDropdownOpenGeneration) return;
+    if(fromSessionFlyout && (flyoutGen!==_composerSessionFlyoutGen || _composerSessionFlyoutAction!=='profile')) return;
     // In single profile mode, don't show profile dropdown at all
     if (data.single_profile_mode) {
       closeProfileDropdown();
@@ -7045,14 +7087,18 @@ function toggleProfileDropdown(e) {
 function closeProfileDropdown() {
   _profileDropdownOpenGeneration++;
   const dd = $('profileDropdown');
-  if (dd) dd.classList.remove('open');
+  if (dd) {
+    dd.classList.remove('open');
+    if(typeof _clearSessionFlyoutLayout==='function') _clearSessionFlyoutLayout(dd);
+    dd.style.top='';
+  }
   const chip=$('profileChip');
   if(chip) chip.classList.remove('active');
   const tbtn=$('titlebarProfileBtn');
   if(tbtn) tbtn.classList.remove('active');
 }
 document.addEventListener('click', e => {
-  if (!e.target.closest('#profileChipWrap') && !e.target.closest('#titlebarProfileBtn') && !e.target.closest('#profileDropdown')) closeProfileDropdown();
+  if (!e.target.closest('#profileChipWrap') && !e.target.closest('#composerSessionMenu') && !e.target.closest('#titlebarProfileBtn') && !e.target.closest('#profileDropdown')) closeProfileDropdown();
 });
 window.addEventListener('resize',()=>{
   const dd=$('profileDropdown');

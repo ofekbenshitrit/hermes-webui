@@ -6261,9 +6261,12 @@ function _isSessionListUserInteracting(){
   const now=Date.now();
   const list=$('sessionList');
   const pointerOverList=Boolean(list&&(list.matches(':hover')||list.matches(':focus-within')));
+  const filterMenu=document.querySelector('.sidebar-filter-menu');
+  const pointerOverFilterMenu=Boolean(filterMenu&&(filterMenu.matches(':hover')||filterMenu.matches(':focus-within')||filterMenu.contains(document.activeElement)));
   return Boolean(
     _sessionListPointerActive ||
     pointerOverList ||
+    pointerOverFilterMenu ||
     (_sessionListLastScrollAt && now-_sessionListLastScrollAt<SESSION_LIST_INTERACTION_IDLE_MS)
   );
 }
@@ -8773,6 +8776,245 @@ function _applyProjectChipColor(chip, color){
   chip.style.setProperty('--project-chip-ink', _projectChipInk(hex));
 }
 
+function _sessionSourceTriggerLabel(filter){
+  const key=filter==='cli'?'sessions_source_cli_short':'sessions_source_webui_short';
+  const value=typeof t==='function'?t(key):'';
+  if(value&&value!==key) return value;
+  return filter==='cli'?'CLI':'WebUI';
+}
+
+function _projectFilterTriggerLabel(){
+  if(typeof _activeProject!=='undefined'&&_activeProject){
+    if(typeof NO_PROJECT_FILTER!=='undefined'&&_activeProject===NO_PROJECT_FILTER) return 'Unassigned';
+    const project=(_allProjects||[]).find(item=>item&&item.project_id===_activeProject);
+    return project&&project.name?project.name:'Project';
+  }
+  return 'All';
+}
+
+function _sidebarFilterChevron(){
+  const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');
+  svg.setAttribute('viewBox','0 0 10 5');
+  svg.setAttribute('width','10');
+  svg.setAttribute('height','5');
+  svg.setAttribute('fill','none');
+  svg.setAttribute('aria-hidden','true');
+  const path=document.createElementNS('http://www.w3.org/2000/svg','path');
+  path.setAttribute('d','M1 0.7L5 4.1L9 0.7');
+  path.setAttribute('stroke','currentColor');
+  path.setAttribute('stroke-width','1.2');
+  path.setAttribute('stroke-linecap','round');
+  path.setAttribute('stroke-linejoin','round');
+  svg.appendChild(path);
+  return svg;
+}
+
+let _sidebarFilterDismiss=null;
+function _closeSidebarFilterMenus(){
+  document.querySelectorAll('.sidebar-filter-menu').forEach(el=>el.remove());
+  document.querySelectorAll('.sidebar-filter-btn[aria-expanded="true"]').forEach(btn=>{
+    btn.setAttribute('aria-expanded','false');
+  });
+  if(_sidebarFilterDismiss){
+    document.removeEventListener('click',_sidebarFilterDismiss,true);
+    document.removeEventListener('keydown',_sidebarFilterDismiss);
+    _sidebarFilterDismiss=null;
+  }
+}
+
+function _toggleSidebarFilterMenu(btn, fill){
+  const wasOpen=btn.getAttribute('aria-expanded')==='true';
+  _closeSidebarFilterMenus();
+  if(wasOpen) return;
+  const menu=document.createElement('div');
+  menu.className='sidebar-filter-menu';
+  menu.setAttribute('role','menu');
+  fill(menu);
+  document.body.appendChild(menu);
+  const rect=btn.getBoundingClientRect();
+  const width=Math.max(rect.width,168);
+  let left=rect.left;
+  if(left+width>window.innerWidth-8) left=Math.max(8,window.innerWidth-8-width);
+  let top=rect.bottom+4;
+  menu.style.left=left+'px';
+  menu.style.top=top+'px';
+  menu.style.width=width+'px';
+  const menuRect=menu.getBoundingClientRect();
+  if(menuRect.bottom>window.innerHeight-8){
+    top=Math.max(8,rect.top-4-menuRect.height);
+    menu.style.top=top+'px';
+  }
+  btn.setAttribute('aria-expanded','true');
+  _sidebarFilterDismiss=(e)=>{
+    if(e.type==='keydown'){
+      if(e.key==='Escape') _closeSidebarFilterMenus();
+      return;
+    }
+    if(btn.contains(e.target)||menu.contains(e.target)) return;
+    _closeSidebarFilterMenus();
+  };
+  setTimeout(()=>{
+    if(!_sidebarFilterDismiss) return;
+    document.addEventListener('click',_sidebarFilterDismiss,true);
+    document.addEventListener('keydown',_sidebarFilterDismiss);
+  },0);
+}
+
+function _sidebarFilterButton(label, menuLabel){
+  const btn=document.createElement('button');
+  btn.type='button';
+  btn.className='sidebar-filter-btn session-source-tab';
+  btn.setAttribute('aria-haspopup','menu');
+  btn.setAttribute('aria-expanded','false');
+  btn.setAttribute('aria-label',menuLabel);
+  const text=document.createElement('span');
+  text.className='sidebar-filter-label';
+  text.textContent=label;
+  btn.appendChild(text);
+  btn.appendChild(_sidebarFilterChevron());
+  return btn;
+}
+
+function _renderSidebarFilterRow(list, opts){
+  const showCliOption=Boolean(opts&&(opts.showCliOption));
+  const cliSessionTabCount=opts?opts.cliSessionTabCount:0;
+  const webuiSessionTabCount=opts?opts.webuiSessionTabCount:0;
+  const hasUnprojected=Boolean(opts&&opts.hasUnprojected);
+  const row=document.createElement('div');
+  row.className='sidebar-filter-row session-source-tabs';
+  const sourceBtn=_sidebarFilterButton(
+    _sessionSourceTriggerLabel(_sessionSourceFilter),
+    _sessionSourceLabel(_sessionSourceFilter,_sessionSourceFilter==='cli'?cliSessionTabCount:webuiSessionTabCount)
+  );
+  sourceBtn.classList.add('active');
+  sourceBtn.onclick=(e)=>{
+    e.stopPropagation();
+    _toggleSidebarFilterMenu(sourceBtn,(menu)=>{
+      for(const filter of ['webui','cli']){
+        if(filter==='cli'&&!showCliOption) continue;
+        const count=filter==='cli'?cliSessionTabCount:webuiSessionTabCount;
+        const item=document.createElement('button');
+        item.type='button';
+        item.className='sidebar-filter-option session-source-tab'+(_sessionSourceFilter===filter?' active':'');
+        item.setAttribute('role','menuitem');
+        item.setAttribute('aria-pressed',_sessionSourceFilter===filter?'true':'false');
+        item.textContent=_sessionSourceLabel(filter,count);
+        item.onclick=(ev)=>{
+          ev.stopPropagation();
+          _closeSidebarFilterMenus();
+          _setSessionSourceFilter(filter);
+        };
+        menu.appendChild(item);
+      }
+    });
+  };
+  row.appendChild(sourceBtn);
+
+  const projectBtn=_sidebarFilterButton(_projectFilterTriggerLabel(),'Filter by project');
+  projectBtn.onclick=(e)=>{
+    e.stopPropagation();
+    _toggleSidebarFilterMenu(projectBtn,(menu)=>{
+      const allChip=document.createElement('button');
+      allChip.type='button';
+      allChip.className='sidebar-filter-option project-chip project-chip-all'+(!_activeProject?' active':'');
+      allChip.setAttribute('role','menuitem');
+      allChip.textContent='All';
+      _applyProjectChipColor(allChip, PROJECT_CHIP_ALL_COLOR);
+      allChip.onclick=()=>{_setActiveProjectFilter(null);};
+      menu.appendChild(allChip);
+      if(hasUnprojected){
+        const noneChip=document.createElement('button');
+        noneChip.type='button';
+        noneChip.className='project-chip no-project'+(_activeProject===NO_PROJECT_FILTER?' active':'');
+        noneChip.classList.add('sidebar-filter-option');
+        noneChip.setAttribute('role','menuitem');
+        noneChip.textContent='Unassigned';
+        _applyProjectChipColor(noneChip, PROJECT_CHIP_UNASSIGNED_COLOR);
+        noneChip.title='Show conversations not yet assigned to a project';
+        noneChip.onclick=()=>{_setActiveProjectFilter(NO_PROJECT_FILTER);};
+        menu.appendChild(noneChip);
+      }
+      if(_allProjects.length>0||hasUnprojected){
+        for(const p of _allProjects){
+          const chip=document.createElement('button');
+          chip.type='button';
+          chip.className='sidebar-filter-option project-chip'+(p.project_id===_activeProject?' active':'');
+          chip.setAttribute('role','menuitem');
+          const chipColor=p.color||(typeof PROJECT_COLORS!=='undefined'?PROJECT_COLORS[_allProjects.indexOf(p)%PROJECT_COLORS.length]:'');
+          _applyProjectChipColor(chip, chipColor);
+          const nameSpan=document.createElement('span');
+          nameSpan.textContent=p.name;
+          chip.appendChild(nameSpan);
+          let _pClickTimer=null;
+          chip.onclick=(ev)=>{
+            ev.stopPropagation();
+            clearTimeout(_pClickTimer);
+            _pClickTimer=setTimeout(()=>{_pClickTimer=null;_setActiveProjectFilter(p.project_id);},220);
+          };
+          chip.ondblclick=(ev)=>{ev.stopPropagation();clearTimeout(_pClickTimer);_pClickTimer=null;_startProjectRename(p,chip);};
+          chip.oncontextmenu=(ev)=>{ev.preventDefault();_showProjectContextMenu(ev,p,chip);};
+          // Touch long-press → context menu (mobile UX: project chips can only be
+          // deleted via the right-click menu, which has no touch equivalent).
+          let _lpTimer=null;
+          let _lpHandled=false;
+          let _lpStartX=0,_lpStartY=0;
+          chip.addEventListener('touchstart',(e)=>{
+            const t=e.changedTouches&&e.changedTouches[0];
+            if(!t) return;
+            // Clear any in-flight timer before scheduling a new one, mirroring the
+            // session-item long-press path (_clearLongPressTimer). Without this a
+            // second finger / stray touchstart orphans the prior timer, which then
+            // fires unsuppressed ~500ms later and pops the menu after the gesture
+            // was cancelled.
+            if(_lpTimer){clearTimeout(_lpTimer);_lpTimer=null;}
+            _lpHandled=false;_lpStartX=t.clientX;_lpStartY=t.clientY;
+            chip.classList.add('long-pressing');
+            _lpTimer=setTimeout(()=>{
+              _lpTimer=null;
+              if(_lpHandled) return;  // already consumed by another gesture — stale fire is a no-op
+              _lpHandled=true;
+              chip.classList.remove('long-pressing');
+              clearTimeout(_pClickTimer);_pClickTimer=null;
+              const syn={clientX:t.clientX,clientY:t.clientY,preventDefault:()=>{}};
+              _showProjectContextMenu(syn,p,chip);
+            },500);
+          },{passive:true});
+          chip.addEventListener('touchmove',(e)=>{
+            if(!_lpTimer) return;
+            const t=e.changedTouches&&e.changedTouches[0];
+            if(!t) return;
+            if(Math.abs(t.clientX-_lpStartX)>10||Math.abs(t.clientY-_lpStartY)>10){
+              clearTimeout(_lpTimer);_lpTimer=null;
+              chip.classList.remove('long-pressing');
+            }
+          },{passive:true});
+          chip.addEventListener('touchend',(e)=>{
+            clearTimeout(_lpTimer);_lpTimer=null;
+            chip.classList.remove('long-pressing');
+            if(_lpHandled){e.preventDefault();e.stopPropagation();}
+          },{passive:false});
+          chip.addEventListener('touchcancel',()=>{
+            clearTimeout(_lpTimer);_lpTimer=null;_lpHandled=false;
+            chip.classList.remove('long-pressing');
+          },{passive:true});
+          if(window._projectQuickCreate) _attachProjectQuickCreateButton(chip,p);
+          menu.appendChild(chip);
+        }
+      }
+      const addBtn=document.createElement('button');
+      addBtn.type='button';
+      addBtn.className='project-create-btn sidebar-filter-option';
+      addBtn.textContent='New project';
+      addBtn.title='New project';
+      addBtn.setAttribute('role','menuitem');
+      addBtn.onclick=(ev)=>{ev.stopPropagation();_startProjectCreate(menu,addBtn);};
+      menu.appendChild(addBtn);
+    });
+  };
+  row.appendChild(projectBtn);
+  list.appendChild(row);
+}
+
 function _pinnedGroupTitle(){
   let scope='All';
   if(typeof _activeProject!=='undefined'&&_activeProject){
@@ -8912,6 +9154,7 @@ function renderSessionListFromCache(){
   const committedSwipeDuration=_sessionPrefersReducedMotion()?0:SESSION_SWIPE_DURATION_MS;
   const committedSwipeReflowDelay=Math.max(0,committedSwipeDuration-SESSION_SWIPE_REFLOW_LEAD_MS);
   const listScrollTopBeforeRender=list.scrollTop||0;
+  if(typeof _closeSidebarFilterMenus==='function') _closeSidebarFilterMenus();
   list.innerHTML='';
   // #4671: belt-and-suspenders. The authoritative skeleton-clear happens in
   // _applySessionListPayload (once fresh data is in hand) BEFORE this function is
@@ -8943,118 +9186,16 @@ function renderSessionListFromCache(){
     const note=_renderSessionListLoadErrorNote();
     if(note) list.appendChild(note);
   }
-  if(window._showCliSessions || cliSessionCount>0){
-    const sourceTabs=document.createElement('div');
-    sourceTabs.className='session-source-tabs';
-    for(const filter of ['webui','cli']){
-      const count=filter==='cli'?cliSessionTabCount:webuiSessionTabCount;
-      const btn=document.createElement('button');
-      btn.type='button';
-      btn.className='session-source-tab'+(_sessionSourceFilter===filter?' active':'');
-      btn.textContent=_sessionSourceLabel(filter,count);
-      btn.setAttribute('aria-pressed', _sessionSourceFilter===filter?'true':'false');
-      btn.onclick=()=>_setSessionSourceFilter(filter);
-      sourceTabs.appendChild(btn);
-    }
-    list.appendChild(sourceTabs);
-  }
-  // Project filter bar — show when there are real projects OR there are
-  // unassigned sessions (so the Unassigned chip has something to filter to).
+  // Session source and project pickers. The row is always visible; the CLI
+  // option and the Unassigned option stay gated on the same conditions as
+  // the previous tabs and chips.
   const hasUnprojected=_sidebarHasUnprojectedRows(profileFiltered, projectIdFor);
-  if(_allProjects.length>0||hasUnprojected){
-    const bar=document.createElement('div');
-    bar.className='project-bar';
-    // "All" chip
-    const allChip=document.createElement('span');
-    allChip.className='project-chip project-chip-all'+(!_activeProject?' active':'');
-    allChip.textContent='All';
-    _applyProjectChipColor(allChip, PROJECT_CHIP_ALL_COLOR);
-    allChip.onclick=()=>{_setActiveProjectFilter(null);};
-    bar.appendChild(allChip);
-    // "Unassigned" chip — only when there are sessions with no project to
-    // filter to. Hidden in the common case where every session is already
-    // organized, to keep the chip bar uncluttered.
-    if(hasUnprojected){
-      const noneChip=document.createElement('span');
-      noneChip.className='project-chip no-project'+(_activeProject===NO_PROJECT_FILTER?' active':'');
-      noneChip.textContent='Unassigned';
-      _applyProjectChipColor(noneChip, PROJECT_CHIP_UNASSIGNED_COLOR);
-      noneChip.title='Show conversations not yet assigned to a project';
-      noneChip.onclick=()=>{_setActiveProjectFilter(NO_PROJECT_FILTER);};
-      bar.appendChild(noneChip);
-    }
-    // Project chips
-    for(const p of _allProjects){
-      const chip=document.createElement('span');
-      chip.className='project-chip'+(p.project_id===_activeProject?' active':'');
-      const chipColor=p.color||(typeof PROJECT_COLORS!=='undefined'?PROJECT_COLORS[_allProjects.indexOf(p)%PROJECT_COLORS.length]:'');
-      _applyProjectChipColor(chip, chipColor);
-      const nameSpan=document.createElement('span');
-      nameSpan.textContent=p.name;
-      chip.appendChild(nameSpan);
-      let _pClickTimer=null;
-      chip.onclick=(e)=>{
-        clearTimeout(_pClickTimer);
-        _pClickTimer=setTimeout(()=>{_pClickTimer=null;_setActiveProjectFilter(p.project_id);},220);
-      };
-      chip.ondblclick=(e)=>{e.stopPropagation();clearTimeout(_pClickTimer);_pClickTimer=null;_startProjectRename(p,chip);};
-      chip.oncontextmenu=(e)=>{e.preventDefault();_showProjectContextMenu(e,p,chip);};
-      // Touch long-press → context menu (mobile UX: project chips can only be
-      // deleted via the right-click menu, which has no touch equivalent).
-      let _lpTimer=null;
-      let _lpHandled=false;
-      let _lpStartX=0,_lpStartY=0;
-      chip.addEventListener('touchstart',(e)=>{
-        const t=e.changedTouches&&e.changedTouches[0];
-        if(!t) return;
-        // Clear any in-flight timer before scheduling a new one, mirroring the
-        // session-item long-press path (_clearLongPressTimer). Without this a
-        // second finger / stray touchstart orphans the prior timer, which then
-        // fires unsuppressed ~500ms later and pops the menu after the gesture
-        // was cancelled.
-        if(_lpTimer){clearTimeout(_lpTimer);_lpTimer=null;}
-        _lpHandled=false;_lpStartX=t.clientX;_lpStartY=t.clientY;
-        chip.classList.add('long-pressing');
-        _lpTimer=setTimeout(()=>{
-          _lpTimer=null;
-          if(_lpHandled) return;  // already consumed by another gesture — stale fire is a no-op
-          _lpHandled=true;
-          chip.classList.remove('long-pressing');
-          clearTimeout(_pClickTimer);_pClickTimer=null;
-          const syn={clientX:t.clientX,clientY:t.clientY,preventDefault:()=>{}};
-          _showProjectContextMenu(syn,p,chip);
-        },500);
-      },{passive:true});
-      chip.addEventListener('touchmove',(e)=>{
-        if(!_lpTimer) return;
-        const t=e.changedTouches&&e.changedTouches[0];
-        if(!t) return;
-        if(Math.abs(t.clientX-_lpStartX)>10||Math.abs(t.clientY-_lpStartY)>10){
-          clearTimeout(_lpTimer);_lpTimer=null;
-          chip.classList.remove('long-pressing');
-        }
-      },{passive:true});
-      chip.addEventListener('touchend',(e)=>{
-        clearTimeout(_lpTimer);_lpTimer=null;
-        chip.classList.remove('long-pressing');
-        if(_lpHandled){e.preventDefault();e.stopPropagation();}
-      },{passive:false});
-      chip.addEventListener('touchcancel',()=>{
-        clearTimeout(_lpTimer);_lpTimer=null;_lpHandled=false;
-        chip.classList.remove('long-pressing');
-      },{passive:true});
-      if(window._projectQuickCreate) _attachProjectQuickCreateButton(chip,p);
-      bar.appendChild(chip);
-    }
-    // Create button
-    const addBtn=document.createElement('button');
-    addBtn.className='project-create-btn';
-    addBtn.textContent='+';
-    addBtn.title='New project';
-    addBtn.onclick=(e)=>{e.stopPropagation();_startProjectCreate(bar,addBtn);};
-    bar.appendChild(addBtn);
-    list.appendChild(bar);
-  }
+  _renderSidebarFilterRow(list,{
+    showCliOption:Boolean(window._showCliSessions||cliSessionCount>0),
+    cliSessionTabCount,
+    webuiSessionTabCount,
+    hasUnprojected,
+  });
   // Profile filter toggle (show sessions from other profiles).
   // Cross-profile rows live SERVER-SIDE behind ?all_profiles=1, so the toggle
   // must trigger a refetch — there's no client-cached aggregate to slice through.
