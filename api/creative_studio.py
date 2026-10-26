@@ -1083,6 +1083,8 @@ def handle_creative_post(handler, parsed, body: dict):
             body.get("text") or "",
             scope=str(body.get("scope") or "stage"),
             field=str(body.get("field") or ""),
+            model=str(body.get("model") or ""),
+            model_provider=str(body.get("model_provider") or ""),
         ))
     if path == "/api/creative-studio/assist":
         return _http_call(handler, lambda: assist_message(
@@ -1232,8 +1234,135 @@ def _chat_context_lines(project: dict, stage: str, scope: str, field: str = "") 
     return lines, missing
 
 
-def post_studio_chat(project_id: str, stage: str, text: str, scope: str = "stage", field: str = "") -> dict:
-    """Append a studio thread turn. Writes a proposal only when the user names one."""
+def _suggestion_targets(project: dict, stage: str, scope: str, field: str) -> list[dict]:
+    if scope == "field" and field:
+        names = [field]
+    else:
+        names = list(FIELDS.get(stage) or ())
+    targets = []
+    row = (project.get("stages") or {}).get(stage) or {}
+    slots = row.get("fields") or {}
+    for name in names[:6]:
+        slot = slots.get(name) or {}
+        targets.append({
+            "field": name,
+            "text": (slot.get("text") or "").strip(),
+        })
+    return targets
+
+
+def _parse_suggestion_payload(raw: str, allowed: set[str]) -> list[dict]:
+    text = (raw or "").strip()
+    if not text:
+        return []
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.I)
+        text = re.sub(r"\s*```$", "", text)
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", text, flags=re.S)
+        if not match:
+            return []
+        try:
+            data = json.loads(match.group(0))
+        except json.JSONDecodeError:
+            return []
+    items = data.get("suggestions") if isinstance(data, dict) else None
+    if not isinstance(items, list):
+        return []
+    found = []
+    seen = set()
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("field") or "").strip().lower().replace(" ", "_")
+        body = str(item.get("text") or "").strip()
+        if name not in allowed or name in seen or not body:
+            continue
+        seen.add(name)
+        found.append({"field": name, "text": body[:4000]})
+    return found
+
+
+def complete_studio_prompt(system: str, user: str, model: str = "", provider: str = "") -> str:
+    """Ask the configured Hermes model for field suggestions.
+
+    A model chosen in the studio composer overrides the default. Tests and
+    explicit opt-out skip the model so a studio chat never calls the network
+    unless the running server is actually serving a person.
+    """
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return ""
+    if os.environ.get("HERMES_WEBUI_STUDIO_LLM", "1").strip().lower() in {"0", "false", "off"}:
+        return ""
+    try:
+        from api.routes import _llm_update_summary
+        return (_llm_update_summary(
+            system,
+            user,
+            model_override=(model or "").strip() or None,
+            provider_override=(provider or "").strip() or None,
+        ) or "").strip()
+    except Exception:
+        return ""
+
+
+def _draft_field_suggestions(project: dict, stage: str, scope: str, field: str, user_text: str, lines: list[str], model: str = "", provider: str = "") -> list[dict]:
+    targets = _suggestion_targets(project, stage, scope, field)
+    if not targets:
+        return []
+    blocks = []
+    for item in targets:
+        state = item["text"] or "(empty)"
+        blocks.append(f"{item['field']}: {state}")
+    context = "\n".join(lines[:24]) or "(no other saved field text)"
+    system = (
+        "You draft Creative Studio field text. Reply with JSON only, no markdown: "
+        '{"suggestions":[{"field":"name","text":"replacement"}]}. '
+        "Return one suggestion for every requested field. "
+        "If the field is empty, write a first answer. "
+        "If the field already has text, rewrite the whole value using the user's note. "
+        "Do not invent numbers, testimonials, or product capabilities that are not in the context. "
+        "When context is thin, keep the line short and exploratory."
+    )
+    user = (
+        f"Project: {project.get('name')}\n"
+        f"Stage: {stage}\n"
+        f"User note:\n{user_text}\n\n"
+        f"Saved context:\n{context}\n\n"
+        "Fields to revise:\n" + "\n".join(blocks)
+    )
+    if model or provider:
+        raw = complete_studio_prompt(system, user, model, provider)
+    else:
+        raw = complete_studio_prompt(system, user)
+    allowed = {item["field"] for item in targets}
+    current = {item["field"]: item["text"] for item in targets}
+    drafts = []
+    for item in _parse_suggestion_payload(raw, allowed):
+        if item["text"] == current.get(item["field"], ""):
+            continue
+        drafts.append({
+            "field": item["field"],
+            "text": item["text"],
+            "previous": current.get(item["field"], ""),
+        })
+    return drafts
+
+
+def _studio_model_choice(model: str, provider: str) -> tuple[str, str]:
+    model = (model or "").strip()
+    provider = (provider or "").strip()
+    if len(model) > 300 or len(provider) > 80:
+        raise StudioError("unknown model")
+    if any(char in model or char in provider for char in "\n\r\x00"):
+        raise StudioError("unknown model")
+    return model, provider
+
+
+def post_studio_chat(project_id: str, stage: str, text: str, scope: str = "stage", field: str = "", model: str = "", model_provider: str = "") -> dict:
+    """Append a studio thread turn. A suggestion replaces a field only when applied."""
     cleaned = (text or "").strip()
     if not cleaned:
         raise StudioError("message is required")
@@ -1251,6 +1380,7 @@ def post_studio_chat(project_id: str, stage: str, text: str, scope: str = "stage
     else:
         scope = "stage"
         field = ""
+    model, model_provider = _studio_model_choice(model, model_provider)
     saved = []
     for match in _PROPOSAL_LINE.finditer(cleaned):
         raw_field = match.group(1).strip().lower().replace(" ", "_")
@@ -1266,12 +1396,38 @@ def post_studio_chat(project_id: str, stage: str, text: str, scope: str = "stage
             if raw_field not in FIELDS[owner]:
                 continue
         result = save_proposal(project_id, owner, raw_field, body, discussion=cleaned[:500])
+        slot_text = ""
+        try:
+            slot_text = ((get_project(project_id, field=raw_field).get("data") or {}).get("text") or "")
+        except StudioError:
+            slot_text = ""
         saved.append({
             "id": result["proposal"]["id"],
             "stage": owner,
             "field": raw_field,
             "text": body,
+            "previous": slot_text,
         })
+    if not saved:
+        with _lock_for(_profile_dir()):
+            preview = _load(project_id)
+            preview_lines, _preview_missing = _chat_context_lines(preview, stage, scope, field)
+        for draft in _draft_field_suggestions(
+            preview, stage, scope, field, cleaned, preview_lines, model=model, provider=model_provider,
+        ):
+            try:
+                result = save_proposal(
+                    project_id, stage, draft["field"], draft["text"], discussion=cleaned[:500],
+                )
+            except StudioError:
+                continue
+            saved.append({
+                "id": result["proposal"]["id"],
+                "stage": stage,
+                "field": draft["field"],
+                "text": draft["text"],
+                "previous": draft["previous"],
+            })
     with _lock_for(_profile_dir()):
         project = _load(project_id)
         lines, missing = _chat_context_lines(project, stage, scope, field)
@@ -1286,30 +1442,35 @@ def post_studio_chat(project_id: str, stage: str, text: str, scope: str = "stage
             "created_at": now,
         }
         if scope == "field":
-            where = f", {stage}.{field} only."
+            where = f"{stage}.{field} only"
         elif scope == "stage":
-            where = f", stage {stage}."
+            where = f"the {stage} stage"
         else:
-            where = ", across the project."
-        parts = [
-            f"Looking at {project['name']}" + where,
-        ]
+            where = "the whole project"
+        parts = [f"{project['name']}, {where}."]
         if lines:
-            parts.append("Saved context:\n" + "\n".join(lines[:24]))
+            parts.append("Already on the project:\n" + "\n".join(lines[:24]))
         else:
-            parts.append("This view has no saved field text yet. Hermes product notes stay outside the project until you write a field or a proposal.")
-        if missing:
-            parts.append("Still empty for suggestions on this stage: " + ", ".join(missing[:12]) + ".")
+            parts.append("Nothing is saved here yet, so this chat can't fill the fields in.")
+        stage_missing = [
+            item.split(".", 1)[-1].replace("_", " ")
+            for item in missing
+            if item.startswith(stage + ".")
+        ]
+        if stage_missing and not lines:
+            parts.append("Still open: " + ", ".join(dict.fromkeys(stage_missing)) + ".")
+        elif missing and not lines:
+            parts.append("This stage is waiting on product notes that aren't in the project yet.")
         if saved:
-            parts.append(
-                "Saved "
-                + ", ".join(f"{item['field']} proposal" for item in saved)
-                + ". The selected field is unchanged until you apply it."
-            )
+            parts = [
+                f"Suggested replacements for {project['name']}, {where}. "
+                "The fields stay as they are until you replace them."
+            ]
         else:
+            example = field if scope == "field" and field else (FIELDS.get(stage) or ("outcome",))[0]
             parts.append(
-                "Nothing was written to the project. To keep a line as a proposal, send "
-                "`proposal field_name: the line`. Applying it is a separate step."
+                "Hermes didn't return a suggestion. To hold a line yourself, send "
+                f"proposal {example}: your line, then replace the field."
             )
         assistant = {
             "id": _new_id(),

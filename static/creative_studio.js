@@ -287,6 +287,7 @@ function _creativeRestoreOpenDetails(){
 function creativeRenderWorkspace(){
   const root = document.getElementById('creativeWorkspace');
   if(!root) return;
+  closeCreativeModelDropdown();
   _creativeRememberOpenDetails();
   if(_creativeCreating){
     root.innerHTML = _creativeCreateMarkup();
@@ -337,6 +338,7 @@ function creativeRenderWorkspace(){
   const log = document.getElementById('creativeChatLog');
   if(log) log.scrollTop = log.scrollHeight;
   _creativeRestoreOpenDetails();
+  _creativeMountModelPicker();
   const fields = document.getElementById('creativeFields');
   if(fields && !fields.dataset.detailsBound){
     fields.dataset.detailsBound = '1';
@@ -403,7 +405,7 @@ function _creativeStageMarkup(stage){
     extra = `<div class="creative-card"><strong>Concept checks</strong><p class="creative-help">Single idea, plausibility, visualizability, and a clear villain or false solution.</p><div class="creative-checks">${boxes}</div></div>`;
   }
   const exportBox = _creativeExportOpen ? `<div class="creative-card" id="creativeExportCard"><pre id="creativeExportPreview"></pre><button type="button" class="creative-inline-btn" onclick="creativeCopyExport()">Copy Markdown</button></div>` : '';
-  return `<div class="creative-stage-head"><div><h2>${_creativeEsc(meta ? meta.title : '')}</h2><p class="creative-help">Ask in the side chat to suggest, clarify, or critique. Nothing is selected for you.</p></div><label class="creative-status-select">Stage <select aria-label="Stage status" onchange="creativeMarkStage(this.value)">${options}</select></label></div>${exportBox}${extra}${_creativeFieldInputs(stage)}`;
+  return `<div class="creative-stage-head"><div><h2>${_creativeEsc(meta ? meta.title : '')}</h2><p class="creative-help">Ask Hermes to suggest empty fields or revise filled ones. Nothing is selected for you until you replace a field.</p></div><label class="creative-status-select">Stage <select aria-label="Stage status" onchange="creativeMarkStage(this.value)">${options}</select></label></div>${exportBox}${extra}${_creativeFieldInputs(stage)}`;
 }
 
 function creativeIsolateField(field){
@@ -423,22 +425,31 @@ function _creativeChatMarkup(){
   const stageMeta = CREATIVE_STAGES.find(item => item.id === _creativeStage);
   const focusLabel = focus ? _creativeLabel(focus) : '';
   const history = messages.length ? messages.map(item => {
-    return `<article class="creative-msg creative-msg-${_creativeEsc(item.role || 'assistant')}"><p>${_creativeEsc(item.text)}</p></article>`;
-  }).join('') : `<p class="creative-help" id="creativeChatEmpty">${focus ? `Nothing on ${ _creativeEsc(focusLabel) } yet.` : 'Ask about this stage. A line becomes a proposal only if you write proposal field_name: the line.'}</p>`;
+    return `<article class="creative-msg creative-msg-${_creativeEsc(item.role || 'assistant')}"><p>${_creativeEsc(item.text)}</p>${item.role === 'assistant' ? _creativeMessageSuggestions(item) : ''}</article>`;
+  }).join('') : `<p class="creative-help" id="creativeChatEmpty">${focus ? `Nothing on ${ _creativeEsc(focusLabel) } yet.` : 'Ask Hermes to suggest the empty fields, or to revise the ones you already filled.'}</p>`;
   const pending = _creativeOpenProposals();
   const contextLine = focus
     ? `${project.name} · ${focusLabel}`
     : `${project.name} · ${stageMeta ? stageMeta.label : _creativeStage}`;
   const clear = focus ? `<button type="button" class="creative-text-btn" onclick="creativeIsolateField('${focus}')">Leave field</button>` : '';
   const scope = focus ? '' : `<button type="button" class="creative-scope-chip" id="creativeChatScope" aria-pressed="false" onclick="creativeToggleProjectScope(event)">Whole project</button>`;
-  const placeholder = focus ? `Message about ${_creativeEsc(focusLabel)}` : 'Message Hermes…';
+  const placeholder = focus ? `Revise ${_creativeEsc(focusLabel)}` : 'Ask Hermes…';
+  const modelPicker = `<div class="composer-model-wrap">
+      <button class="composer-model-chip" id="creativeModelChip" type="button" onclick="toggleCreativeModelDropdown(event)" title="Conversation model" aria-label="Conversation model" aria-haspopup="listbox" aria-expanded="false" aria-controls="creativeModelDropdown">
+        <span class="composer-model-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M15 2v2"/><path d="M15 20v2"/><path d="M2 15h2"/><path d="M2 9h2"/><path d="M20 15h2"/><path d="M20 9h2"/><path d="M9 2v2"/><path d="M9 20v2"/></svg></span>
+        <span class="composer-model-label" id="creativeModelLabel">Model</span>
+        <span class="composer-model-chevron" aria-hidden="true"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
+      </button>
+      <select id="creativeModelSelect" class="composer-model-select" title="Conversation model" aria-hidden="true" tabindex="-1"></select>
+      <div class="model-dropdown" id="creativeModelDropdown"></div>
+    </div>`;
   return `<header class="creative-chat-head"><p>${_creativeEsc(contextLine)}</p>${clear}</header>
     <div class="creative-chat-log" id="creativeChatLog">${_creativeChatError ? `<p class="creative-save failed" role="alert">${_creativeEsc(_creativeChatError)}</p>` : ''}${history}${pending}</div>
     <form class="composer-wrap creative-composer" onsubmit="creativeSendChat(); return false;">
       <div class="composer-box" id="creativeComposerBox">
         <textarea id="creativeChatInput" dir="auto" rows="1" enterkeyhint="enter" placeholder="${placeholder}" onkeydown="creativeChatKey(event)" ${_creativeChatBusy ? 'disabled' : ''}></textarea>
         <div class="composer-footer">
-          <div class="composer-left">${scope}</div>
+          <div class="composer-left">${modelPicker}${scope}</div>
           <div class="composer-right">
             <button type="submit" class="send-btn" aria-label="Send" ${_creativeChatBusy ? 'disabled' : ''}>
               <svg viewBox="0 0 10 10" fill="none" aria-hidden="true"><path d="M0.93 4.775L5.00143 0.5M5.00143 0.5L9.07286 4.775M5.00143 0.5V10" stroke="currentColor" stroke-width="0.7" stroke-linejoin="round"/></svg>
@@ -463,6 +474,41 @@ function creativeChatKey(event){
   }
 }
 
+function _creativeLiveProposal(proposalId){
+  const stages = (_creativeProject && _creativeProject.stages) || {};
+  for(const stage of Object.values(stages)){
+    for(const slot of Object.values((stage && stage.fields) || {})){
+      for(const proposal of slot.proposals || []){
+        if(proposal.id === proposalId) return proposal;
+      }
+    }
+  }
+  return null;
+}
+
+function _creativeMessageSuggestions(item){
+  const cards = (item.proposals || []).map(itemProposal => {
+    const live = _creativeLiveProposal(itemProposal.id);
+    if(live && live.status !== 'proposed' && live.status !== 'in_discussion') return '';
+    const label = _creativeLabel(itemProposal.field || '');
+    const previous = (itemProposal.previous || '').trim();
+    const next = ((live && (live.revised_text || live.text)) || itemProposal.text || '').trim();
+    const before = previous
+      ? `<div class="creative-suggest-block"><span>Now</span><p>${_creativeEsc(previous)}</p></div>`
+      : `<div class="creative-suggest-block"><span>Now</span><p>Empty</p></div>`;
+    return `<article class="creative-suggest" data-proposal="${_creativeEsc(itemProposal.id)}">
+      <div class="creative-suggest-kicker">Replace ${_creativeEsc(label)}</div>
+      ${before}
+      <div class="creative-suggest-block creative-suggest-next"><span>Suggestion</span><p>${_creativeEsc(next)}</p></div>
+      <div class="creative-actions">
+        <button type="button" class="creative-primary" onclick="creativeProposalAction('${itemProposal.id}','accept')">Replace field</button>
+        <button type="button" onclick="creativeProposalAction('${itemProposal.id}','dismiss')">Dismiss</button>
+      </div>
+    </article>`;
+  }).join('');
+  return cards;
+}
+
 function _creativeOpenProposals(){
   const stage = _creativeProject.stages[_creativeStage];
   if(!stage) return '';
@@ -472,12 +518,15 @@ function _creativeOpenProposals(){
     (slot.proposals || []).forEach(proposal => {
       if(proposal.status === 'dismissed' || proposal.status === 'accepted' || proposal.status === 'edited_accepted') return;
       const label = _creativeLabel(field);
-      cards.push(`<article class="creative-card" data-proposal="${_creativeEsc(proposal.id)}">
-        <div><strong>${_creativeEsc(label)}</strong> · proposal</div>
-        <p>${_creativeEsc(proposal.revised_text || proposal.text)}</p>
-        <div class="creative-actions creative-quiet-actions">
-          <button type="button" onclick="creativeProposalAction('${proposal.id}','accept')">Apply to ${_creativeEsc(label)}</button>
-          <button type="button" onclick="creativeProposalAction('${proposal.id}','alternative')">Save as alternative</button>
+      const shownInThread = (_creativeProject.chat || []).some(message =>
+        (message.proposals || []).some(item => item.id === proposal.id)
+      );
+      if(shownInThread) return;
+      cards.push(`<article class="creative-suggest" data-proposal="${_creativeEsc(proposal.id)}">
+        <div class="creative-suggest-kicker">Replace ${_creativeEsc(label)}</div>
+        <div class="creative-suggest-block creative-suggest-next"><span>Suggestion</span><p>${_creativeEsc(proposal.revised_text || proposal.text)}</p></div>
+        <div class="creative-actions">
+          <button type="button" class="creative-primary" onclick="creativeProposalAction('${proposal.id}','accept')">Replace field</button>
           <button type="button" onclick="creativeProposalAction('${proposal.id}','dismiss')">Dismiss</button>
         </div>
       </article>`);
@@ -512,12 +561,171 @@ function _creativeFieldInputs(stage){
   }).join('');
 }
 
+let _creativeModel = '';
+let _creativeModelProvider = '';
+let _creativeModelDropdownHome = null;
+
+function _creativeSyncModelChip(){
+  const sel = document.getElementById('creativeModelSelect');
+  const label = document.getElementById('creativeModelLabel');
+  const chip = document.getElementById('creativeModelChip');
+  if(!sel || !label) return;
+  const opt = sel.selectedOptions && sel.selectedOptions[0];
+  const text = (opt && opt.textContent) || (typeof getModelLabel === 'function' ? getModelLabel(sel.value || '') : '') || 'Model';
+  label.textContent = text.trim() || 'Model';
+  if(chip) chip.title = sel.value || text;
+}
+
+function _creativeRememberModel(){
+  const sel = document.getElementById('creativeModelSelect');
+  if(!sel || !sel.value) return;
+  const state = typeof _modelStateForSelect === 'function'
+    ? _modelStateForSelect(sel, sel.value)
+    : {model: sel.value, model_provider: ''};
+  _creativeModel = state.model || sel.value;
+  _creativeModelProvider = state.model_provider || '';
+}
+
+function _creativeCopyModelOptions(){
+  const source = document.getElementById('modelSelect');
+  const sel = document.getElementById('creativeModelSelect');
+  if(!sel) return;
+  if(source && source.options.length){
+    sel.innerHTML = source.innerHTML;
+  }else if(typeof populateModelDropdown === 'function'){
+    populateModelDropdown().then(() => {
+      const fresh = document.getElementById('modelSelect');
+      const target = document.getElementById('creativeModelSelect');
+      if(fresh && target && fresh.options.length){
+        target.innerHTML = fresh.innerHTML;
+        _creativeApplyRememberedModel();
+      }
+    }).catch(() => {});
+  }
+  _creativeApplyRememberedModel();
+}
+
+function _creativeApplyRememberedModel(){
+  const sel = document.getElementById('creativeModelSelect');
+  const source = document.getElementById('modelSelect');
+  if(!sel) return;
+  const model = _creativeModel || (source && source.value) || '';
+  const provider = _creativeModel ? _creativeModelProvider : '';
+  if(model && typeof _applyModelToDropdown === 'function'){
+    const applied = _applyModelToDropdown(model, sel, provider || null);
+    if(!applied && source && source.value) sel.value = source.value;
+  }else if(source && source.value){
+    sel.value = source.value;
+  }
+  _creativeRememberModel();
+  _creativeSyncModelChip();
+}
+
+function _creativeMountModelPicker(){
+  _creativeCopyModelOptions();
+}
+
+function _creativeRestoreModelDropdown(){
+  const dd = document.getElementById('creativeModelDropdown');
+  if(!dd) return;
+  dd.classList.remove('open', 'model-dropdown--floating');
+  dd.removeAttribute('style');
+  const home = _creativeModelDropdownHome;
+  if(home && home.parent && home.parent.isConnected && dd.parentNode !== home.parent){
+    home.parent.insertBefore(dd, home.next);
+  }
+  _creativeModelDropdownHome = null;
+}
+
+function closeCreativeModelDropdown(){
+  const chip = document.getElementById('creativeModelChip');
+  _creativeRestoreModelDropdown();
+  if(chip){
+    chip.classList.remove('active');
+    chip.setAttribute('aria-expanded', 'false');
+  }
+}
+
+function _creativePositionModelDropdown(){
+  const dd = document.getElementById('creativeModelDropdown');
+  const chip = document.getElementById('creativeModelChip');
+  if(!dd || !chip) return;
+  if(!_creativeModelDropdownHome){
+    _creativeModelDropdownHome = {parent: dd.parentNode, next: dd.nextSibling};
+  }
+  if(dd.parentNode !== document.body) document.body.appendChild(dd);
+  dd.classList.add('model-dropdown--floating');
+  const rect = chip.getBoundingClientRect();
+  const margin = 8;
+  const width = Math.min(420, Math.max(240, window.innerWidth - margin * 2));
+  let left = rect.left;
+  if(left + width > window.innerWidth - margin) left = Math.max(margin, window.innerWidth - width - margin);
+  dd.style.left = left + 'px';
+  dd.style.width = width + 'px';
+  dd.style.right = 'auto';
+  dd.style.bottom = 'auto';
+  const spaceAbove = Math.max(160, rect.top - margin - 6);
+  dd.style.maxHeight = Math.min(spaceAbove, Math.round(window.innerHeight * 0.7)) + 'px';
+  const height = dd.offsetHeight || 280;
+  dd.style.top = Math.max(margin, rect.top - height - 6) + 'px';
+}
+
+function selectCreativeModelFromDropdown(value, preferredProviderId){
+  const sel = document.getElementById('creativeModelSelect');
+  if(!sel){ closeCreativeModelDropdown(); return; }
+  const provider = String(preferredProviderId || '').trim() || null;
+  if(typeof _ensureModelOptionInDropdown === 'function'){
+    _ensureModelOptionInDropdown(value, sel, provider);
+  }else{
+    sel.value = value;
+  }
+  _creativeRememberModel();
+  if(provider) _creativeModelProvider = provider;
+  _creativeSyncModelChip();
+  closeCreativeModelDropdown();
+}
+
+function toggleCreativeModelDropdown(event){
+  if(event){ event.preventDefault(); event.stopPropagation(); }
+  const dd = document.getElementById('creativeModelDropdown');
+  const chip = document.getElementById('creativeModelChip');
+  const sel = document.getElementById('creativeModelSelect');
+  if(!dd || !chip || !sel) return;
+  if(dd.classList.contains('open')){ closeCreativeModelDropdown(); return; }
+  if(typeof closeModelDropdown === 'function') closeModelDropdown();
+  if(typeof closeSettingsModelDropdown === 'function') closeSettingsModelDropdown();
+  _creativeCopyModelOptions();
+  if(typeof renderModelDropdown !== 'function') return;
+  renderModelDropdown({
+    dropdownId: 'creativeModelDropdown',
+    selectId: 'creativeModelSelect',
+    forceOpenKey: 'creative',
+    closeDropdown: closeCreativeModelDropdown,
+    selectModel: selectCreativeModelFromDropdown,
+    scopeNoteText: 'Used for Creative Studio chat replies.',
+  });
+  dd.classList.add('open');
+  chip.classList.add('active');
+  chip.setAttribute('aria-expanded', 'true');
+  _creativePositionModelDropdown();
+  const activeRow = dd.querySelector('.model-opt.active');
+  if(activeRow && typeof activeRow.scrollIntoView === 'function') activeRow.scrollIntoView({block: 'nearest'});
+}
+
+document.addEventListener('click', event => {
+  if(event.target.closest('#creativeModelChip') || event.target.closest('#creativeModelDropdown')) return;
+  closeCreativeModelDropdown();
+});
+
 async function creativeSendChat(){
   if(!_creativeProject || _creativeChatBusy) return;
   const input = document.getElementById('creativeChatInput');
   const text = input ? input.value.trim() : '';
   if(!text) return;
   const scopeBox = document.getElementById('creativeChatScope');
+  _creativeRememberModel();
+  const model = _creativeModel;
+  const modelProvider = _creativeModelProvider;
   _creativeChatBusy = true;
   _creativeChatError = '';
   creativeRenderWorkspace();
@@ -531,6 +739,8 @@ async function creativeSendChat(){
         text,
         scope: _creativeFocusField ? 'field' : (scopeBox && scopeBox.getAttribute('aria-pressed') === 'true' ? 'project' : 'stage'),
         field: _creativeFocusField || '',
+        model,
+        model_provider: modelProvider,
       }),
     });
     _creativeProject.chat = result.chat || _creativeProject.chat || [];

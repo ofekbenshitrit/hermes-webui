@@ -16080,7 +16080,13 @@ def _resolve_new_session_workspace(body, visible_prev_session_id, profile=None):
     return str(workspace)
 
 
-def _llm_update_summary(system_prompt: str, user_prompt: str, active_profile: str | None = None) -> str:
+def _llm_update_summary(
+    system_prompt: str,
+    user_prompt: str,
+    active_profile: str | None = None,
+    model_override: str | None = None,
+    provider_override: str | None = None,
+) -> str:
     from api import profiles as profiles_api
 
     profile = active_profile or profiles_api.get_active_profile_name() or "default"
@@ -16100,7 +16106,14 @@ def _llm_update_summary(system_prompt: str, user_prompt: str, active_profile: st
             {"role": "user", "content": user_prompt},
         ]
 
-        _main_model, _main_provider, _main_base_url = resolve_model_provider(get_effective_default_model())
+        if model_override:
+            _main_model, _main_provider, _main_base_url = resolve_model_provider(
+                model_override, explicitly_picked=True,
+            )
+            if provider_override:
+                _main_provider = provider_override
+        else:
+            _main_model, _main_provider, _main_base_url = resolve_model_provider(get_effective_default_model())
         _main_api_key = None
         _rt = None
         try:
@@ -16134,7 +16147,9 @@ def _llm_update_summary(system_prompt: str, user_prompt: str, active_profile: st
         try:
             from agent.auxiliary_client import get_text_auxiliary_client
 
-            aux_client, aux_model = get_text_auxiliary_client(
+            # A studio (or other caller) model pick must be the model that
+            # answers. The compression auxiliary would ignore that pick.
+            aux_client, aux_model = (None, None) if model_override else get_text_auxiliary_client(
                 "compression",
                 main_runtime=main_runtime,
             )

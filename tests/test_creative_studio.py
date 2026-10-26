@@ -242,11 +242,16 @@ def test_static_panel_wires_stage_switch_proposals_and_export():
     assert "function creativeSetStage" in script
     assert "function creativeProposalAction" in script
     assert "function creativeSendChat" in script
+    assert 'id="creativeModelChip"' in script
+    assert "toggleCreativeModelDropdown" in script
+    assert "renderModelDropdown" in script
     assert "role=\"tablist\"" in script
     assert "Suggest directions" not in script
     assert "function creativeExport" in script
     assert "function creativeCopyExport" in script
-    assert "Nothing is selected for you." in script
+    assert "Nothing is selected for you until you replace a field." in script
+    assert "Message Hermes" not in script
+    assert "Replace field" in script
 
 
 def test_studio_chat_persists_without_changing_the_field(studio):
@@ -254,6 +259,11 @@ def test_studio_chat_persists_without_changing_the_field(studio):
     studio.update_field(project["id"], "who", "segment", "Night bakers", author="user")
     posted = studio.post_studio_chat(project["id"], "who", "What should the hook lean on?")
     assert posted["proposals"] == []
+    empty = studio.post_studio_chat(studio.create_project("Blank", "Tea")["id"], "who", "fill this in")
+    reply = empty["messages"][1]["text"]
+    assert "can't fill the fields" in reply
+    assert "brief.product_facts" not in reply
+    assert "proposal outcome:" in reply
     assert studio.get_project(project["id"], field="segment")["data"]["text"] == "Night bakers"
     saved = studio.post_studio_chat(project["id"], "who", "proposal outcome: Wake up before the alarm")
     assert saved["proposals"][0]["field"] == "outcome"
@@ -268,6 +278,53 @@ def test_studio_chat_persists_without_changing_the_field(studio):
     assert isolated["messages"][0]["scope"] == "field"
     assert "who.segment only" in isolated["messages"][1]["text"]
     assert "who.segment: Night bakers" in isolated["messages"][1]["text"]
+
+
+def test_studio_chat_sends_the_picked_model(studio, monkeypatch):
+    seen = {}
+
+    def fake(system, user, model="", provider=""):
+        seen["model"] = model
+        seen["provider"] = provider
+        return ""
+
+    monkeypatch.setattr(studio, "complete_studio_prompt", fake)
+    project = studio.create_project("Pick", "Mug")
+    studio.post_studio_chat(
+        project["id"], "who", "Sharpen the audience",
+        model="@openai:gpt-5.4", model_provider="openai",
+    )
+    assert seen["model"] == "@openai:gpt-5.4"
+    assert seen["provider"] == "openai"
+    with pytest.raises(studio.StudioError):
+        studio.post_studio_chat(project["id"], "who", "Again", model="bad\nmodel")
+
+
+def test_studio_chat_drafts_replacements_without_writing_fields(studio, monkeypatch):
+    seen = {}
+
+    def fake(system, user):
+        seen["user"] = user
+        return json.dumps({
+            "suggestions": [
+                {"field": "outcome", "text": "Wake before the alarm"},
+                {"field": "segment", "text": "Night bakers who want a quieter morning"},
+            ]
+        })
+
+    monkeypatch.setattr(studio, "complete_studio_prompt", fake)
+    project = studio.create_project("Thread", "Mug")
+    studio.update_field(project["id"], "who", "segment", "Night bakers", author="user")
+    posted = studio.post_studio_chat(project["id"], "who", "Sharpen the audience")
+    by_field = {item["field"]: item for item in posted["proposals"]}
+    assert "(empty)" in seen["user"]
+    assert "Night bakers" in seen["user"]
+    assert by_field["outcome"]["previous"] == ""
+    assert by_field["outcome"]["text"] == "Wake before the alarm"
+    assert by_field["segment"]["previous"] == "Night bakers"
+    assert studio.get_project(project["id"], field="outcome")["data"]["text"] == ""
+    assert studio.get_project(project["id"], field="segment")["data"]["text"] == "Night bakers"
+    assert "Replace" in posted["messages"][1]["text"] or "replace" in posted["messages"][1]["text"]
 
 
 def test_legacy_project_without_chat_still_opens(studio, tmp_path):
