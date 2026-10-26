@@ -30,22 +30,27 @@ class TestSidebarCollapseCSS:
         assert ".layout.sidebar-collapsed .sidebar" in CSS, \
             ".layout.sidebar-collapsed .sidebar rule missing from style.css"
 
-    def test_collapsed_sets_width_zero(self):
-        assert "width:0 !important" in CSS or "width:0!important" in CSS, \
-            "sidebar-collapsed rule must set width:0!important"
+    def test_collapsed_keeps_icon_column(self):
+        idx = CSS.index(".layout.sidebar-collapsed .sidebar:not(.mobile-open)")
+        block = CSS[idx:idx + 500]
+        assert "width:48px !important" in block or "width:48px!important" in block, \
+            "sidebar-collapsed rule must keep a 48px icon column"
+        assert "min-width:48px" in block, \
+            "collapsed sidebar must not shrink past the icon column"
+        assert "translateX" not in block, \
+            "collapsed sidebar must not slide; icons stay on the left edge"
 
-    def test_collapsed_sets_opacity_zero(self):
-        # Find the collapsed block and verify opacity:0 is inside it
-        idx = CSS.index(".layout.sidebar-collapsed .sidebar")
-        block = CSS[idx:idx + 400]
+    def test_collapsed_fades_panel_not_icons(self):
+        idx = CSS.index(".layout.sidebar-collapsed .sidebar > .panel-view")
+        block = CSS[idx:idx + 250]
         assert "opacity:0" in block, \
-            "sidebar-collapsed rule must set opacity:0"
+            "session list must fade when the sidebar collapses"
+        assert "visibility:hidden" in block, \
+            "faded session list must leave the tab order"
 
-    def test_collapsed_uses_negative_translate(self):
-        idx = CSS.index(".layout.sidebar-collapsed .sidebar")
-        block = CSS[idx:idx + 400]
-        assert "translateX(-14px)" in block, \
-            "Sidebar should slide left when collapsed (mirrors workspace panel)"
+    def test_collapsed_icon_slot_is_stable(self):
+        assert ".sidebar-icon-slot{width:48px;height:36px;flex:0 0 48px;}" in CSS, \
+            "primary icons must sit in a fixed 48px slot so they do not move"
 
     def test_collapsed_hides_resize_handle(self):
         assert ".layout.sidebar-collapsed .sidebar .resize-handle" in CSS, \

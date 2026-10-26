@@ -1139,6 +1139,7 @@ const LOCALES = {
     kanban_status_archived: 'Archived',
     tab_todos: 'Todos',
     tab_insights: 'Insights',
+    tab_creative: 'Creative Studio',
     tab_dashboard: 'Hermes Dashboard',
     dashboard_loopback_warning: 'Dashboard is loopback-only on the server. Either browse from the server itself or restart it with --host 0.0.0.0 (insecure).',
     tab_logs: 'Logs',

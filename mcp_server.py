@@ -468,6 +468,256 @@ if not hasattr(Server, "list_tools"):  # pragma: no cover
 #  MCP Server wiring
 # ═══════════════════════════════════════════════════════════════════════════
 
+_CREATIVE_CONTRACT = (
+    " Read the project with get_creative_project before proposing or updating a value. "
+    "Pass project_id. If the name matches more than one project, do not write; ask which id. "
+    "Discussion and critique do not change the selected field. "
+    "Only update_creative_field, accept_creative_proposal, or select via the user's explicit accept. "
+    "Suggest at most three options. Clarify asks questions and does not rewrite. "
+    "Critique notes gaps and unsupported claims and revises only when asked. "
+    "Never invent proof, numbers, testimonials, features, outcomes, or usage conditions. "
+    "Framework examples are copywriting examples, not evidence. "
+    "After a write, the result includes project, field, and saved text. If a write fails, say so."
+)
+
+
+def _creative_text(payload: dict) -> list[TextContent]:
+    return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False))]
+
+
+def _creative_store_call(fn):
+    from api.creative_studio import StudioError
+
+    try:
+        return fn()
+    except StudioError as exc:
+        return exc.payload
+
+
+def _creative_write(endpoint: str, body: dict, fallback):
+    remote = _api_post(endpoint, body)
+    err = str(remote.get("error") or "")
+    if err.startswith("API unreachable") or err.startswith("API 404"):
+        return _creative_store_call(fallback)
+    return remote
+
+
+async def handle_list_creative_projects(_arguments: dict) -> list[TextContent]:
+    from api.creative_studio import list_projects
+
+    return _creative_text(_creative_store_call(list_projects))
+
+
+async def handle_get_creative_project(arguments: dict) -> list[TextContent]:
+    from api.creative_studio import get_project
+
+    return _creative_text(_creative_store_call(lambda: get_project(
+        arguments.get("project_id") or None,
+        name=arguments.get("name") or None,
+        stage=arguments.get("stage") or None,
+        field=arguments.get("field") or None,
+        for_suggestion=bool(arguments.get("for_suggestion")),
+    )))
+
+
+async def handle_get_active_creative_project(_arguments: dict) -> list[TextContent]:
+    from api.creative_studio import get_active_project_id, get_project
+
+    def _read():
+        project_id = get_active_project_id()
+        if not project_id:
+            return {"project_id": ""}
+        return get_project(project_id)
+
+    return _creative_text(_creative_store_call(_read))
+
+
+async def handle_set_active_creative_project(arguments: dict) -> list[TextContent]:
+    from api.creative_studio import set_active_project
+
+    project_id = str(arguments.get("project_id") or "")
+    payload = _creative_write(
+        "/api/creative-studio/active",
+        {"project_id": project_id},
+        lambda: set_active_project(project_id),
+    )
+    return _creative_text(payload)
+
+
+async def handle_create_creative_project(arguments: dict) -> list[TextContent]:
+    from api.creative_studio import create_project
+
+    name = arguments.get("name") or ""
+    product = arguments.get("product") or ""
+    payload = _creative_write(
+        "/api/creative-studio/projects",
+        {"name": name, "product": product},
+        lambda: create_project(name, product),
+    )
+    return _creative_text(payload)
+
+
+async def handle_update_creative_field(arguments: dict) -> list[TextContent]:
+    from api.creative_studio import update_field
+
+    project_id = str(arguments.get("project_id") or "")
+    stage = str(arguments.get("stage") or "")
+    field = str(arguments.get("field") or "")
+    text = arguments.get("text") if arguments.get("text") is not None else ""
+    body = {
+        "stage": stage,
+        "field": field,
+        "text": text,
+        "author": "user" if arguments.get("author") != "agent" else "agent",
+    }
+    if arguments.get("claim"):
+        body["claim"] = arguments["claim"]
+    if arguments.get("source_ref"):
+        body["source_ref"] = arguments["source_ref"]
+    payload = _creative_write(
+        f"/api/creative-studio/projects/{project_id}/fields",
+        body,
+        lambda: update_field(project_id, stage, field, text, claim=body.get("claim"), source_ref=body.get("source_ref"), author=body["author"]),
+    )
+    return _creative_text(payload)
+
+
+async def handle_save_creative_proposal(arguments: dict) -> list[TextContent]:
+    from api.creative_studio import save_proposal
+
+    project_id = str(arguments.get("project_id") or "")
+    stage = str(arguments.get("stage") or "")
+    field = str(arguments.get("field") or "")
+    text = arguments.get("text") or ""
+    body = {
+        "stage": stage,
+        "field": field,
+        "text": text,
+        "exploratory": bool(arguments.get("exploratory")),
+        "missing": arguments.get("missing") or [],
+        "discussion": arguments.get("discussion") or "",
+    }
+    payload = _creative_write(
+        f"/api/creative-studio/projects/{project_id}/proposals",
+        body,
+        lambda: save_proposal(project_id, stage, field, text, exploratory=body["exploratory"], missing=body["missing"], discussion=body["discussion"]),
+    )
+    return _creative_text(payload)
+
+
+async def handle_update_creative_proposal(arguments: dict) -> list[TextContent]:
+    from api.creative_studio import update_proposal
+
+    project_id = str(arguments.get("project_id") or "")
+    proposal_id = str(arguments.get("proposal_id") or "")
+    body = {}
+    if arguments.get("status"):
+        body["status"] = arguments["status"]
+    if "revised_text" in arguments:
+        body["revised_text"] = arguments.get("revised_text") or ""
+    if "discussion" in arguments:
+        body["discussion"] = arguments.get("discussion") or ""
+    payload = _creative_write(
+        f"/api/creative-studio/projects/{project_id}/proposals/{proposal_id}",
+        body,
+        lambda: update_proposal(
+            project_id,
+            proposal_id,
+            status=body.get("status"),
+            revised_text=body.get("revised_text") if "revised_text" in body else None,
+            discussion=body.get("discussion") if "discussion" in body else None,
+        ),
+    )
+    return _creative_text(payload)
+
+
+async def handle_accept_creative_proposal(arguments: dict) -> list[TextContent]:
+    from api.creative_studio import accept_proposal, edit_accept_proposal
+
+    project_id = str(arguments.get("project_id") or "")
+    proposal_id = str(arguments.get("proposal_id") or "")
+    edited = arguments.get("text")
+    action = "edit_accept" if edited is not None else "accept"
+    body = {"action": action}
+    if edited is not None:
+        body["text"] = edited
+    payload = _creative_write(
+        f"/api/creative-studio/projects/{project_id}/proposals/{proposal_id}",
+        body,
+        lambda: edit_accept_proposal(project_id, proposal_id, edited) if edited is not None else accept_proposal(project_id, proposal_id),
+    )
+    return _creative_text(payload)
+
+
+async def handle_dismiss_creative_proposal(arguments: dict) -> list[TextContent]:
+    from api.creative_studio import dismiss_proposal
+
+    project_id = str(arguments.get("project_id") or "")
+    proposal_id = str(arguments.get("proposal_id") or "")
+    payload = _creative_write(
+        f"/api/creative-studio/projects/{project_id}/proposals/{proposal_id}",
+        {"action": "dismiss"},
+        lambda: dismiss_proposal(project_id, proposal_id),
+    )
+    return _creative_text(payload)
+
+
+async def handle_save_creative_alternative(arguments: dict) -> list[TextContent]:
+    from api.creative_studio import save_alternative, select_alternative
+
+    project_id = str(arguments.get("project_id") or "")
+    proposal_id = str(arguments.get("proposal_id") or "")
+    select = bool(arguments.get("select"))
+    action = "select" if select else "alternative"
+    payload = _creative_write(
+        f"/api/creative-studio/projects/{project_id}/proposals/{proposal_id}",
+        {"action": action},
+        lambda: select_alternative(project_id, proposal_id) if select else save_alternative(project_id, proposal_id),
+    )
+    return _creative_text(payload)
+
+
+async def handle_record_creative_decision(arguments: dict) -> list[TextContent]:
+    from api.creative_studio import record_decision
+
+    project_id = str(arguments.get("project_id") or "")
+    stage = str(arguments.get("stage") or "")
+    field = str(arguments.get("field") or "")
+    text = arguments.get("text") or ""
+    payload = _creative_write(
+        f"/api/creative-studio/projects/{project_id}/decision",
+        {"stage": stage, "field": field, "text": text},
+        lambda: record_decision(project_id, stage, field, text),
+    )
+    return _creative_text(payload)
+
+
+async def handle_set_creative_stage_status(arguments: dict) -> list[TextContent]:
+    from api.creative_studio import set_stage_status
+
+    project_id = str(arguments.get("project_id") or "")
+    stage = str(arguments.get("stage") or "")
+    status = str(arguments.get("status") or "")
+    reason = arguments.get("reason") or ""
+    payload = _creative_write(
+        f"/api/creative-studio/projects/{project_id}/stage",
+        {"stage": stage, "status": status, "reason": reason},
+        lambda: set_stage_status(project_id, stage, status, reason),
+    )
+    return _creative_text(payload)
+
+
+async def handle_export_creative_project(arguments: dict) -> list[TextContent]:
+    from api.creative_studio import export_markdown
+
+    project_id = str(arguments.get("project_id") or "")
+    include = arguments.get("include_alternatives")
+    return _creative_text(_creative_store_call(lambda: export_markdown(
+        project_id,
+        include_alternatives=None if include is None else bool(include),
+    )))
+
+
 TOOLS = [
     Tool(
         name="list_projects",
@@ -547,6 +797,179 @@ TOOLS = [
             "required": [],
         },
     ),
+    Tool(
+        name="list_creative_projects",
+        description="List Creative Studio projects (name, product, progress). These are ad-creative projects, not session projects." + _CREATIVE_CONTRACT,
+        inputSchema={"type": "object", "properties": {}, "required": []},
+    ),
+    Tool(
+        name="get_creative_project",
+        description="Read a Creative Studio project, stage, or field. Set for_suggestion=true with field to receive the brief, dependency context, and missing dependencies. Does not generate copy." + _CREATIVE_CONTRACT,
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "project_id": {"type": "string"},
+                "name": {"type": "string", "description": "Used only when project_id is omitted. Ambiguous names return candidates and do not guess."},
+                "stage": {"type": "string"},
+                "field": {"type": "string"},
+                "for_suggestion": {"type": "boolean"},
+            },
+            "required": [],
+        },
+    ),
+    Tool(
+        name="get_active_creative_project",
+        description="Return the Creative Studio project currently open in the WebUI, if one is set." + _CREATIVE_CONTRACT,
+        inputSchema={"type": "object", "properties": {}, "required": []},
+    ),
+    Tool(
+        name="set_active_creative_project",
+        description="Set the shared active Creative Studio project so later chat turns can omit the name." + _CREATIVE_CONTRACT,
+        inputSchema={
+            "type": "object",
+            "properties": {"project_id": {"type": "string"}},
+            "required": ["project_id"],
+        },
+    ),
+    Tool(
+        name="create_creative_project",
+        description="Create a Creative Studio project from a name and optional product/offer. Does not generate the rest of the brief." + _CREATIVE_CONTRACT,
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "product": {"type": "string"},
+            },
+            "required": ["name"],
+        },
+    ),
+    Tool(
+        name="update_creative_field",
+        description="Write user-provided content onto a selected Creative Studio field. Use only when the user explicitly asks to change that field. Confirm project, field, and the saved value." + _CREATIVE_CONTRACT,
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "project_id": {"type": "string"},
+                "stage": {"type": "string"},
+                "field": {"type": "string"},
+                "text": {"type": "string"},
+                "claim": {"type": "string", "description": "user_approved, needs_verification, or supported_by_source"},
+                "source_ref": {"type": "string"},
+                "author": {"type": "string", "description": "user or agent. User-authored edits use user."},
+            },
+            "required": ["project_id", "stage", "field", "text"],
+        },
+    ),
+    Tool(
+        name="save_creative_proposal",
+        description="Save an agent suggestion as a pending proposal. Does not change the selected field value. At most three pending proposals per field." + _CREATIVE_CONTRACT,
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "project_id": {"type": "string"},
+                "stage": {"type": "string"},
+                "field": {"type": "string"},
+                "text": {"type": "string"},
+                "exploratory": {"type": "boolean"},
+                "missing": {"type": "array", "items": {"type": "string"}},
+                "discussion": {"type": "string"},
+            },
+            "required": ["project_id", "stage", "field", "text"],
+        },
+    ),
+    Tool(
+        name="update_creative_proposal",
+        description="Update a proposal's discussion or revised wording and optionally set status to proposed or in_discussion. Does not change the selected field." + _CREATIVE_CONTRACT,
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "project_id": {"type": "string"},
+                "proposal_id": {"type": "string"},
+                "status": {"type": "string"},
+                "revised_text": {"type": "string"},
+                "discussion": {"type": "string"},
+            },
+            "required": ["project_id", "proposal_id"],
+        },
+    ),
+    Tool(
+        name="accept_creative_proposal",
+        description="Accept a proposal into the selected field. Pass text to edit-and-accept. This is the explicit adopt action." + _CREATIVE_CONTRACT,
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "project_id": {"type": "string"},
+                "proposal_id": {"type": "string"},
+                "text": {"type": "string", "description": "When present, the field stores this edited wording."},
+            },
+            "required": ["project_id", "proposal_id"],
+        },
+    ),
+    Tool(
+        name="dismiss_creative_proposal",
+        description="Dismiss a proposal. Leaves the selected field unchanged." + _CREATIVE_CONTRACT,
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "project_id": {"type": "string"},
+                "proposal_id": {"type": "string"},
+            },
+            "required": ["project_id", "proposal_id"],
+        },
+    ),
+    Tool(
+        name="save_creative_alternative",
+        description="Keep a proposal as a saved alternative without changing the selected field. Pass select=true only when the user asks to make that alternative the current answer." + _CREATIVE_CONTRACT,
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "project_id": {"type": "string"},
+                "proposal_id": {"type": "string"},
+                "select": {"type": "boolean"},
+            },
+            "required": ["project_id", "proposal_id"],
+        },
+    ),
+    Tool(
+        name="record_creative_decision",
+        description="Store a discussion outcome or decision note. Does not change the selected field." + _CREATIVE_CONTRACT,
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "project_id": {"type": "string"},
+                "stage": {"type": "string"},
+                "field": {"type": "string"},
+                "text": {"type": "string"},
+            },
+            "required": ["project_id", "stage", "text"],
+        },
+    ),
+    Tool(
+        name="set_creative_stage_status",
+        description="Set a stage to not_started, draft, approved, review_recommended, or not_applicable. not_applicable requires reason." + _CREATIVE_CONTRACT,
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "project_id": {"type": "string"},
+                "stage": {"type": "string"},
+                "status": {"type": "string"},
+                "reason": {"type": "string"},
+            },
+            "required": ["project_id", "stage", "status"],
+        },
+    ),
+    Tool(
+        name="export_creative_project",
+        description="Export the selected Creative Studio answers as Markdown, including claim labels. Alternatives are included only when include_alternatives is true. Does not write a finished ad script." + _CREATIVE_CONTRACT,
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "project_id": {"type": "string"},
+                "include_alternatives": {"type": "boolean"},
+            },
+            "required": ["project_id"],
+        },
+    ),
 ]
 
 HANDLERS = {
@@ -557,6 +980,20 @@ HANDLERS = {
     "rename_session": handle_rename_session,
     "move_session": handle_move_session,
     "list_sessions": handle_list_sessions,
+    "list_creative_projects": handle_list_creative_projects,
+    "get_creative_project": handle_get_creative_project,
+    "get_active_creative_project": handle_get_active_creative_project,
+    "set_active_creative_project": handle_set_active_creative_project,
+    "create_creative_project": handle_create_creative_project,
+    "update_creative_field": handle_update_creative_field,
+    "save_creative_proposal": handle_save_creative_proposal,
+    "update_creative_proposal": handle_update_creative_proposal,
+    "accept_creative_proposal": handle_accept_creative_proposal,
+    "dismiss_creative_proposal": handle_dismiss_creative_proposal,
+    "save_creative_alternative": handle_save_creative_alternative,
+    "record_creative_decision": handle_record_creative_decision,
+    "set_creative_stage_status": handle_set_creative_stage_status,
+    "export_creative_project": handle_export_creative_project,
 }
 
 

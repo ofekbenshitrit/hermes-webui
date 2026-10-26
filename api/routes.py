@@ -14836,6 +14836,13 @@ def handle_get(handler, parsed) -> bool:
     if parsed.path == "/api/project-os/dashboard":
         return _handle_project_os_dashboard(handler, parsed)
 
+    if parsed.path.startswith("/api/creative-studio/"):
+        from api.creative_studio import handle_creative_get
+
+        result = handle_creative_get(handler, parsed)
+        if result is False:
+            return bad(handler, "unknown creative studio endpoint", status=404)
+        return True
     if parsed.path.startswith("/api/kanban/"):
         from api.kanban_bridge import handle_kanban_get
 
@@ -16378,6 +16385,13 @@ def handle_post(handler, parsed) -> bool:
         result = repair_safe_session_recovery(SESSION_DIR, state_db_path=_active_state_db_path())
         return j(handler, result, status=200 if result.get("clean") else 409)
 
+    if parsed.path.startswith("/api/creative-studio/"):
+        from api.creative_studio import handle_creative_post
+
+        result = handle_creative_post(handler, parsed, body)
+        if result is False:
+            return bad(handler, "unknown creative studio endpoint", status=404)
+        return True
     if parsed.path.startswith("/api/kanban/"):
         from api.kanban_bridge import handle_kanban_post
 
@@ -19069,6 +19083,13 @@ def handle_delete(handler, parsed) -> bool:
         _save_saved_prompts(prompts)
         return j(handler, {"ok": True})
 
+    if parsed.path.startswith("/api/creative-studio/"):
+        from api.creative_studio import handle_creative_delete
+
+        result = handle_creative_delete(handler, parsed)
+        if result is False:
+            return bad(handler, "unknown creative studio endpoint", status=404)
+        return True
     if parsed.path.startswith("/api/kanban/"):
         from api.kanban_bridge import handle_kanban_delete
 
@@ -19101,6 +19122,13 @@ def handle_put(handler, parsed) -> bool:
     if parsed.path.startswith("/api/mcp/servers/"):
         name = parsed.path[len("/api/mcp/servers/"):]
         return _handle_mcp_server_update(handler, name, body)
+    if parsed.path.startswith("/api/creative-studio/"):
+        from api.creative_studio import handle_creative_post
+
+        result = handle_creative_post(handler, parsed, body)
+        if result is False:
+            return bad(handler, "unknown creative studio endpoint", status=404)
+        return True
     return False
 
 # ── GET route helpers ─────────────────────────────────────────────────────────

@@ -4647,12 +4647,14 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
       const quote=node.closest&&node.closest('blockquote');
       const list=node.closest&&node.closest('ul,ol');
       const nestedList=tag==='UL'||tag==='OL';
-      if((quote&&quote!==node)||(list&&list!==node&&!nestedList)){
-        if(node.getAttribute&&node.getAttribute('dir')==='auto') node.removeAttribute('dir');
+      const item=tag==='LI';
+      if((quote&&quote!==node)||(list&&list!==node&&!nestedList&&!item)){
+        if(node.getAttribute&&node.getAttribute('dir')) node.removeAttribute('dir');
         return;
       }
-      if(node.hasAttribute&&node.hasAttribute('dir')) return;
-      if(node.setAttribute) node.setAttribute('dir','auto');
+      const dir=(typeof bidiDirForText==='function'&&bidiDirForText(node.textContent))||'auto';
+      if(node.getAttribute&&node.getAttribute('dir')===dir) return;
+      if(node.setAttribute) node.setAttribute('dir',dir);
     };
     renderer.end_token=(data)=>{
       const marker=tokenStack.pop();

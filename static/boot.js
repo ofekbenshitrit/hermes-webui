@@ -811,6 +811,11 @@ function _syncSidebarAria(){
     .forEach(function(btn){ btn.setAttribute('aria-expanded','false'); });
   const active=document.querySelector('.rail .rail-btn.nav-tab.active[data-panel]');
   if(active)active.setAttribute('aria-expanded',!_isSidebarCollapsed());
+  const collapsed=_isSidebarCollapsed();
+  document.querySelectorAll('.sidebar-mark-btn').forEach(function(btn){
+    btn.tabIndex=collapsed?0:-1;
+    btn.setAttribute('aria-hidden',collapsed?'false':'true');
+  });
 }
 
 function toggleSidebar(forceState){

@@ -343,7 +343,7 @@ def test_sidebar_collapse_available_from_641px():
     """Sidebar desktop collapse must work in the foldable band (641-900px).
 
     The sidebar needs position:relative from min-width:641px so the desktop
-    collapse mechanism (.sidebar-collapsed -> width:0) applies on foldable
+    collapse mechanism (.sidebar-collapsed -> 48px icon column) applies on foldable
     inner screens, not only at >=901px.
     """
     assert "@media(min-width:641px)" in CSS, "Missing @media(min-width:641px) block"

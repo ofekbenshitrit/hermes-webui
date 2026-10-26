@@ -9414,12 +9414,94 @@ function renderMd(raw){
   return s;
 }
 
+// Hebrew, Arabic, and related presentation forms. Latin (including Latin
+// supplements and Greek) is the other strong direction we care about in chat.
+function _bidiStrongKind(cp){
+  if((cp>=0x0590&&cp<=0x05FF)||(cp>=0x0600&&cp<=0x06FF)||(cp>=0x0750&&cp<=0x077F)||
+     (cp>=0x08A0&&cp<=0x08FF)||(cp>=0xFB50&&cp<=0xFDFF)||(cp>=0xFE70&&cp<=0xFEFF)) return 'r';
+  if((cp>=0x0041&&cp<=0x005A)||(cp>=0x0061&&cp<=0x007A)||
+     (cp>=0x00C0&&cp<=0x024F)||(cp>=0x0370&&cp<=0x03FF)) return 'l';
+  return '';
+}
+// Majority script, with a bias toward RTL when Hebrew/Arabic is a real part
+// of the block. A Hebrew sentence that opens with an English label ("Who",
+// "Messaging") is still RTL. A block that is almost all English stays LTR
+// even if it quotes a Hebrew word.
+function bidiDirForText(text){
+  text=String(text||'');
+  let r=0,l=0;
+  for(let i=0;i<text.length;i++){
+    const kind=_bidiStrongKind(text.charCodeAt(i));
+    if(kind==='r') r++;
+    else if(kind==='l') l++;
+  }
+  if(!r&&!l) return '';
+  if(!r) return 'ltr';
+  if(!l) return 'rtl';
+  return (r/(r+l)>=0.35)?'rtl':'ltr';
+}
+const _BIDI_LTR_EMBED=/(\((?:[A-Za-z0-9][^()\u0590-\u08FF]{0,160})\)|[A-Za-z\u00C0-\u024F\u0370-\u03FF](?:[A-Za-z0-9\u00C0-\u024F\u0370-\u03FF._+\-/#:'’]*[A-Za-z0-9\u00C0-\u024F\u0370-\u03FF])?|\d+(?:[./:+\-]\d+)+)/g;
+const _BIDI_RTL_EMBED=/(\([\u0590-\u05FF\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF][^()\u0041-\u007A\u00C0-\u024F]{0,160}\)|[\u0590-\u05FF\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]+)/g;
+function _isolateBidiEmbeds(root){
+  if(!root||!root.querySelectorAll||!document.createTreeWalker) return;
+  // The live markdown parser still owns these text nodes. Rewriting them
+  // mid-stream detaches the node it is appending into.
+  if(root.closest&&root.closest('[data-live-assistant="1"]')) return;
+  if(root.matches&&root.matches('[data-live-assistant="1"]')) return;
+  const blocks=root.querySelectorAll('p,h1,h2,h3,h4,h5,h6,li,blockquote,th,td,dd');
+  for(let i=0;i<blocks.length;i++){
+    const block=blocks[i];
+    if(block.closest&&block.closest('pre,code,.csv-table,.diff-block,.katex,.katex-block,.katex-display,[data-live-assistant="1"]')) continue;
+    const base=block.getAttribute('dir')||bidiDirForText(block.textContent);
+    if(base!=='rtl'&&base!=='ltr') continue;
+    const re=base==='rtl'?_BIDI_LTR_EMBED:_BIDI_RTL_EMBED;
+    const embedDir=base==='rtl'?'ltr':'rtl';
+    const walker=document.createTreeWalker(block,NodeFilter.SHOW_TEXT);
+    const texts=[];
+    let n=walker.nextNode();
+    while(n){texts.push(n);n=walker.nextNode();}
+    for(let t=0;t<texts.length;t++){
+      const node=texts[t];
+      const parent=node.parentElement;
+      if(!parent) continue;
+      if(parent.closest('pre,code,bdi,.csv-table,.diff-block,.katex,.katex-block,.katex-display')) continue;
+      const value=node.nodeValue;
+      if(!value) continue;
+      re.lastIndex=0;
+      if(!re.test(value)) continue;
+      re.lastIndex=0;
+      const frag=document.createDocumentFragment();
+      let last=0;
+      let match;
+      let any=false;
+      while((match=re.exec(value))){
+        if(match.index>last) frag.appendChild(document.createTextNode(value.slice(last,match.index)));
+        const bdi=document.createElement('bdi');
+        bdi.className='bidi-embed';
+        bdi.dir=embedDir;
+        bdi.textContent=match[0];
+        frag.appendChild(bdi);
+        last=match.index+match[0].length;
+        any=true;
+        if(match[0].length===0) break;
+      }
+      if(!any) continue;
+      if(last<value.length) frag.appendChild(document.createTextNode(value.slice(last)));
+      parent.replaceChild(frag,node);
+    }
+  }
+}
 // Lists, quotes, headings, and table cells need a real direction so their
 // marker, quote bar, and start edge follow Hebrew/Arabic text. Plaintext
-// alignment alone leaves that chrome on the left. dir="auto" on a parent
-// ignores descendants that have their own dir, so a quote or list owns the
-// direction and its children inherit it. Nested lists still pick their own.
-// Code, diffs, math, and CSV stay left-to-right. Idempotent.
+// alignment alone leaves that chrome on the left, and it also takes the
+// whole line's direction from the first strong character — so a Hebrew
+// sentence that starts with "Messaging" or "30-50" flips to English order
+// and parentheses/numbers jump. Mixed blocks use the dominant script
+// instead, and the other script is isolated so each run keeps its own
+// order. dir on a parent ignores descendants that have their own dir, so a
+// quote owns the direction and its children inherit it. Each list item
+// picks its own. Nested lists still pick their own. Code, diffs, math, and
+// CSV stay left-to-right. Idempotent.
 function applyBidiAutoDir(root){
   if(!root||!root.querySelectorAll) return;
   const nodes=root.querySelectorAll('p,h1,h2,h3,h4,h5,h6,ul,ol,li,blockquote,th,td');
@@ -9430,12 +9512,15 @@ function applyBidiAutoDir(root){
     const quote=el.closest('blockquote');
     const list=el.closest('ul,ol');
     const nestedList=tag==='UL'||tag==='OL';
-    if((quote&&quote!==el)||(list&&list!==el&&!nestedList)){
-      if(el.getAttribute('dir')==='auto') el.removeAttribute('dir');
+    const item=tag==='LI';
+    if((quote&&quote!==el)||(list&&list!==el&&!nestedList&&!item)){
+      if(el.getAttribute('dir')) el.removeAttribute('dir');
       continue;
     }
-    if(!el.getAttribute('dir')) el.setAttribute('dir','auto');
+    const dir=bidiDirForText(el.textContent)||'auto';
+    if(el.getAttribute('dir')!==dir) el.setAttribute('dir',dir);
   }
+  _isolateBidiEmbeds(root);
 }
 
 function _stripAttachedFilesMarkerForDisplay(text){
