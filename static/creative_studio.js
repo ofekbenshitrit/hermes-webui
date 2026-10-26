@@ -93,6 +93,7 @@ async function creativeNewProject(){
   }
   if(!_creativeCreating) return;
   creativeRenderWorkspace();
+  creativeFilterProducts();
   const name = document.getElementById('creativeCreateName');
   if(name) name.focus();
 }
@@ -107,9 +108,13 @@ function creativeFilterProducts(){
   const list = document.getElementById('creativeProductOptions');
   if(!input || !list) return;
   const query = input.value.trim().toLowerCase();
-  _creativeProductMatches = _creativeCatalog.filter(item => !query || item.name.toLowerCase().includes(query)).slice(0, 8);
+  _creativeProductMatches = _creativeCatalog.filter(item => !query || item.name.toLowerCase().includes(query)).slice(0, 6);
+  const selected = (input.dataset.source || '').trim();
   list.hidden = _creativeProductMatches.length === 0;
-  list.innerHTML = _creativeProductMatches.map((item, index) => `<button type="button" class="creative-product-option" onmousedown="creativePickProductIndex(${index})">${_creativeEsc(item.name)}<small>${_creativeEsc(item.kind || '')}</small></button>`).join('');
+  list.innerHTML = _creativeProductMatches.map((item, index) => {
+    const on = selected && selected === (item.source || '') ? ' selected' : '';
+    return `<button type="button" class="creative-product-option${on}" onmousedown="creativePickProductIndex(${index}); return false;"><span>${_creativeEsc(item.name)}</span><small>${_creativeEsc(item.kind || 'notes')}</small></button>`;
+  }).join('');
 }
 
 function creativePickProductIndex(index){
@@ -120,8 +125,7 @@ function creativePickProductIndex(index){
     input.value = item.name;
     input.dataset.source = item.source || '';
   }
-  const list = document.getElementById('creativeProductOptions');
-  if(list) list.hidden = true;
+  creativeFilterProducts();
 }
 
 async function creativeSubmitCreate(){
@@ -185,25 +189,24 @@ async function creativeDeleteProject(id){
 }
 
 function _creativeCreateMarkup(){
-  const emptyCatalog = _creativeCatalog.length
-    ? 'Pick a product from your notes, or type its name. The notes stay where they are.'
-    : 'No product notes were found in the Obsidian vault, wiki, or skills yet. Type the product name and Hermes can still look it up later.';
-  return `<form id="creativeCreateForm" class="creative-create" onsubmit="creativeSubmitCreate(); return false;">
-    <div class="creative-create-card">
-      <h2>New creative</h2>
-      <p class="creative-help">${emptyCatalog}</p>
+  const lead = _creativeCatalog.length
+    ? 'Hermes already knows these products. Choose one, or type a name. The notes stay where they are.'
+    : 'Type the product name. When product notes show up in your vault, wiki, or skills, they will appear here to choose from.';
+  return `<form id="creativeCreateForm" class="creative-wizard" onsubmit="creativeSubmitCreate(); return false;">
+    <div class="creative-wizard-body">
+      <p class="creative-wizard-kicker">New creative</p>
+      <h2>Name it and choose a product</h2>
+      <p class="creative-wizard-lead">${lead}</p>
       <label for="creativeCreateName">Creative name</label>
       <input id="creativeCreateName" name="name" required maxlength="160" autocomplete="off" placeholder="Spring launch">
       <label for="creativeCreateProduct">Product</label>
-      <div class="creative-product-picker">
-        <input id="creativeCreateProduct" name="product" autocomplete="off" placeholder="Search products" oninput="creativeFilterProducts()" onfocus="creativeFilterProducts()">
-        <div id="creativeProductOptions" class="creative-product-options" hidden></div>
-      </div>
-      <p id="creativeCreateError" class="creative-save failed"></p>
-      <div class="creative-actions">
-        <button type="submit" class="creative-primary">Create creative</button>
-        <button type="button" onclick="creativeCancelCreate()">Cancel</button>
-      </div>
+      <input id="creativeCreateProduct" name="product" autocomplete="off" placeholder="Search or type a product" oninput="creativeFilterProducts()" onfocus="creativeFilterProducts()">
+      <div id="creativeProductOptions" class="creative-product-options" hidden></div>
+      <p id="creativeCreateError" class="creative-save failed" role="alert"></p>
+    </div>
+    <div class="creative-wizard-footer">
+      <button type="button" class="creative-ghost" onclick="creativeCancelCreate()">Back</button>
+      <button type="submit" class="creative-primary">Continue</button>
     </div>
   </form>`;
 }
@@ -262,9 +265,9 @@ function creativeRenderWorkspace(){
       </aside>
     </div>
     <div class="creative-footer">
-      <button type="button" onclick="creativeMoveStage(-1)">Back</button>
-      <button type="button" onclick="creativeMarkStage()">Stage status</button>
-      <button type="button" onclick="creativeMoveStage(1)">Continue</button>
+      <button type="button" class="creative-ghost" onclick="creativeMoveStage(-1)">Back</button>
+      <button type="button" class="creative-ghost" onclick="creativeMarkStage()">Stage status</button>
+      <button type="button" class="creative-primary" onclick="creativeMoveStage(1)">Continue</button>
     </div>`;
   _creativeRenderAssistantCards();
 }
