@@ -549,10 +549,11 @@ async def handle_create_creative_project(arguments: dict) -> list[TextContent]:
 
     name = arguments.get("name") or ""
     product = arguments.get("product") or ""
+    product_source = arguments.get("product_source") or ""
     payload = _creative_write(
         "/api/creative-studio/projects",
-        {"name": name, "product": product},
-        lambda: create_project(name, product),
+        {"name": name, "product": product, "product_source": product_source},
+        lambda: create_project(name, product, product_source),
     )
     return _creative_text(payload)
 

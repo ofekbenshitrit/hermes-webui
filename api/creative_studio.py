@@ -391,7 +391,69 @@ def list_projects() -> dict:
         return {"projects": [_summary(row) for row in _iter_projects()]}
 
 
-def create_project(name: str, product: str = "") -> dict:
+def _env_assignment(home: Path, key: str) -> str:
+    env_file = home / ".env"
+    if not env_file.is_file():
+        return ""
+    prefix = key + "="
+    try:
+        lines = env_file.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return ""
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith(prefix):
+            return stripped[len(prefix):].strip().strip('"').strip("'")
+    return ""
+
+
+def product_catalog_roots() -> list[tuple[str, Path]]:
+    """Places Hermes already keeps product knowledge: Obsidian, the wiki, and skills."""
+    from api.profiles import get_active_hermes_home
+
+    home = get_active_hermes_home()
+    vault = _env_assignment(home, "OBSIDIAN_VAULT_PATH") or os.environ.get("OBSIDIAN_VAULT_PATH") or ""
+    wiki = _env_assignment(home, "WIKI_PATH") or os.environ.get("WIKI_PATH") or ""
+    vault_path = Path(vault).expanduser() if vault else Path.home() / "Documents" / "Obsidian Vault"
+    wiki_path = Path(wiki).expanduser() if wiki else Path.home() / "wiki"
+    return [
+        ("obsidian", vault_path),
+        ("wiki", wiki_path),
+        ("skills", home / "skills"),
+    ]
+
+
+def list_known_products() -> dict:
+    """Product names only. Note bodies stay in the vault, wiki, or skill."""
+    found: list[dict] = []
+    seen: set[str] = set()
+
+    def add(name: str, source: str, kind: str) -> None:
+        cleaned = (name or "").strip()
+        key = cleaned.casefold()
+        if not cleaned or key in seen or cleaned.casefold() in {"index", "readme", "skill"}:
+            return
+        seen.add(key)
+        found.append({"name": cleaned, "source": source, "kind": kind})
+
+    for kind, root in product_catalog_roots():
+        if not root.is_dir():
+            continue
+        folders = [root / "products", root / "Products", root / "Product"]
+        if kind == "skills":
+            folders = list(root.glob("**/products")) + list(root.glob("**/Products"))
+        for folder in folders:
+            if not folder.is_dir():
+                continue
+            for note in sorted(folder.glob("*.md")):
+                if note.name.lower() == "skill.md":
+                    continue
+                add(note.stem.replace("-", " ").replace("_", " "), str(note), kind)
+    found.sort(key=lambda item: item["name"].casefold())
+    return {"products": found}
+
+
+def create_project(name: str, product: str = "", product_source: str = "") -> dict:
     cleaned = (name or "").strip()
     if not cleaned:
         raise StudioError("name is required")
@@ -399,6 +461,7 @@ def create_project(name: str, product: str = "") -> dict:
         raise StudioError("name is too long")
     with _lock_for(_profile_dir()):
         project = _blank_project(cleaned, product=(product or "").strip())
+        project["product_source"] = (product_source or "").strip()
         _save(project)
         _write_active(project["id"])
         return project
@@ -969,6 +1032,8 @@ def _pid(parsed, prefix: str) -> str:
 
 def handle_creative_get(handler, parsed):
     path = parsed.path
+    if path == "/api/creative-studio/products":
+        return _http_call(handler, list_known_products)
     if path == "/api/creative-studio/projects":
         return _http_call(handler, list_projects)
     if path == "/api/creative-studio/active":
@@ -1000,7 +1065,11 @@ def handle_creative_post(handler, parsed, body: dict):
     path = parsed.path
     body = body or {}
     if path == "/api/creative-studio/projects":
-        return _http_call(handler, lambda: create_project(body.get("name") or "", body.get("product") or ""))
+        return _http_call(handler, lambda: create_project(
+            body.get("name") or "",
+            body.get("product") or "",
+            body.get("product_source") or "",
+        ))
     if path == "/api/creative-studio/active":
         return _http_call(handler, lambda: set_active_project(str(body.get("project_id") or "")))
     if path == "/api/creative-studio/assist":

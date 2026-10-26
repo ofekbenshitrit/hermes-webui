@@ -20,6 +20,25 @@ def studio(tmp_path, monkeypatch):
     return studio
 
 
+def test_product_catalog_reads_names_from_notes(studio, tmp_path, monkeypatch):
+    vault = tmp_path / "vault" / "Products"
+    vault.mkdir(parents=True)
+    (vault / "Trail Shoes.md").write_text("# Trail Shoes\nWaterproof upper.\n", encoding="utf-8")
+    (vault / "index.md").write_text("not a product", encoding="utf-8")
+    skills = tmp_path / "skills" / "brand" / "products"
+    skills.mkdir(parents=True)
+    (skills / "day-cream.md").write_text("rich product note", encoding="utf-8")
+    monkeypatch.setattr(studio, "product_catalog_roots", lambda: [("obsidian", vault.parent), ("skills", tmp_path / "skills")])
+    catalog = studio.list_known_products()
+    names = [item["name"] for item in catalog["products"]]
+    assert names == ["day cream", "Trail Shoes"]
+    assert "Waterproof" not in json.dumps(catalog)
+    created = studio.create_project("Launch", "Trail Shoes", str(vault / "Trail Shoes.md"))
+    assert created["stages"]["brief"]["fields"]["product_offer"]["text"] == "Trail Shoes"
+    assert created["product_source"].endswith("Trail Shoes.md")
+    assert created["stages"]["brief"]["fields"]["product_facts"]["text"] == ""
+
+
 def test_create_reopen_and_user_edit_round_trip(studio):
     created = studio.create_project("Spring", "Trail shoes")
     studio.update_field(created["id"], "who", "segment", "Weekend runners", author="user")
@@ -216,7 +235,9 @@ def test_static_panel_wires_stage_switch_proposals_and_export():
     assert "loadCreativeStudio" in panels
     assert "function creativeNewProject" in script
     assert "function creativeSubmitCreate" in script
-    assert 'id="creativeCreateForm"' in script
+    assert "Creative name" in script
+    assert "creativeCreateProduct" in script
+    assert "CREATIVE_CREATE_FIELDS" not in script
     assert "window.prompt('Project name')" not in script
     assert "function creativeSetStage" in script
     assert "function creativeProposalAction" in script
