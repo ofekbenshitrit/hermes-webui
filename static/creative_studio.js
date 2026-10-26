@@ -1,13 +1,19 @@
 /* Creative Studio — stage workspace over /api/creative-studio. */
 const CREATIVE_STAGES = [
-  {id:'brief', label:'Brief'},
-  {id:'who', label:'Who'},
-  {id:'what', label:'What'},
-  {id:'hook', label:'Hook'},
-  {id:'casts', label:'CASTS'},
-  {id:'copy', label:'Copy Blocks'},
-  {id:'review', label:'Review'},
+  {id:'who', label:'Who', title:'Who — Outcome, Demographic, Facet, Segment'},
+  {id:'what', label:'What', title:'What — Concept, Angle, UMP, UMS, Mechanism'},
+  {id:'hook', label:'Hook', title:'How: Hook and Format'},
+  {id:'casts', label:'Creative', title:'Creative (CASTS) — Conceit, Actor(s), Style, Terrain, Setup'},
+  {id:'copy', label:'Copy', title:'Copy Blocks — Pain, Promise, Proof, Curiosity, Constraints, Conditions'},
 ];
+const CREATIVE_STATUS = {
+  not_started:'Empty',
+  draft:'Draft',
+  approved:'Approved',
+  review_recommended:'Needs review',
+  not_applicable:'Skipped',
+};
+const CREATIVE_SHORT = new Set(['outcome','demographic','facet','segment','concept','angle','ump','ums','hook_type','format','actors','style','terrain']);
 const CREATIVE_FIELDS = {
   brief:['product_offer','product_facts','audience_notes','objective','channel','format_length','assets','sources','summary_provided','summary_assumptions','summary_missing'],
   who:['outcome','demographic','facet','segment'],
@@ -33,7 +39,12 @@ const CREATIVE_HELP = {
 };
 let _creativeProjects = [];
 let _creativeProject = null;
-let _creativeStage = 'brief';
+let _creativeStage = 'who';
+let _creativeChatOpen = true;
+let _creativeChatWidth = 340;
+let _creativeChatError = '';
+let _creativeChatBusy = false;
+let _creativeExportOpen = false;
 let _creativeSaveState = 'Saved';
 let _creativeTimers = {};
 let _creativePoll = null;
@@ -150,7 +161,7 @@ async function creativeSubmitCreate(){
       body:JSON.stringify({name, product, product_source: productSource}),
     });
     _creativeCreating = false;
-    _creativeStage = 'brief';
+    _creativeStage = 'who';
     _creativeSaveState = 'Saved';
     await creativeOpenProject(project.id);
   }catch(err){
@@ -162,7 +173,7 @@ async function creativeSubmitCreate(){
 async function creativeOpenProject(id, opts){
   const project = await api('/api/creative-studio/projects/' + id);
   _creativeProject = project;
-  if(!(opts && opts.keepStage)) _creativeStage = 'brief';
+  if(!(opts && opts.keepStage) || !CREATIVE_STAGES.some(stage => stage.id === _creativeStage)) _creativeStage = 'who';
   await api('/api/creative-studio/active', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({project_id:id})});
   await creativeRefreshList();
   creativeRenderWorkspace();
@@ -211,9 +222,33 @@ function _creativeCreateMarkup(){
   </form>`;
 }
 
+function _creativeStatusLabel(status){
+  return CREATIVE_STATUS[status] || 'Draft';
+}
+
 function creativeSetStage(stage){
+  if(!CREATIVE_STAGES.some(item => item.id === stage)) return;
+  Object.keys(_creativeTimers).forEach(field => {
+    clearTimeout(_creativeTimers[field]);
+    creativeSaveField(field);
+  });
   _creativeStage = stage;
   creativeRenderWorkspace();
+  const tab = document.getElementById('creativeTab-' + stage);
+  if(tab) tab.focus();
+}
+
+function creativeStageKey(event){
+  const keys = ['ArrowRight','ArrowLeft','Home','End'];
+  if(!keys.includes(event.key)) return;
+  event.preventDefault();
+  const index = CREATIVE_STAGES.findIndex(stage => stage.id === _creativeStage);
+  let next = index;
+  if(event.key === 'ArrowRight') next = (index + 1) % CREATIVE_STAGES.length;
+  if(event.key === 'ArrowLeft') next = (index - 1 + CREATIVE_STAGES.length) % CREATIVE_STAGES.length;
+  if(event.key === 'Home') next = 0;
+  if(event.key === 'End') next = CREATIVE_STAGES.length - 1;
+  creativeSetStage(CREATIVE_STAGES[next].id);
 }
 
 function creativeMoveStage(delta){
@@ -236,11 +271,11 @@ function creativeRenderWorkspace(){
     return;
   }
   const project = _creativeProject;
-  const stage = project.stages[_creativeStage];
-  const assistantClass = _creativeAssistantOpen ? 'creative-assistant' : 'creative-assistant collapsed';
+  const stage = project.stages[_creativeStage] || {fields:{}, status:'not_started'};
+  const chatClass = _creativeChatOpen ? 'creative-chat' : 'creative-chat collapsed';
   root.innerHTML = `
     <div class="creative-header">
-      <div>
+      <div class="creative-header-title">
         <strong>${_creativeEsc(project.name)}</strong>
         <span class="creative-save ${_creativeSaveState === 'Save failed' ? 'failed' : ''}" id="creativeSaveState">${_creativeEsc(_creativeSaveState)}</span>
       </div>
@@ -248,50 +283,108 @@ function creativeRenderWorkspace(){
         <button type="button" onclick="creativeRenameProject('${project.id}')">Rename</button>
         <button type="button" onclick="creativeDuplicateProject('${project.id}')">Duplicate</button>
         <button type="button" onclick="creativeDeleteProject('${project.id}')">Delete</button>
-        <button type="button" onclick="creativeExport()">Export</button>
-        <button type="button" onclick="creativeRetrySave()">Retry</button>
+        <button type="button" onclick="creativeToggleExport()">Export</button>
+        ${_creativeSaveState === 'Save failed' ? '<button type="button" onclick="creativeRetrySave()">Retry</button>' : ''}
+        <button type="button" class="creative-ghost" onclick="creativeToggleChat()" aria-pressed="${_creativeChatOpen ? 'true' : 'false'}">${_creativeChatOpen ? 'Hide chat' : 'Show chat'}</button>
       </div>
     </div>
-    <div class="creative-body">
-      <nav class="creative-stages" aria-label="Framework stages">${CREATIVE_STAGES.map(item => {
-        const status = project.stages[item.id].status;
-        return `<button type="button" class="creative-stage-btn${item.id === _creativeStage ? ' active' : ''}" onclick="creativeSetStage('${item.id}')"><span>${item.label}</span><small>${_creativeEsc(status)}</small></button>`;
-      }).join('')}</nav>
-      <div class="creative-fields" id="creativeFields">${_creativeStageMarkup(stage)}</div>
-      <aside class="${assistantClass}" id="creativeAssistant">
-        <strong>Assistant</strong>
-        <p class="creative-help">Suggestions stay proposals until you choose Use or edit them into the field.</p>
-        <div id="creativeAssistantBody"></div>
+    <div class="creative-stagebar" role="tablist" aria-label="Framework stages" onkeydown="creativeStageKey(event)">${CREATIVE_STAGES.map(item => {
+      const status = (project.stages[item.id] && project.stages[item.id].status) || 'not_started';
+      const selected = item.id === _creativeStage;
+      return `<button type="button" role="tab" id="creativeTab-${item.id}" class="creative-stage-tab${selected ? ' active' : ''}" aria-selected="${selected ? 'true' : 'false'}" tabindex="${selected ? '0' : '-1'}" title="${_creativeEsc(item.title)}" onclick="creativeSetStage('${item.id}')"><span>${item.label}</span><i class="creative-dot creative-dot-${_creativeEsc(status)}" title="${_creativeEsc(_creativeStatusLabel(status))}"></i></button>`;
+    }).join('')}</div>
+    <div class="creative-body${_creativeChatOpen ? '' : ' chat-closed'}" style="--creative-chat-width:${_creativeChatWidth}px">
+      <div class="creative-fields" id="creativeFields" role="tabpanel" aria-labelledby="creativeTab-${_creativeStage}">${_creativeStageMarkup(stage)}</div>
+      <div class="creative-chat-resizer" role="separator" aria-orientation="vertical" aria-label="Resize chat" onpointerdown="creativeChatResizeStart(event)"></div>
+      <aside class="${chatClass}" id="creativeAssistant" aria-label="Project chat">
+        ${_creativeChatMarkup()}
       </aside>
-    </div>
-    <div class="creative-footer">
-      <button type="button" class="creative-ghost" onclick="creativeMoveStage(-1)">Back</button>
-      <button type="button" class="creative-ghost" onclick="creativeMarkStage()">Stage status</button>
-      <button type="button" class="creative-primary" onclick="creativeMoveStage(1)">Continue</button>
     </div>`;
-  _creativeRenderAssistantCards();
+  const log = document.getElementById('creativeChatLog');
+  if(log) log.scrollTop = log.scrollHeight;
+  const composer = document.getElementById('creativeChatInput');
+  if(composer && !_creativeChatBusy) composer.focus();
+}
+
+function creativeToggleChat(){
+  _creativeChatOpen = !_creativeChatOpen;
+  creativeRenderWorkspace();
+}
+
+function creativeChatResizeStart(event){
+  if(window.matchMedia('(max-width: 860px)').matches) return;
+  event.preventDefault();
+  const startX = event.clientX;
+  const startW = _creativeChatWidth;
+  function move(ev){
+    _creativeChatWidth = Math.max(260, Math.min(560, startW + (startX - ev.clientX)));
+    const body = document.querySelector('#creativeWorkspace .creative-body');
+    if(body) body.style.setProperty('--creative-chat-width', _creativeChatWidth + 'px');
+  }
+  function up(){
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+  }
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
 }
 
 function _creativeStageMarkup(stage){
-  const actions = _creativeStage === 'review' ? '' : `
-    <div class="creative-actions">
-      <button type="button" onclick="creativeAssist('suggest')">Suggest directions</button>
-      <button type="button" onclick="creativeAssist('clarify')">Clarify my thinking</button>
-      <button type="button" onclick="creativeAssist('critique')">Critique this stage</button>
-      <button type="button" onclick="creativeContinueAlone()">Continue on my own</button>
-    </div>`;
-  if(_creativeStage === 'brief'){
-    return actions + _creativeFieldInputs(stage) + '<button type="button" class="creative-inline-btn" onclick="creativeSummarizeBrief()">Summarize brief</button> <button type="button" class="creative-inline-btn" onclick="creativeConfirmSummary()">Confirm summary</button>';
-  }
+  const meta = CREATIVE_STAGES.find(item => item.id === _creativeStage);
+  const status = stage.status || 'not_started';
+  const options = Object.keys(CREATIVE_STATUS).map(key =>
+    `<option value="${key}" ${key === status ? 'selected' : ''}>${CREATIVE_STATUS[key]}</option>`
+  ).join('');
+  let extra = '';
   if(_creativeStage === 'what'){
     const checks = _creativeProject.concept_checks || {};
     const boxes = ['single_idea','plausibility','visualizability','villain'].map(key =>
       `<label><input type="checkbox" ${checks[key] ? 'checked' : ''} onchange="creativeToggleCheck('${key}', this.checked)"> ${_creativeEsc(key.replace(/_/g,' '))}</label>`
-    ).join(' ');
-    return actions + `<div class="creative-card"><strong>Concept checks</strong><p class="creative-help">Single idea, plausibility, visualizability, and a clear villain or false solution. This is a review panel, not a score.</p><div>${boxes}</div></div>` + _creativeFieldInputs(stage);
+    ).join('');
+    extra = `<div class="creative-card"><strong>Concept checks</strong><p class="creative-help">Single idea, plausibility, visualizability, and a clear villain or false solution.</p><div class="creative-checks">${boxes}</div></div>`;
   }
-  if(_creativeStage === 'review') return _creativeReviewMarkup();
-  return actions + _creativeFieldInputs(stage);
+  const exportBox = _creativeExportOpen ? `<div class="creative-card" id="creativeExportCard"><pre id="creativeExportPreview"></pre><button type="button" class="creative-inline-btn" onclick="creativeCopyExport()">Copy Markdown</button></div>` : '';
+  return `<div class="creative-stage-head"><div><h2>${_creativeEsc(meta ? meta.title : '')}</h2><p class="creative-help">Ask in the side chat to suggest, clarify, or critique. Nothing is selected for you.</p></div><label class="creative-status-select">Stage <select aria-label="Stage status" onchange="creativeMarkStage(this.value)">${options}</select></label></div>${exportBox}${extra}${_creativeFieldInputs(stage)}`;
+}
+
+function _creativeChatMarkup(){
+  const project = _creativeProject;
+  const messages = (project.chat || []).filter(item => item && item.text);
+  const stageMeta = CREATIVE_STAGES.find(item => item.id === _creativeStage);
+  const history = messages.length ? messages.map(item => {
+    const who = item.role === 'user' ? 'You' : 'Hermes';
+    return `<article class="creative-msg creative-msg-${_creativeEsc(item.role || 'assistant')}"><header>${who}${item.stage ? ` · ${_creativeEsc(item.stage)}` : ''}</header><p>${_creativeEsc(item.text)}</p></article>`;
+  }).join('') : '<p class="creative-help" id="creativeChatEmpty">No messages yet. Ask about this stage, or send <code>proposal field_name: the line</code> to save a proposal without changing the field.</p>';
+  const pending = _creativeOpenProposals();
+  return `<header class="creative-chat-head"><div><strong>Chat</strong><p>${_creativeEsc(project.name)} · ${_creativeEsc(stageMeta ? stageMeta.label : _creativeStage)}</p></div></header>
+    <div class="creative-chat-log" id="creativeChatLog">${_creativeChatError ? `<p class="creative-save failed" role="alert">${_creativeEsc(_creativeChatError)}</p>` : ''}${history}${pending}</div>
+    <form class="creative-composer" onsubmit="creativeSendChat(); return false;">
+      <label class="creative-scope"><input type="checkbox" id="creativeChatScope"> Discuss the whole project</label>
+      <textarea id="creativeChatInput" rows="3" placeholder="Discuss, challenge, or refine this stage" ${_creativeChatBusy ? 'disabled' : ''}></textarea>
+      <button type="submit" class="creative-primary" ${_creativeChatBusy ? 'disabled' : ''}>${_creativeChatBusy ? 'Sending…' : 'Send'}</button>
+    </form>`;
+}
+
+function _creativeOpenProposals(){
+  const stage = _creativeProject.stages[_creativeStage];
+  if(!stage) return '';
+  const cards = [];
+  Object.entries(stage.fields || {}).forEach(([field, slot]) => {
+    (slot.proposals || []).forEach(proposal => {
+      if(proposal.status === 'dismissed' || proposal.status === 'accepted' || proposal.status === 'edited_accepted') return;
+      const label = _creativeLabel(field);
+      cards.push(`<article class="creative-card" data-proposal="${_creativeEsc(proposal.id)}">
+        <div><strong>${_creativeEsc(label)}</strong> · proposal</div>
+        <p>${_creativeEsc(proposal.revised_text || proposal.text)}</p>
+        <div class="creative-actions">
+          <button type="button" onclick="creativeProposalAction('${proposal.id}','accept')">Apply to ${_creativeEsc(label)}</button>
+          <button type="button" onclick="creativeProposalAction('${proposal.id}','alternative')">Save as alternative</button>
+          <button type="button" onclick="creativeProposalAction('${proposal.id}','dismiss')">Dismiss</button>
+        </div>
+      </article>`);
+    });
+  });
+  return cards.join('');
 }
 
 function _creativeFieldInputs(stage){
@@ -302,43 +395,50 @@ function _creativeFieldInputs(stage){
   return names.map(name => {
     const slot = stage.fields[name];
     const help = CREATIVE_HELP[name] ? `<p class="creative-help">${_creativeEsc(CREATIVE_HELP[name])}</p><details><summary>Examples stay copywriting examples, not evidence.</summary><p class="creative-help">Use project sources. Do not treat a framework sample line as proof.</p></details>` : '';
-    const claimClass = slot.claim === 'needs_verification' || slot.regulated ? 'creative-claim needs' : 'creative-claim';
-    const copyTools = _creativeStage === 'copy' ? `<label><input type="checkbox" ${slot.include ? 'checked' : ''} onchange="creativeToggleInclude('${name}', this.checked)"> Include</label> <button type="button" class="creative-inline-btn" onclick="creativeNudgeOrder('${name}', -1)">Up</button> <button type="button" class="creative-inline-btn" onclick="creativeNudgeOrder('${name}', 1)">Down</button> <button type="button" class="creative-inline-btn" onclick="creativeMarkVerification('${name}')">Needs source/verification</button>` : '';
+    const claim = (slot.claim === 'needs_verification' || slot.regulated) ? '<span class="creative-claim needs">Needs source</span>' : '';
+    const copyTools = _creativeStage === 'copy' ? `<div class="creative-inline-tools"><label><input type="checkbox" ${slot.include ? 'checked' : ''} onchange="creativeToggleInclude('${name}', this.checked)"> Include</label> <button type="button" class="creative-inline-btn" onclick="creativeNudgeOrder('${name}', -1)">Up</button> <button type="button" class="creative-inline-btn" onclick="creativeNudgeOrder('${name}', 1)">Down</button></div>` : '';
+    const control = CREATIVE_SHORT.has(name)
+      ? `<input data-creative-field="${name}" value="${_creativeEsc(slot.text || '')}" oninput="creativeScheduleSave('${name}')">`
+      : `<textarea data-creative-field="${name}" rows="4" oninput="creativeScheduleSave('${name}')">${_creativeEsc(slot.text || '')}</textarea>`;
     return `<div class="creative-field" data-field="${name}">
-      <label>${_creativeEsc(_creativeLabel(name))} <span class="${claimClass}">${_creativeEsc(slot.claim || 'user_approved')}${slot.regulated ? ' · needs verification' : ''}</span></label>
-      ${help}
+      <label for="">${_creativeEsc(_creativeLabel(name))} ${claim}</label>
+      ${help ? `<details class="creative-help-more"><summary>What does this mean?</summary>${help}</details>` : ''}
       ${copyTools}
-      <textarea data-creative-field="${name}" rows="${name.startsWith('summary_') ? 3 : 2}" oninput="creativeScheduleSave('${name}')">${_creativeEsc(slot.text || '')}</textarea>
-      <div class="creative-proposals" data-proposals="${name}"></div>
+      ${control}
     </div>`;
   }).join('');
 }
 
-function _creativeRenderAssistantCards(){
-  const body = document.getElementById('creativeAssistantBody');
-  if(!body || !_creativeProject) return;
-  const stage = _creativeProject.stages[_creativeStage];
-  const cards = [];
-  Object.entries(stage.fields || {}).forEach(([field, slot]) => {
-    (slot.proposals || []).forEach(proposal => {
-      if(proposal.status === 'dismissed' || proposal.status === 'accepted' || proposal.status === 'edited_accepted') return;
-      cards.push(`<article class="creative-card" data-proposal="${_creativeEsc(proposal.id)}">
-        <div><strong>${_creativeEsc(field)}</strong> · ${_creativeEsc(proposal.status)}${proposal.exploratory ? ' · exploratory' : ''}</div>
-        <p>${_creativeEsc(proposal.revised_text || proposal.text)}</p>
-        ${proposal.discussion ? `<p class="creative-help">${_creativeEsc(proposal.discussion)}</p>` : ''}
-        <div class="creative-actions">
-          <button type="button" onclick="creativeProposalAction('${proposal.id}','accept')">Use</button>
-          <button type="button" onclick="creativeEditProposal('${proposal.id}')">Edit</button>
-          <button type="button" onclick="creativeProposalAction('${proposal.id}','alternative')">Save alternative</button>
-          <button type="button" onclick="creativeProposalAction('${proposal.id}','dismiss')">Dismiss</button>
-        </div>
-      </article>`);
+async function creativeSendChat(){
+  if(!_creativeProject || _creativeChatBusy) return;
+  const input = document.getElementById('creativeChatInput');
+  const text = input ? input.value.trim() : '';
+  if(!text) return;
+  const scopeBox = document.getElementById('creativeChatScope');
+  _creativeChatBusy = true;
+  _creativeChatError = '';
+  creativeRenderWorkspace();
+  try{
+    const result = await api('/api/creative-studio/chat', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        project_id:_creativeProject.id,
+        stage:_creativeStage,
+        text,
+        scope: scopeBox && scopeBox.checked ? 'project' : 'stage',
+      }),
     });
-  });
-  body.innerHTML = cards.join('') || '<p class="creative-help">No open proposals on this stage.</p>';
-  if(cards.length) _creativeAssistantOpen = true;
-  const aside = document.getElementById('creativeAssistant');
-  if(aside) aside.classList.toggle('collapsed', !_creativeAssistantOpen);
+    _creativeProject.chat = result.chat || _creativeProject.chat || [];
+    if(result.proposals && result.proposals.length){
+      await creativeReloadQuiet();
+    }
+  }catch(err){
+    _creativeChatError = err && err.message ? err.message : 'Could not send the message.';
+  }finally{
+    _creativeChatBusy = false;
+    creativeRenderWorkspace();
+  }
 }
 
 function creativeScheduleSave(field){
@@ -384,51 +484,10 @@ async function creativeReloadQuiet(){
   if(!_creativeProject || _creativeDirty) return;
   const fresh = await api('/api/creative-studio/projects/' + _creativeProject.id);
   _creativeProject = fresh;
-  const focused = document.activeElement && document.activeElement.getAttribute && document.activeElement.getAttribute('data-creative-field');
-  if(focused){
-    _creativeRenderAssistantCards();
-    return;
-  }
+  const active = document.activeElement;
+  const focused = active && active.getAttribute && active.getAttribute('data-creative-field');
+  if(focused || (active && active.id === 'creativeChatInput')) return;
   creativeRenderWorkspace();
-}
-
-function creativeContinueAlone(){
-  _creativeAssistantOpen = false;
-  const aside = document.getElementById('creativeAssistant');
-  if(aside) aside.classList.add('collapsed');
-}
-
-async function creativeAssist(action){
-  if(!_creativeProject) return;
-  _creativeAssistantOpen = true;
-  const result = await api('/api/creative-studio/assist', {
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({project_id:_creativeProject.id, stage:_creativeStage, action}),
-  });
-  const box = document.getElementById('msg');
-  if(box){
-    box.value = result.message;
-    if(typeof send === 'function') send();
-  }
-  const body = document.getElementById('creativeAssistantBody');
-  if(body){
-    const note = document.createElement('p');
-    note.className = 'creative-help';
-    note.textContent = 'Asked chat to ' + action + ' this stage. Proposals show up here after they are saved. Nothing is selected for you.';
-    body.prepend(note);
-  }
-  const aside = document.getElementById('creativeAssistant');
-  if(aside) aside.classList.remove('collapsed');
-}
-
-function creativeSummarizeBrief(){
-  if(!_creativeProject) return;
-  const box = document.getElementById('msg');
-  if(!box) return;
-  box.value = `Creative Studio project ${_creativeProject.id} (${_creativeProject.name}). Read the brief with get_creative_project. Then update_creative_field for summary_provided, summary_assumptions, and summary_missing. Do not copy assumptions into product facts or any other field. Label assumptions as assumptions.`;
-  if(typeof send === 'function') send();
-  _creativeAssistantOpen = true;
 }
 
 async function creativeConfirmSummary(){
@@ -505,12 +564,11 @@ async function creativeMarkVerification(field){
   await creativeOpenProject(_creativeProject.id, {keepStage:true});
 }
 
-async function creativeMarkStage(){
-  const status = window.prompt('Stage status: draft, approved, review_recommended, not_applicable', _creativeProject.stages[_creativeStage].status);
+async function creativeMarkStage(status){
   if(!status) return;
   let reason = '';
   if(status === 'not_applicable'){
-    reason = window.prompt('Short reason') || '';
+    reason = window.prompt('Short reason for skipping this stage') || '';
     if(!reason.trim()) return;
   }
   await api('/api/creative-studio/projects/' + _creativeProject.id + '/stage', {
@@ -520,25 +578,10 @@ async function creativeMarkStage(){
   await creativeOpenProject(_creativeProject.id, {keepStage:true});
 }
 
-function _creativeReviewMarkup(){
-  const options = _creativeProject.export_options || {};
-  const groups = CREATIVE_STAGES.filter(stage => stage.id !== 'review').map(stage => {
-    const row = _creativeProject.stages[stage.id];
-    const fields = Object.entries(row.fields).map(([name, slot]) => {
-      const alts = (slot.proposals || []).filter(item => item.status === 'alternative');
-      return `<div class="creative-field"><strong>${_creativeEsc(_creativeLabel(name))}</strong>
-        <span class="creative-claim">${_creativeEsc(slot.author || 'user')} · ${_creativeEsc(slot.claim || 'user_approved')}${slot.regulated ? ' · needs verification' : ''}</span>
-        <p>${_creativeEsc(slot.text || '')}</p>
-        ${alts.length ? `<p class="creative-help">${alts.length} saved alternative(s)</p>` : ''}
-      </div>`;
-    }).join('');
-    return `<section><h3>${stage.label}</h3><p class="creative-help">${_creativeEsc(row.status)}</p>${fields}</section>`;
-  }).join('');
-  return `<label><input type="checkbox" id="creativeIncludeAlts" ${options.include_alternatives ? 'checked' : ''} onchange="creativeSetExportFlag(this.checked)"> Include saved alternatives</label>
-    <div id="creativeReviewBody">${groups}</div>
-    <pre id="creativeExportPreview" class="creative-card"></pre>
-    <button type="button" class="creative-inline-btn" onclick="creativeExport()">Refresh Markdown</button>
-    <button type="button" class="creative-inline-btn" onclick="creativeCopyExport()">Copy to clipboard</button>`;
+function creativeToggleExport(){
+  _creativeExportOpen = !_creativeExportOpen;
+  creativeRenderWorkspace();
+  if(_creativeExportOpen) creativeExport();
 }
 
 async function creativeSetExportFlag(include){
@@ -556,7 +599,8 @@ async function creativeExport(){
   const data = await api(`/api/creative-studio/projects/${_creativeProject.id}/export?include_alternatives=${flag}`);
   let preview = document.getElementById('creativeExportPreview');
   if(!preview){
-    creativeSetStage('review');
+    _creativeExportOpen = true;
+    creativeRenderWorkspace();
     preview = document.getElementById('creativeExportPreview');
   }
   if(preview) preview.textContent = data.markdown || '';

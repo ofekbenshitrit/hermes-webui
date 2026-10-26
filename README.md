@@ -217,8 +217,8 @@ If an AI assistant is helping with install, reinstall, bootstrap, provider setup
 - Context usage indicator in composer footer -- token count, cost, and fill bar (model-aware)
 
 ### Creative Studio
-- Sidebar tab for ad-creative projects (brief, audience, message, hook, CASTS, copy blocks, review). Projects live under `HERMES_WEBUI_STATE_DIR/creative_studio/<profile>/` and are separate from session projects.
-- Fields autosave. Agent output is stored as a proposal until you choose Use, edit it into the field, or keep it as an alternative. Changing an earlier stage keeps later text and marks those stages Review recommended.
+- Sidebar tab for ad-creative projects (Who, What, Hook, Creative, Copy). Product context stays in Hermes notes. A stored brief, if an older project has one, is not a stage in the editor. Projects live under `HERMES_WEBUI_STATE_DIR/creative_studio/<profile>/` and are separate from session projects.
+- The project workspace is a horizontal stage bar, the fields for the selected stage, and a side chat. The chat thread is stored on the project. A line becomes a proposal only when you send `proposal field_name: text`. Apply, save as alternative, and dismiss stay explicit. Fields autosave. Changing an earlier stage keeps later text and marks those stages as needing review.
 - The same records are exposed on the `hermes-webui` MCP server (`list_creative_projects`, `get_creative_project`, `update_creative_field`, `save_creative_proposal`, `accept_creative_proposal`, and the other `creative` tools). Chat should read the project before suggesting, and discussion does not replace the selected answer.
 - Review exports Markdown and can copy it to the clipboard. Alternatives are included only when you ask. Claim labels travel with the export. The export does not certify legal or platform compliance, and it does not generate a finished ad.
 

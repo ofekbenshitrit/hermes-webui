@@ -241,6 +241,35 @@ def test_static_panel_wires_stage_switch_proposals_and_export():
     assert "window.prompt('Project name')" not in script
     assert "function creativeSetStage" in script
     assert "function creativeProposalAction" in script
+    assert "function creativeSendChat" in script
+    assert "role=\"tablist\"" in script
+    assert "Suggest directions" not in script
     assert "function creativeExport" in script
     assert "function creativeCopyExport" in script
-    assert "Continue never accepts" in script or "Nothing is selected for you." in script
+    assert "Nothing is selected for you." in script
+
+
+def test_studio_chat_persists_without_changing_the_field(studio):
+    project = studio.create_project("Thread", "Mug")
+    studio.update_field(project["id"], "who", "segment", "Night bakers", author="user")
+    posted = studio.post_studio_chat(project["id"], "who", "What should the hook lean on?")
+    assert posted["proposals"] == []
+    assert studio.get_project(project["id"], field="segment")["data"]["text"] == "Night bakers"
+    saved = studio.post_studio_chat(project["id"], "who", "proposal outcome: Wake up before the alarm")
+    assert saved["proposals"][0]["field"] == "outcome"
+    assert studio.get_project(project["id"], field="outcome")["data"]["text"] == ""
+    reopened = studio.get_project(project["id"])
+    assert len(reopened["chat"]) == 4
+    assert "Night bakers" in reopened["chat"][1]["text"]
+
+
+def test_legacy_project_without_chat_still_opens(studio, tmp_path):
+    project = studio.create_project("Legacy")
+    path = studio._project_path(project["id"])
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw.pop("chat", None)
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    loaded = studio.get_project(project["id"])
+    assert loaded["chat"] == []
+    assert "brief" in loaded["stages"]
+    assert loaded["stages"]["who"]["fields"]["outcome"]["text"] == ""

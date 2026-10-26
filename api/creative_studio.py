@@ -256,6 +256,7 @@ def _blank_project(name: str, product: str = "") -> dict:
             "include_alternatives": False,
             "excluded_blocks": [],
         },
+        "chat": [],
     }
 
 
@@ -280,7 +281,10 @@ def _load(project_id: str) -> dict:
     path = _project_path(project_id)
     if not path.is_file():
         raise StudioError("project not found", status=404)
-    return _read_json(path)
+    project = _read_json(path)
+    if not isinstance(project.get("chat"), list):
+        project["chat"] = []
+    return project
 
 
 def _save(project: dict) -> dict:
@@ -1072,6 +1076,13 @@ def handle_creative_post(handler, parsed, body: dict):
         ))
     if path == "/api/creative-studio/active":
         return _http_call(handler, lambda: set_active_project(str(body.get("project_id") or "")))
+    if path == "/api/creative-studio/chat":
+        return _http_call(handler, lambda: post_studio_chat(
+            str(body.get("project_id") or ""),
+            str(body.get("stage") or ""),
+            body.get("text") or "",
+            scope=str(body.get("scope") or "stage"),
+        ))
     if path == "/api/creative-studio/assist":
         return _http_call(handler, lambda: assist_message(
             str(body.get("project_id") or ""),
@@ -1177,6 +1188,113 @@ def handle_creative_delete(handler, parsed):
     if parsed.path != prefix + project_id:
         return False
     return _http_call(handler, lambda: delete_project(project_id))
+
+
+_PROPOSAL_LINE = re.compile(
+    r"(?im)^\s*(?:proposal|save(?:\s+as\s+proposal)?|apply\s+to)\s+([a-z_ ]+?)\s*:\s*(.+?)\s*$"
+)
+
+
+def _chat_context_lines(project: dict, stage: str, scope: str) -> tuple[list[str], list[str]]:
+    stages = [stage] if scope != "project" else [name for name in STAGES if name != "review"]
+    lines = []
+    missing = []
+    seen = set()
+    for name in stages:
+        row = project["stages"].get(name) or {}
+        for field, slot in (row.get("fields") or {}).items():
+            text = (slot.get("text") or "").strip()
+            if text:
+                lines.append(f"{name}.{field}: {text}")
+            key = (name, field)
+            if key not in seen and not text and name == stage:
+                seen.add(key)
+    if stage in FIELDS and stage != "review":
+        for field in FIELDS[stage]:
+            _context, field_missing = _suggestion_bundle(project, field)
+            for item in field_missing:
+                if item not in missing:
+                    missing.append(item)
+    return lines, missing
+
+
+def post_studio_chat(project_id: str, stage: str, text: str, scope: str = "stage") -> dict:
+    """Append a studio thread turn. Writes a proposal only when the user names one."""
+    cleaned = (text or "").strip()
+    if not cleaned:
+        raise StudioError("message is required")
+    if len(cleaned) > 8000:
+        raise StudioError("message is too long")
+    if stage not in FIELDS or stage in {"brief", "review"}:
+        raise StudioError("unknown stage")
+    scope = "project" if scope == "project" else "stage"
+    saved = []
+    for match in _PROPOSAL_LINE.finditer(cleaned):
+        raw_field = match.group(1).strip().lower().replace(" ", "_")
+        body = match.group(2).strip()
+        if not body:
+            continue
+        owner = stage
+        if raw_field not in FIELDS.get(stage, ()):
+            try:
+                owner = _stage_for_field(raw_field)
+            except StudioError:
+                continue
+            if raw_field not in FIELDS[owner]:
+                continue
+        result = save_proposal(project_id, owner, raw_field, body, discussion=cleaned[:500])
+        saved.append({
+            "id": result["proposal"]["id"],
+            "stage": owner,
+            "field": raw_field,
+            "text": body,
+        })
+    with _lock_for(_profile_dir()):
+        project = _load(project_id)
+        lines, missing = _chat_context_lines(project, stage, scope)
+        now = _now()
+        user_msg = {
+            "id": _new_id(),
+            "role": "user",
+            "text": cleaned,
+            "stage": stage,
+            "scope": scope,
+            "created_at": now,
+        }
+        parts = [
+            f"Looking at {project['name']}"
+            + (f", stage {stage}." if scope == "stage" else ", across the project."),
+        ]
+        if lines:
+            parts.append("Saved context:\n" + "\n".join(lines[:24]))
+        else:
+            parts.append("This view has no saved field text yet. Hermes product notes stay outside the project until you write a field or a proposal.")
+        if missing:
+            parts.append("Still empty for suggestions on this stage: " + ", ".join(missing[:12]) + ".")
+        if saved:
+            parts.append(
+                "Saved "
+                + ", ".join(f"{item['field']} proposal" for item in saved)
+                + ". The selected field is unchanged until you apply it."
+            )
+        else:
+            parts.append(
+                "Nothing was written to the project. To keep a line as a proposal, send "
+                "`proposal field_name: the line`. Applying it is a separate step."
+            )
+        assistant = {
+            "id": _new_id(),
+            "role": "assistant",
+            "text": "\n\n".join(parts),
+            "stage": stage,
+            "scope": scope,
+            "created_at": now,
+            "proposals": saved,
+        }
+        project.setdefault("chat", []).extend([user_msg, assistant])
+        project["chat"] = project["chat"][-200:]
+        _save(project)
+    return {"messages": [user_msg, assistant], "chat": project["chat"], "proposals": saved}
 
 
 def assist_message(project_id: str, stage: str, action: str) -> dict:
