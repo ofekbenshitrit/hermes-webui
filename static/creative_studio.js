@@ -44,6 +44,8 @@ let _creativeFocusField = '';
 let _creativeChatWidth = 340;
 let _creativeChatError = '';
 let _creativeChatBusy = false;
+let _creativeAgentLog = [];
+let _creativeAgentStream = null;
 let _creativeExportOpen = false;
 let _creativeSaveState = 'Saved';
 let _creativeTimers = {};
@@ -139,6 +141,7 @@ async function creativeOpenProject(id, opts){
   if(!(opts && opts.keepStage) || !CREATIVE_STAGES.some(stage => stage.id === _creativeStage)) _creativeStage = 'who';
   await api('/api/creative-studio/active', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({project_id:id})});
   await creativeRefreshList();
+  await _creativeLoadAgentTranscript();
   creativeRenderWorkspace();
 }
 
@@ -449,11 +452,60 @@ function _creativeChatLogBody(history, pending){
   return `${error}${history}${pending}`;
 }
 
+function _creativeActiveThread(){
+  const project = _creativeProject;
+  if(!project) return null;
+  const threads = project.threads || [];
+  return threads.find(row => row.id === project.active_thread) || threads[threads.length - 1] || null;
+}
+
+function _creativeMessageText(item){
+  const raw = item && (item.content != null ? item.content : item.text);
+  if(typeof raw === 'string') return raw;
+  if(Array.isArray(raw)){
+    return raw.map(part => {
+      if(typeof part === 'string') return part;
+      return part && (part.text || part.content) || '';
+    }).join('');
+  }
+  return '';
+}
+
+function _creativeVisibleTurn(text){
+  return String(text || '').replace(/\n*\[studio project=[^\]]*\]\s*$/g, '').trim();
+}
+
+async function _creativeLoadAgentTranscript(){
+  const thread = _creativeActiveThread();
+  _creativeAgentLog = [];
+  if(!thread || !thread.session_id) return;
+  const sessionId = thread.session_id;
+  try{
+    const data = await api('/api/session?session_id=' + encodeURIComponent(sessionId));
+    if(!_creativeActiveThread() || _creativeActiveThread().session_id !== sessionId) return;
+    const rows = (data.session && data.session.messages) || [];
+    _creativeAgentLog = rows.map(item => {
+      const role = item.role === 'user' ? 'user' : (item.role === 'assistant' ? 'assistant' : '');
+      if(!role) return null;
+      const text = _creativeVisibleTurn(_creativeMessageText(item));
+      if(!text) return null;
+      return {role, text};
+    }).filter(Boolean);
+  }catch(err){
+    _creativeChatError = err && err.message ? err.message : 'Could not load the agent session.';
+  }
+}
+
 function _creativeChatHistory(){
   const project = _creativeProject;
   const focus = _creativeFocusField;
-  const messages = (project.chat || []).filter(item => {
+  const thread = _creativeActiveThread();
+  const source = thread && thread.session_id
+    ? _creativeAgentLog
+    : (project.chat || []);
+  const messages = source.filter(item => {
     if(!item || !item.text) return false;
+    if(thread && thread.session_id) return true;
     if(!focus) return true;
     return item.field === focus;
   });
@@ -611,6 +663,7 @@ async function creativeNewChatTab(){
   const view = await api('/api/creative-studio/projects/' + _creativeProject.id + '/threads', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
   _creativeApplyThreads(view);
   _creativeChatError = '';
+  await _creativeLoadAgentTranscript();
   _creativeSyncLive();
   const input = document.getElementById('creativeChatInput');
   if(input) input.focus();
@@ -621,6 +674,7 @@ async function creativeSelectChatTab(id){
   const view = await api('/api/creative-studio/projects/' + _creativeProject.id + '/threads/active', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({thread_id:id})});
   _creativeApplyThreads(view);
   _creativeChatError = '';
+  await _creativeLoadAgentTranscript();
   _creativeSyncLive();
 }
 
@@ -629,6 +683,7 @@ async function creativeCloseChatTab(event, id){
   if(!_creativeProject || !id) return;
   const view = await api('/api/creative-studio/projects/' + _creativeProject.id + '/threads/close', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({thread_id:id})});
   _creativeApplyThreads(view);
+  await _creativeLoadAgentTranscript();
   _creativeSyncLive();
 }
 
@@ -685,15 +740,15 @@ function _creativeMessageSuggestions(item){
     const previous = (itemProposal.previous || '').trim();
     const next = ((live && (live.revised_text || live.text)) || itemProposal.text || '').trim();
     const before = previous
-      ? `<div class="creative-suggest-block"><span>Now</span><p dir="auto">${_creativeEsc(previous)}</p></div>`
-      : `<div class="creative-suggest-block"><span>Now</span><p>Empty</p></div>`;
+      ? `<p class="creative-suggest-now" dir="auto">${_creativeEsc(previous)}</p>`
+      : '';
     return `<article class="creative-suggest" data-proposal="${_creativeEsc(itemProposal.id)}">
-      <div class="creative-suggest-kicker">Replace ${_creativeEsc(label)}</div>
+      <p class="creative-suggest-kicker">${_creativeEsc(label)}</p>
       ${before}
-      <div class="creative-suggest-block creative-suggest-next"><span>Suggestion</span><p dir="auto">${_creativeEsc(next)}</p></div>
+      <p class="creative-suggest-next" dir="auto">${_creativeEsc(next)}</p>
       <div class="creative-actions">
-        <button type="button" class="creative-primary" onclick="creativeProposalAction('${itemProposal.id}','accept')">Replace field</button>
-        <button type="button" onclick="creativeProposalAction('${itemProposal.id}','dismiss')">Dismiss</button>
+        <button type="button" class="creative-suggest-apply" onclick="creativeProposalAction('${itemProposal.id}','accept')">Replace</button>
+        <button type="button" class="creative-suggest-dismiss" onclick="creativeProposalAction('${itemProposal.id}','dismiss')">Dismiss</button>
       </div>
     </article>`;
   }).join('');
@@ -728,11 +783,11 @@ function _creativeOpenProposals(){
       );
       if(shownInThread) return;
       cards.push(`<article class="creative-suggest" data-proposal="${_creativeEsc(proposal.id)}">
-        <div class="creative-suggest-kicker">Replace ${_creativeEsc(label)}</div>
-        <div class="creative-suggest-block creative-suggest-next"><span>Suggestion</span><p dir="auto">${_creativeEsc(proposal.revised_text || proposal.text)}</p></div>
+        <p class="creative-suggest-kicker">${_creativeEsc(label)}</p>
+        <p class="creative-suggest-next" dir="auto">${_creativeEsc(proposal.revised_text || proposal.text)}</p>
         <div class="creative-actions">
-          <button type="button" class="creative-primary" onclick="creativeProposalAction('${proposal.id}','accept')">Replace field</button>
-          <button type="button" onclick="creativeProposalAction('${proposal.id}','dismiss')">Dismiss</button>
+          <button type="button" class="creative-suggest-apply" onclick="creativeProposalAction('${proposal.id}','accept')">Replace</button>
+          <button type="button" class="creative-suggest-dismiss" onclick="creativeProposalAction('${proposal.id}','dismiss')">Dismiss</button>
         </div>
       </article>`);
     });
@@ -1115,6 +1170,13 @@ document.addEventListener('click', event => {
   closeCreativeSessionMenu();
 });
 
+function _creativeStopAgentStream(){
+  if(_creativeAgentStream){
+    _creativeAgentStream.close();
+    _creativeAgentStream = null;
+  }
+}
+
 async function creativeSendChat(){
   if(!_creativeProject || _creativeChatBusy) return;
   const input = document.getElementById('creativeChatInput');
@@ -1124,46 +1186,95 @@ async function creativeSendChat(){
   const choice = _creativeStudioModel();
   const model = choice.model;
   const modelProvider = choice.provider;
+  const scope = _creativeFocusField ? 'field' : (scopeBox && scopeBox.getAttribute('aria-pressed') === 'true' ? 'project' : 'stage');
+  const field = _creativeFocusField || '';
   _creativeChatBusy = true;
   _creativeChatError = '';
   if(input) input.value = '';
-  if(!_creativeProject.chat) _creativeProject.chat = [];
-  _creativeProject.chat.push({
-    role:'user',
-    text,
-    field:_creativeFocusField || '',
-    pending:true,
-  });
+  _creativeAgentLog.push({role:'user', text, pending:true});
   _creativeSyncLive();
+  let sessionId = '';
   try{
-    const result = await api('/api/creative-studio/chat', {
+    let thread = _creativeActiveThread();
+    if(!thread || !thread.id) throw new Error('Open a chat first.');
+    sessionId = thread.session_id || '';
+    if(!sessionId){
+      const created = await api('/api/session/new', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+          worktree:false,
+          profile:(typeof S !== 'undefined' && S.activeProfile) || 'default',
+          workspace:(typeof S !== 'undefined' && ((S.session && S.session.workspace) || S._profileDefaultWorkspace)) || undefined,
+          model: model || undefined,
+          model_provider: modelProvider || undefined,
+        }),
+      });
+      sessionId = created && created.session && created.session.session_id;
+      if(!sessionId) throw new Error('Could not start an agent session.');
+      const view = await api('/api/creative-studio/projects/' + _creativeProject.id + '/threads/session', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({thread_id:thread.id, session_id:sessionId}),
+      });
+      _creativeApplyThreads(view);
+      if(typeof renderSessionList === 'function') void renderSessionList();
+    }
+    const marker = `[studio project=${_creativeProject.id} name=${_creativeProject.name} stage=${_creativeStage} scope=${scope}${field ? ' field=' + field : ''}]`;
+    const message = text + '\n\n' + marker + ' Read this Creative Studio project with the Creative Studio tools before you answer. Save drafts with save_creative_proposal. Change a field only when I explicitly ask.';
+    const start = await api('/api/chat/start', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({
-        project_id:_creativeProject.id,
-        stage:_creativeStage,
-        text,
-        scope: _creativeFocusField ? 'field' : (scopeBox && scopeBox.getAttribute('aria-pressed') === 'true' ? 'project' : 'stage'),
-        field: _creativeFocusField || '',
-        model,
-        model_provider: modelProvider,
-        thread_id: _creativeProject.active_thread || '',
+        session_id:sessionId,
+        message,
+        model: model || undefined,
+        model_provider: modelProvider || undefined,
+        profile:(typeof S !== 'undefined' && S.activeProfile) || 'default',
+        workspace:(typeof S !== 'undefined' && S.session && S.session.workspace) || undefined,
       }),
     });
-    _creativeApplyThreads(result);
-    if(!result.threads) _creativeProject.chat = result.chat || _creativeProject.chat || [];
-    if(result.proposals && result.proposals.length){
-      await creativeReloadQuiet();
-    }else{
-      _creativeSyncLive();
-    }
+    const streamId = start && start.stream_id;
+    if(!streamId) throw new Error('The agent did not start.');
+    _creativeAgentLog.push({role:'assistant', text:''});
+    await new Promise((resolve, reject) => {
+      _creativeStopAgentStream();
+      const src = new EventSource(new URL('api/chat/stream?stream_id=' + encodeURIComponent(streamId), document.baseURI || location.href).href);
+      _creativeAgentStream = src;
+      let settled = false;
+      const finish = (err) => {
+        if(settled) return;
+        settled = true;
+        src.close();
+        if(_creativeAgentStream === src) _creativeAgentStream = null;
+        if(err) reject(err);
+        else resolve();
+      };
+      src.addEventListener('token', event => {
+        try{
+          const data = JSON.parse(event.data);
+          const last = _creativeAgentLog[_creativeAgentLog.length - 1];
+          if(last && last.role === 'assistant') last.text += data.text || '';
+          _creativeSyncLive();
+        }catch(_){ }
+      });
+      src.addEventListener('done', () => finish());
+      src.addEventListener('stream_end', () => finish());
+      src.addEventListener('apperror', event => {
+        let messageText = 'The agent run failed.';
+        try{ messageText = JSON.parse(event.data).message || messageText; }catch(_){ }
+        finish(new Error(messageText));
+      });
+      src.onerror = () => finish(new Error('The agent stream closed.'));
+    });
+    await _creativeLoadAgentTranscript();
+    await creativeReloadQuiet();
   }catch(err){
     _creativeChatError = err && err.message ? err.message : 'Could not send the message.';
     if(input) input.value = text;
-    const chat = _creativeProject && _creativeProject.chat;
-    if(chat){
-      const index = chat.findIndex(item => item && item.pending && item.text === text);
-      if(index >= 0) chat.splice(index, 1);
+    _creativeAgentLog = _creativeAgentLog.filter(item => !(item && item.pending && item.text === text));
+    if(sessionId){
+      try{ await _creativeLoadAgentTranscript(); }catch(_){ }
     }
   }finally{
     _creativeChatBusy = false;

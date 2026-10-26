@@ -313,6 +313,24 @@ def test_studio_chat_persists_without_changing_the_field(studio, monkeypatch):
     assert "who.segment:" not in seen["user"].split("Rest of the project", 1)[1]
 
 
+def test_studio_chat_tab_binds_one_agent_session(studio):
+    project = studio.create_project("Bound", "Mug")
+    opened = studio.create_chat_thread(project["id"])
+    bound = studio.bind_chat_session(project["id"], opened["active_thread"], "sess_studio_1")
+    match = next(row for row in bound["threads"] if row["id"] == opened["active_thread"])
+    assert match["session_id"] == "sess_studio_1"
+    again = studio.bind_chat_session(project["id"], opened["active_thread"], "sess_studio_1")
+    assert next(row for row in again["threads"] if row["id"] == opened["active_thread"])["session_id"] == "sess_studio_1"
+    try:
+        studio.bind_chat_session(project["id"], opened["active_thread"], "sess_studio_2")
+    except studio.StudioError as exc:
+        assert "already" in str(exc)
+    else:
+        raise AssertionError("expected a second session to be rejected")
+    copy = studio.duplicate_project(project["id"])
+    assert all(not row.get("session_id") for row in copy["threads"])
+
+
 def test_studio_chat_tabs_keep_separate_threads(studio):
     project = studio.create_project("Tabs", "Mug")
     first = studio.post_studio_chat(project["id"], "who", "First thread line")

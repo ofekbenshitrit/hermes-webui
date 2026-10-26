@@ -343,14 +343,23 @@ def _ensure_threads(project: dict) -> bool:
             if messages is not row.get("messages"):
                 changed = True
             title = str(row.get("title") or "").strip() or _thread_title(messages)
-            if title != row.get("title") or len(messages) > 200:
+            session_id = str(row.get("session_id") or "").strip()
+            if session_id and not re.fullmatch(r"[A-Za-z0-9_-]{8,80}", session_id):
+                session_id = ""
                 changed = True
-            threads.append({"id": thread_id, "title": title[:80], "messages": messages[-200:]})
+            if title != row.get("title") or len(messages) > 200 or session_id != (row.get("session_id") or ""):
+                changed = True
+            threads.append({
+                "id": thread_id,
+                "title": title[:80],
+                "messages": messages[-200:],
+                "session_id": session_id,
+            })
         if len(threads) != len(raw):
             changed = True
     if not threads:
         chat = project.get("chat") if isinstance(project.get("chat"), list) else []
-        threads = [{"id": _new_id(), "title": _thread_title(chat), "messages": list(chat)[-200:]}]
+        threads = [{"id": _new_id(), "title": _thread_title(chat), "messages": list(chat)[-200:], "session_id": ""}]
         changed = True
     if len(threads) > 12:
         threads = threads[-12:]
@@ -367,7 +376,12 @@ def _ensure_threads(project: dict) -> bool:
 def _thread_view(project: dict) -> dict:
     return {
         "threads": [
-            {"id": row["id"], "title": row["title"], "messages": row.get("messages") or []}
+            {
+                "id": row["id"],
+                "title": row["title"],
+                "messages": row.get("messages") or [],
+                "session_id": row.get("session_id") or "",
+            }
             for row in project.get("threads") or []
         ],
         "active_thread": project.get("active_thread") or "",
@@ -380,7 +394,7 @@ def create_chat_thread(project_id: str) -> dict:
         project = _load(project_id)
         if len(project["threads"]) >= 12:
             raise StudioError("too many chats")
-        thread = {"id": _new_id(), "title": "New chat", "messages": []}
+        thread = {"id": _new_id(), "title": "New chat", "messages": [], "session_id": ""}
         project["threads"].append(thread)
         project["active_thread"] = thread["id"]
         _sync_active_chat(project)
@@ -400,6 +414,25 @@ def activate_chat_thread(project_id: str, thread_id: str) -> dict:
         return _thread_view(project)
 
 
+def bind_chat_session(project_id: str, thread_id: str, session_id: str) -> dict:
+    """Attach a Hermes agent session to one studio chat tab."""
+    thread_id = (thread_id or "").strip()
+    session_id = (session_id or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9_-]{8,80}", session_id):
+        raise StudioError("invalid session id")
+    with _lock_for(_profile_dir()):
+        project = _load(project_id)
+        thread = next((row for row in project["threads"] if row["id"] == thread_id), None)
+        if thread is None:
+            raise StudioError("unknown chat")
+        existing = thread.get("session_id") or ""
+        if existing and existing != session_id:
+            raise StudioError("chat already has a session")
+        thread["session_id"] = session_id
+        _save(project)
+        return _thread_view(project)
+
+
 def close_chat_thread(project_id: str, thread_id: str) -> dict:
     thread_id = (thread_id or "").strip()
     with _lock_for(_profile_dir()):
@@ -408,7 +441,7 @@ def close_chat_thread(project_id: str, thread_id: str) -> dict:
         if len(remaining) == len(project["threads"]):
             raise StudioError("unknown chat")
         if not remaining:
-            remaining = [{"id": _new_id(), "title": "New chat", "messages": []}]
+            remaining = [{"id": _new_id(), "title": "New chat", "messages": [], "session_id": ""}]
         project["threads"] = remaining
         if project.get("active_thread") == thread_id:
             project["active_thread"] = remaining[-1]["id"]
@@ -705,6 +738,8 @@ def duplicate_project(project_id: str, name: str | None = None) -> dict:
             for slot in stage["fields"].values():
                 for proposal in slot.get("proposals") or []:
                     proposal["id"] = "p_" + _new_id()
+        for thread in project.get("threads") or []:
+            thread["session_id"] = ""
         _save(project)
         return project
 
@@ -1245,6 +1280,12 @@ def handle_creative_post(handler, parsed, body: dict):
         return _http_call(handler, lambda: activate_chat_thread(project_id, str(body.get("thread_id") or "")))
     if tail == "/threads/close":
         return _http_call(handler, lambda: close_chat_thread(project_id, str(body.get("thread_id") or "")))
+    if tail == "/threads/session":
+        return _http_call(handler, lambda: bind_chat_session(
+            project_id,
+            str(body.get("thread_id") or ""),
+            str(body.get("session_id") or ""),
+        ))
     if tail == "/rename":
         return _http_call(handler, lambda: rename_project(project_id, body.get("name") or ""))
     if tail == "/duplicate":
