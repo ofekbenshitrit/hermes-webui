@@ -1391,19 +1391,57 @@ def _recent_turns(project: dict, thread_id: str, limit: int = 8) -> str:
     return "\n".join(lines)
 
 
+_FIELD_TEXT_LIMIT = 480
+_PROJECT_CONTEXT_BUDGET = 6000
+
+
+def _compact_field_text(text: str, limit: int = _FIELD_TEXT_LIMIT) -> str:
+    collapsed = re.sub(r"\s+", " ", (text or "").strip())
+    if len(collapsed) <= limit:
+        return collapsed
+    return collapsed[: limit - 1].rstrip() + "…"
+
+
+def _project_context_lines(project: dict, omit: tuple[str, str] | None = None) -> list[str]:
+    """Filled fields across the project, in stage order, without the field under review."""
+    lines = []
+    used = 0
+    for name in STAGES:
+        if name == "review":
+            continue
+        row = (project.get("stages") or {}).get(name) or {}
+        slots = row.get("fields") or {}
+        ordered = list(FIELDS.get(name) or ()) or list(slots)
+        for field_name in ordered:
+            if omit and (name, field_name) == omit:
+                continue
+            text = _compact_field_text((slots.get(field_name) or {}).get("text") or "")
+            if not text:
+                continue
+            line = f"{name}.{field_name}: {text}"
+            if lines and used + len(line) > _PROJECT_CONTEXT_BUDGET:
+                return lines
+            lines.append(line)
+            used += len(line) + 1
+    return lines
+
+
+def _isolated_field_block(project: dict, stage: str, field: str) -> str:
+    slot = ((project.get("stages") or {}).get(stage) or {}).get("fields", {}).get(field) or {}
+    text = _compact_field_text(slot.get("text") or "", limit=1200) or "(empty)"
+    purpose = FIELD_HELP.get(field) or ""
+    block = f"{stage}.{field}: {text}"
+    if purpose:
+        block += f"\nPurpose: {purpose}"
+    return block
+
+
 def _chat_context_lines(project: dict, stage: str, scope: str, field: str = "") -> tuple[list[str], list[str]]:
     if scope == "field" and field:
         slot = project["stages"][stage]["fields"][field]
         text = (slot.get("text") or "").strip()
         lines = [f"{stage}.{field}: {text or '(empty)'}"]
-        context, missing = _suggestion_bundle(project, field)
-        for key, value in context.items():
-            if key == "brief":
-                for bit in value:
-                    lines.append(f"{bit['stage']}.{bit['field']}: {bit['text']}")
-                continue
-            if value.get("text"):
-                lines.append(f"{key}: {value['text']}")
+        _context, missing = _suggestion_bundle(project, field)
         return lines, missing
     stages = [stage] if scope != "project" else [name for name in STAGES if name != "review"]
     lines = []
@@ -1513,29 +1551,53 @@ def _draft_field_suggestions(project: dict, stage: str, scope: str, field: str, 
     for item in targets:
         state = item["text"] or "(empty)"
         blocks.append(f"{item['field']}: {state}")
-    context = "\n".join(lines[:24]) or "(no other saved field text)"
     guide = _field_guide(stage, field if scope == "field" else "")
     history = _recent_turns(project, "")
+    isolated = scope == "field" and bool(field)
+    if isolated:
+        context = "\n".join(_project_context_lines(project, omit=(stage, field))) or "(nothing else saved)"
+        subject = _isolated_field_block(project, stage, field)
+    else:
+        context = "\n".join(lines[:24]) or "(no other saved field text)"
+        subject = ""
     system = _studio_system(project, (
         "You draft Creative Studio field text using the Luke Iha method. "
         "Reply with JSON only, no markdown: "
         '{"suggestions":[{"field":"name","text":"replacement"}]}. '
-        "Return one suggestion for every requested field. "
-        "Write each field for its stated purpose. Concept is one idea, not features. "
+        + (
+            "The user wants feedback on one field. "
+            "Read the rest of the project as context and return one suggestion for that field only. "
+            if isolated else
+            "Return one suggestion for every requested field. "
+        )
+        + "Write each field for its stated purpose. Concept is one idea, not features. "
         "UMP is why the problem happens. UMS is how this product fixes it. "
         "If the field is empty, write a first answer. "
         "If the field already has text, rewrite the whole value using the user's note. "
         "Write about the named product."
     ))
-    user = (
-        f"Project: {project.get('name')}\n"
-        f"Stage: {stage}\n\n"
-        f"What each field is for:\n{guide}\n\n"
-        f"User note:\n{user_text}\n\n"
-        f"Earlier in this chat:\n{history or '(none)'}\n\n"
-        f"Saved context:\n{context}\n\n"
-        "Fields to revise:\n" + "\n".join(blocks)
-    )
+    if isolated:
+        user = (
+            f"Project: {project.get('name')}\n"
+            f"Stage: {stage}\n\n"
+            "Field under review:\n"
+            f"{subject}\n\n"
+            f"User note:\n{user_text}\n\n"
+            f"Earlier in this chat:\n{history or '(none)'}\n\n"
+            "Rest of the project, for context only:\n"
+            f"{context}\n\n"
+            "Revise only the field under review:\n" + "\n".join(blocks)
+        )
+    else:
+        user = (
+            f"Project: {project.get('name')}\n"
+            f"Stage: {stage}\n\n"
+            f"What each field is for:\n{guide}\n\n"
+            f"User note:\n{user_text}\n\n"
+            f"Earlier in this chat:\n{history or '(none)'}\n\n"
+            f"Saved context:\n{context}\n\n"
+            "Fields to revise:\n" + "\n".join(blocks)
+        )
     if model or provider:
         raw = complete_studio_prompt(system, user, model, provider)
     else:
@@ -1626,20 +1688,41 @@ def post_studio_chat(project_id: str, stage: str, text: str, scope: str = "stage
             preview_lines, _preview_missing = _chat_context_lines(preview, stage, scope, field)
             guide = _field_guide(stage, field if scope == "field" else "")
             history = _recent_turns(preview, thread_id)
-        answer = complete_studio_prompt(
-            _studio_system(preview, (
+            isolated = scope == "field" and bool(field)
+        if isolated:
+            question_user = (
+                f"Project: {preview.get('name')}\n\n"
+                "Answer about the field under review. The other fields are context.\n\n"
+                "Field under review:\n"
+                f"{_isolated_field_block(preview, stage, field)}\n\n"
+                "Rest of the project:\n"
+                + ("\n".join(_project_context_lines(preview, omit=(stage, field))) or "(nothing else saved)")
+                + f"\n\nEarlier in this chat:\n{history or '(none)'}\n\n"
+                f"Question:\n{cleaned}"
+            )
+            question_system = (
                 "You are Hermes inside Creative Studio, using the Luke Iha method. "
-                "Answer the user's question about this product or these fields. "
-                "Use the field purposes and what you already know about the product. "
+                "The user isolated one field for feedback. "
+                "Read every other saved field as context and answer about that field. "
                 "Plain sentences."
-            )),
-            (
+            )
+        else:
+            question_user = (
                 f"Project: {preview.get('name')}\n\n"
                 f"Field purposes:\n{guide}\n\n"
                 f"Saved fields:\n" + ("\n".join(preview_lines[:24]) or "(none)") + "\n\n"
                 f"Earlier in this chat:\n{history or '(none)'}\n\n"
                 f"Question:\n{cleaned}"
-            ),
+            )
+            question_system = (
+                "You are Hermes inside Creative Studio, using the Luke Iha method. "
+                "Answer the user's question about this product or these fields. "
+                "Use the field purposes and what you already know about the product. "
+                "Plain sentences."
+            )
+        answer = complete_studio_prompt(
+            _studio_system(preview, question_system),
+            question_user,
             model,
             model_provider,
         )
@@ -1678,7 +1761,7 @@ def post_studio_chat(project_id: str, stage: str, text: str, scope: str = "stage
             "created_at": now,
         }
         if scope == "field":
-            where = f"{stage}.{field} only"
+            where = f"feedback on {stage}.{field}, using the rest of the project"
         elif scope == "stage":
             where = f"the {stage} stage"
         else:

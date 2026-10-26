@@ -242,10 +242,13 @@ def test_static_panel_wires_stage_switch_proposals_and_export():
     assert "function creativeSetStage" in script
     assert "function creativeProposalAction" in script
     assert "function creativeSendChat" in script
+    send = script.split("async function creativeSendChat()", 1)[1].split("function creativeScheduleSave", 1)[0]
+    assert send.find("pending:true") < send.find("api('/api/creative-studio/chat'")
     assert "function creativeNewChatTab" in script
     assert "function creativeCloseChatTab" in script
     assert "creative-chat-menu-x" in script
     assert "CREATIVE_AGENT_PROFILE = 'copywriting'" in script
+    assert "CREATIVE_PROFILE_DEFAULT_MODEL = 'google/gemini-3.8-flash'" in script
     assert "api('/api/profiles'" in script
     assert 'aria-label="Chats"' in script
     assert 'id="creativeSessionChip"' in script
@@ -267,7 +270,7 @@ def test_static_panel_wires_stage_switch_proposals_and_export():
     assert "Replace field" in script
 
 
-def test_studio_chat_persists_without_changing_the_field(studio):
+def test_studio_chat_persists_without_changing_the_field(studio, monkeypatch):
     project = studio.create_project("Thread", "Mug")
     studio.update_field(project["id"], "who", "segment", "Night bakers", author="user")
     posted = studio.post_studio_chat(project["id"], "who", "What should the hook lean on?")
@@ -284,13 +287,30 @@ def test_studio_chat_persists_without_changing_the_field(studio):
     reopened = studio.get_project(project["id"])
     assert len(reopened["chat"]) == 4
     assert "Night bakers" in reopened["chat"][1]["text"]
+    studio.update_field(project["id"], "brief", "product_facts", "Ceramic, 12oz", author="user")
+    studio.update_field(project["id"], "what", "concept", "Quiet mornings beat louder alarms", author="user")
+    seen = {}
+
+    def fake(system, user, model="", provider=""):
+        seen["system"] = system
+        seen["user"] = user
+        return ""
+
+    monkeypatch.setattr(studio, "complete_studio_prompt", fake)
     isolated = studio.post_studio_chat(
         project["id"], "who", "Tighten this line", scope="field", field="segment"
     )
     assert isolated["messages"][0]["field"] == "segment"
     assert isolated["messages"][0]["scope"] == "field"
-    assert "who.segment only" in isolated["messages"][1]["text"]
+    assert "feedback on who.segment" in isolated["messages"][1]["text"]
     assert "who.segment: Night bakers" in isolated["messages"][1]["text"]
+    assert "Field under review" in seen["user"]
+    assert "who.segment: Night bakers" in seen["user"]
+    assert "brief.product_facts: Ceramic, 12oz" in seen["user"]
+    assert "what.concept: Quiet mornings beat louder alarms" in seen["user"]
+    assert "one field" in seen["system"]
+    assert seen["user"].index("Field under review") < seen["user"].index("Rest of the project")
+    assert "who.segment:" not in seen["user"].split("Rest of the project", 1)[1]
 
 
 def test_studio_chat_tabs_keep_separate_threads(studio):

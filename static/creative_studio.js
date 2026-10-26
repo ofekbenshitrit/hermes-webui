@@ -765,10 +765,11 @@ function _creativeFieldInputs(stage){
 }
 
 const CREATIVE_AGENT_PROFILE = 'copywriting';
+const CREATIVE_PROFILE_DEFAULT_MODEL = 'google/gemini-3.8-flash';
 let _creativeModel = '';
 let _creativeModelProvider = '';
 let _creativeModelChosen = false;
-let _creativeProfileModel = '';
+let _creativeProfileModel = CREATIVE_PROFILE_DEFAULT_MODEL;
 let _creativeProfileProvider = '';
 let _creativeProfileModelRequested = false;
 let _creativeModelDropdownHome = null;
@@ -847,7 +848,9 @@ function _creativeApplyRememberedModel(){
   const sel = document.getElementById('creativeModelSelect');
   if(!sel) return;
   const choice = _creativeStudioModel();
-  if(choice.model && typeof _applyModelToDropdown === 'function'){
+  if(choice.model && typeof _ensureModelOptionInDropdown === 'function'){
+    _ensureModelOptionInDropdown(choice.model, sel, choice.provider || null);
+  }else if(choice.model && typeof _applyModelToDropdown === 'function'){
     _applyModelToDropdown(choice.model, sel, choice.provider || null);
   }else if(!choice.model){
     sel.selectedIndex = -1;
@@ -861,8 +864,10 @@ function _creativeLoadProfileModel(){
   api('/api/profiles', {timeoutToast:false}).then(data => {
     const rows = data && Array.isArray(data.profiles) ? data.profiles : [];
     const profile = rows.find(row => row && row.name === CREATIVE_AGENT_PROFILE);
-    _creativeProfileModel = (profile && profile.model) || '';
-    _creativeProfileProvider = (profile && profile.provider) || '';
+    if(profile && profile.model){
+      _creativeProfileModel = profile.model;
+      _creativeProfileProvider = profile.provider || '';
+    }
     if(!_creativeModelChosen) _creativeApplyRememberedModel();
   }).catch(() => {});
 }
@@ -1122,7 +1127,14 @@ async function creativeSendChat(){
   _creativeChatBusy = true;
   _creativeChatError = '';
   if(input) input.value = '';
-  _creativeSyncBusy();
+  if(!_creativeProject.chat) _creativeProject.chat = [];
+  _creativeProject.chat.push({
+    role:'user',
+    text,
+    field:_creativeFocusField || '',
+    pending:true,
+  });
+  _creativeSyncLive();
   try{
     const result = await api('/api/creative-studio/chat', {
       method:'POST',
@@ -1148,6 +1160,11 @@ async function creativeSendChat(){
   }catch(err){
     _creativeChatError = err && err.message ? err.message : 'Could not send the message.';
     if(input) input.value = text;
+    const chat = _creativeProject && _creativeProject.chat;
+    if(chat){
+      const index = chat.findIndex(item => item && item.pending && item.text === text);
+      if(index >= 0) chat.splice(index, 1);
+    }
   }finally{
     _creativeChatBusy = false;
     _creativeSyncLive();
