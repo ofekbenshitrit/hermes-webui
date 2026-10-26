@@ -28,11 +28,11 @@ const CREATIVE_HELP = {
   demographic:'Who they are in observable terms.',
   facet:'The situation or belief that makes the message land.',
   segment:'Outcome, demographic, and facet written as one audience.',
-  concept:'One idea the ad is about.',
-  angle:'The point of view on that idea.',
-  ump:'Unique mechanism of the problem. Keep this separate from the solution.',
-  ums:'Unique mechanism of the solution. Keep this separate from the problem.',
-  mechanism:'How the product produces the outcome. Unsupported claims stay labeled Needs source/verification.',
+  concept:'One idea, not the feature list: the false belief colliding with the real mechanism. One sentence, showable, with a villain that is not the customer.',
+  angle:'The point of view: a false solution, the root-cause mechanism, us vs them, a daily moment, a counter-intuitive warning, or a functional before/after.',
+  ump:'Why the problem actually happens. Keep this separate from the solution.',
+  ums:'How this product physically fixes that fault. Keep this separate from the problem.',
+  mechanism:'UMP plus UMS: how the product produces the outcome. Unsupported claims stay labeled Needs source/verification.',
   hook_type:'Choose a hook type, or ask for suggestions, before drafting alternatives.',
   final_hook:'The hook you are willing to use. Review checks alignment, the first five words, and claims. It is not a score.',
   conceit:'The central execution idea. A full storyboard is out of scope unless you ask in chat.',
@@ -53,9 +53,6 @@ let _creativeAssistantOpen = false;
 let _creativeDirty = false;
 let _creativeCreating = false;
 let _creativeOpenDetails = [];
-let _creativeCatalog = [];
-let _creativeProductMatches = [];
-
 function _creativeEsc(value){
   return String(value == null ? '' : value)
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -98,15 +95,6 @@ async function creativeNewProject(){
   _creativeCreating = true;
   _creativeProject = null;
   creativeRenderWorkspace();
-  try{
-    const data = await api('/api/creative-studio/products');
-    _creativeCatalog = data.products || [];
-  }catch(_){
-    _creativeCatalog = [];
-  }
-  if(!_creativeCreating) return;
-  creativeRenderWorkspace();
-  creativeFilterProducts();
   const name = document.getElementById('creativeCreateName');
   if(name) name.focus();
 }
@@ -114,31 +102,6 @@ async function creativeNewProject(){
 function creativeCancelCreate(){
   _creativeCreating = false;
   creativeRenderWorkspace();
-}
-
-function creativeFilterProducts(){
-  const input = document.getElementById('creativeCreateProduct');
-  const list = document.getElementById('creativeProductOptions');
-  if(!input || !list) return;
-  const query = input.value.trim().toLowerCase();
-  _creativeProductMatches = _creativeCatalog.filter(item => !query || item.name.toLowerCase().includes(query)).slice(0, 6);
-  const selected = (input.dataset.source || '').trim();
-  list.hidden = _creativeProductMatches.length === 0;
-  list.innerHTML = _creativeProductMatches.map((item, index) => {
-    const on = selected && selected === (item.source || '') ? ' selected' : '';
-    return `<button type="button" class="creative-product-option${on}" onmousedown="creativePickProductIndex(${index}); return false;"><span>${_creativeEsc(item.name)}</span><small>${_creativeEsc(item.kind || 'notes')}</small></button>`;
-  }).join('');
-}
-
-function creativePickProductIndex(index){
-  const item = (_creativeProductMatches || [])[index];
-  if(!item) return;
-  const input = document.getElementById('creativeCreateProduct');
-  if(input){
-    input.value = item.name;
-    input.dataset.source = item.source || '';
-  }
-  creativeFilterProducts();
 }
 
 async function creativeSubmitCreate(){
@@ -152,15 +115,13 @@ async function creativeSubmitCreate(){
   }
   const productInput = document.getElementById('creativeCreateProduct');
   const product = (productInput && productInput.value || '').trim();
-  const known = _creativeCatalog.find(item => item.name.toLowerCase() === product.toLowerCase());
-  const productSource = (known && known.source) || (productInput && productInput.dataset.source) || '';
   const submit = form.querySelector('[type="submit"]');
   if(submit) submit.disabled = true;
   try{
     const project = await api('/api/creative-studio/projects', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({name, product, product_source: productSource}),
+      body:JSON.stringify({name, product}),
     });
     _creativeCreating = false;
     _creativeStage = 'who';
@@ -202,19 +163,15 @@ async function creativeDeleteProject(id){
 }
 
 function _creativeCreateMarkup(){
-  const lead = _creativeCatalog.length
-    ? 'Hermes already knows these products. Choose one, or type a name. The notes stay where they are.'
-    : 'Type the product name. When product notes show up in your vault, wiki, or skills, they will appear here to choose from.';
   return `<form id="creativeCreateForm" class="creative-wizard" onsubmit="creativeSubmitCreate(); return false;">
     <div class="creative-wizard-body">
       <p class="creative-wizard-kicker">New creative</p>
-      <h2>Name it and choose a product</h2>
-      <p class="creative-wizard-lead">${lead}</p>
+      <h2>Name it and name the product</h2>
+      <p class="creative-wizard-lead">Type the product name. Every chat in this creative includes that name, and Hermes looks the product up the way it already knows it.</p>
       <label for="creativeCreateName">Creative name</label>
       <input id="creativeCreateName" name="name" required maxlength="160" autocomplete="off" placeholder="Spring launch">
       <label for="creativeCreateProduct">Product</label>
-      <input id="creativeCreateProduct" name="product" autocomplete="off" placeholder="Search or type a product" oninput="creativeFilterProducts()" onfocus="creativeFilterProducts()">
-      <div id="creativeProductOptions" class="creative-product-options" hidden></div>
+      <input id="creativeCreateProduct" name="product" autocomplete="off" placeholder="Product name">
       <p id="creativeCreateError" class="creative-save failed" role="alert"></p>
     </div>
     <div class="creative-wizard-footer">
@@ -434,16 +391,37 @@ function _creativeChatMarkup(){
   const clear = focus ? `<button type="button" class="creative-text-btn" onclick="creativeIsolateField('${focus}')">Leave field</button>` : '';
   const scope = focus ? '' : `<button type="button" class="creative-scope-chip" id="creativeChatScope" aria-pressed="false" onclick="creativeToggleProjectScope(event)">Whole project</button>`;
   const placeholder = focus ? `Revise ${_creativeEsc(focusLabel)}` : 'Ask Hermes…';
-  const modelPicker = `<div class="composer-model-wrap">
-      <button class="composer-model-chip" id="creativeModelChip" type="button" onclick="toggleCreativeModelDropdown(event)" title="Conversation model" aria-label="Conversation model" aria-haspopup="listbox" aria-expanded="false" aria-controls="creativeModelDropdown">
-        <span class="composer-model-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M15 2v2"/><path d="M15 20v2"/><path d="M2 15h2"/><path d="M2 9h2"/><path d="M20 15h2"/><path d="M20 9h2"/><path d="M9 2v2"/><path d="M9 20v2"/></svg></span>
-        <span class="composer-model-label" id="creativeModelLabel">Model</span>
-        <span class="composer-model-chevron" aria-hidden="true"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
+  const chevron = `<span class="composer-session-chevron" aria-hidden="true"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>`;
+  const modelPicker = `<div class="composer-session-wrap" id="creativeSessionWrap">
+      <button class="composer-session-chip" id="creativeSessionChip" type="button" onclick="toggleCreativeSessionMenu(event)" title="Model and thinking level" aria-label="Model and thinking level" aria-haspopup="menu" aria-expanded="false" aria-controls="creativeSessionMenu">
+        <span class="composer-session-model" id="creativeSessionModel">Model</span>
+        <span class="composer-session-effort" id="creativeSessionEffort"></span>
+        ${chevron}
       </button>
-      <select id="creativeModelSelect" class="composer-model-select" title="Conversation model" aria-hidden="true" tabindex="-1"></select>
-      <div class="model-dropdown" id="creativeModelDropdown"></div>
-    </div>`;
-  return `<header class="creative-chat-head"><p>${_creativeEsc(contextLine)}</p>${clear}</header>
+    </div>
+    <select id="creativeModelSelect" class="composer-model-select" title="Conversation model" aria-hidden="true" tabindex="-1"></select>
+    <span id="creativeModelLabel" hidden></span>
+    <div class="composer-session-menu" id="creativeSessionMenu" role="menu" aria-label="Model, thinking, and workspace" hidden>
+      <button class="composer-session-row" id="creativeSessionWorkspaceRow" type="button" role="menuitem" data-session-action="workspace" aria-haspopup="menu" aria-expanded="false" onclick="openCreativeSessionAction(event,'workspace')">
+        <span class="composer-session-row-label">Workspace</span>
+        <span class="composer-session-row-value" id="creativeSessionWorkspaceValue"></span>
+        <span class="composer-session-row-chevron" aria-hidden="true">›</span>
+      </button>
+      <button class="composer-session-row" id="creativeSessionThinkingRow" type="button" role="menuitem" data-session-action="thinking" aria-haspopup="menu" aria-expanded="false" onclick="openCreativeSessionAction(event,'thinking')">
+        <span class="composer-session-row-label">Thinking</span>
+        <span class="composer-session-row-value" id="creativeSessionThinkingValue"></span>
+        <span class="composer-session-row-chevron" aria-hidden="true">›</span>
+      </button>
+      <button class="composer-session-row" id="creativeSessionModelRow" type="button" role="menuitem" data-session-action="model" aria-haspopup="menu" aria-expanded="false" onclick="openCreativeSessionAction(event,'model')">
+        <span class="composer-session-row-label">Model</span>
+        <span class="composer-session-row-value" id="creativeSessionModelValue"></span>
+        <span class="composer-session-row-chevron" aria-hidden="true">›</span>
+      </button>
+    </div>
+    <div class="model-dropdown" id="creativeModelDropdown"></div>
+    <div class="composer-reasoning-dropdown" id="creativeThinkingDropdown"></div>
+    <div class="ws-dropdown" id="creativeWsDropdown" hidden aria-hidden="true"></div>`;
+  return `${_creativeChatTabs()}<header class="creative-chat-head"><p>${_creativeEsc(contextLine)}</p>${clear}</header>
     <div class="creative-chat-log" id="creativeChatLog">${_creativeChatError ? `<p class="creative-save failed" role="alert">${_creativeEsc(_creativeChatError)}</p>` : ''}${history}${pending}</div>
     <form class="composer-wrap creative-composer" onsubmit="creativeSendChat(); return false;">
       <div class="composer-box" id="creativeComposerBox">
@@ -458,6 +436,75 @@ function _creativeChatMarkup(){
         </div>
       </div>
     </form>`;
+}
+
+function _creativeApplyThreads(view){
+  if(!_creativeProject || !view) return;
+  if(Array.isArray(view.threads)) _creativeProject.threads = view.threads;
+  if(Array.isArray(view.chat)) _creativeProject.chat = view.chat;
+  if(view.active_thread) _creativeProject.active_thread = view.active_thread;
+}
+
+function _creativeChatTabs(){
+  const project = _creativeProject;
+  const threads = (project.threads && project.threads.length)
+    ? project.threads
+    : [{id:'', title:'New chat', messages: project.chat || []}];
+  const active = project.active_thread || (threads[threads.length - 1] && threads[threads.length - 1].id) || '';
+  const icon = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-8 8H7l-4 3V12a8 8 0 1 1 18 0z"/></svg>`;
+  const tabs = threads.map(thread => {
+    const on = thread.id === active;
+    const title = thread.title || 'New chat';
+    const close = `<button type="button" class="creative-chat-tab-x" aria-label="Close ${ _creativeEsc(title) }" onclick="creativeCloseChatTab(event, '${thread.id}')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>`;
+    return `<div class="creative-chat-tab${on ? ' active' : ''}" role="tab" aria-selected="${on ? 'true' : 'false'}" title="${_creativeEsc(title)}"><button type="button" class="creative-chat-tab-main" onclick="creativeSelectChatTab('${thread.id}')">${icon}<span>${_creativeEsc(title)}</span></button>${thread.id ? close : ''}</div>`;
+  }).join('');
+  const menu = threads.map(thread => `<button type="button" onclick="creativeSelectChatTab('${thread.id}')">${_creativeEsc(thread.title || 'New chat')}</button>`).join('');
+  return `<div class="creative-chat-tabs" role="tablist" aria-label="Chats"><div class="creative-chat-tab-scroll">${tabs}</div><button type="button" class="creative-chat-tab-tool" aria-label="New chat" onclick="creativeNewChatTab()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button><button type="button" class="creative-chat-tab-tool" aria-label="All chats" aria-expanded="false" onclick="creativeToggleChatMenu(event)"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></button><div class="creative-menu creative-chat-menu" id="creativeChatTabMenu" hidden>${menu}</div></div>`;
+}
+
+async function creativeNewChatTab(){
+  if(!_creativeProject || _creativeChatBusy) return;
+  const view = await api('/api/creative-studio/projects/' + _creativeProject.id + '/threads', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+  _creativeApplyThreads(view);
+  _creativeChatError = '';
+  creativeRenderWorkspace();
+  const input = document.getElementById('creativeChatInput');
+  if(input) input.focus();
+}
+
+async function creativeSelectChatTab(id){
+  if(!_creativeProject || !id || id === _creativeProject.active_thread) return;
+  const view = await api('/api/creative-studio/projects/' + _creativeProject.id + '/threads/active', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({thread_id:id})});
+  _creativeApplyThreads(view);
+  _creativeChatError = '';
+  creativeRenderWorkspace();
+}
+
+async function creativeCloseChatTab(event, id){
+  if(event) event.stopPropagation();
+  if(!_creativeProject || !id) return;
+  const view = await api('/api/creative-studio/projects/' + _creativeProject.id + '/threads/close', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({thread_id:id})});
+  _creativeApplyThreads(view);
+  creativeRenderWorkspace();
+}
+
+function creativeToggleChatMenu(event){
+  if(event) event.stopPropagation();
+  const menu = document.getElementById('creativeChatTabMenu');
+  const button = event && event.currentTarget;
+  if(!menu) return;
+  const open = menu.hidden;
+  menu.hidden = !open;
+  if(button) button.setAttribute('aria-expanded', open ? 'true' : 'false');
+  if(open){
+    const close = (ev) => {
+      if(menu.contains(ev.target) || (button && button.contains(ev.target))) return;
+      menu.hidden = true;
+      if(button) button.setAttribute('aria-expanded', 'false');
+      document.removeEventListener('click', close);
+    };
+    setTimeout(() => document.addEventListener('click', close), 0);
+  }
 }
 
 function creativeToggleProjectScope(event){
@@ -568,12 +615,35 @@ let _creativeModelDropdownHome = null;
 function _creativeSyncModelChip(){
   const sel = document.getElementById('creativeModelSelect');
   const label = document.getElementById('creativeModelLabel');
-  const chip = document.getElementById('creativeModelChip');
   if(!sel || !label) return;
   const opt = sel.selectedOptions && sel.selectedOptions[0];
   const text = (opt && opt.textContent) || (typeof getModelLabel === 'function' ? getModelLabel(sel.value || '') : '') || 'Model';
   label.textContent = text.trim() || 'Model';
-  if(chip) chip.title = sel.value || text;
+  _creativeSyncSessionChip();
+}
+
+function _creativeSyncSessionChip(){
+  const label = document.getElementById('creativeModelLabel');
+  const modelText = (label && label.textContent) || 'Model';
+  const mainThinking = document.getElementById('composerSessionThinkingRow');
+  const effortShown = !(mainThinking && mainThinking.hidden);
+  const effortLabel = document.getElementById('composerReasoningLabel');
+  const effortText = effortShown ? ((effortLabel && effortLabel.textContent) || '') : '';
+  const modelEl = document.getElementById('creativeSessionModel');
+  const effortEl = document.getElementById('creativeSessionEffort');
+  const modelValue = document.getElementById('creativeSessionModelValue');
+  const thinkingValue = document.getElementById('creativeSessionThinkingValue');
+  const workspaceValue = document.getElementById('creativeSessionWorkspaceValue');
+  const thinkingRow = document.getElementById('creativeSessionThinkingRow');
+  const chip = document.getElementById('creativeSessionChip');
+  if(modelEl) modelEl.textContent = modelText;
+  if(effortEl) effortEl.textContent = effortText;
+  if(modelValue) modelValue.textContent = modelText;
+  if(thinkingValue) thinkingValue.textContent = effortText;
+  if(thinkingRow) thinkingRow.hidden = !effortShown;
+  const workspace = document.getElementById('composerWorkspaceLabel');
+  if(workspaceValue) workspaceValue.textContent = (workspace && workspace.textContent) || '';
+  if(chip) chip.title = modelText;
 }
 
 function _creativeRememberModel(){
@@ -638,36 +708,101 @@ function _creativeRestoreModelDropdown(){
 }
 
 function closeCreativeModelDropdown(){
-  const chip = document.getElementById('creativeModelChip');
   _creativeRestoreModelDropdown();
-  if(chip){
-    chip.classList.remove('active');
-    chip.setAttribute('aria-expanded', 'false');
-  }
+  const row = document.getElementById('creativeSessionModelRow');
+  if(row) row.setAttribute('aria-expanded', 'false');
+}
+
+function _creativeCloseThinking(){
+  const dd = document.getElementById('creativeThinkingDropdown');
+  if(!dd) return;
+  dd.classList.remove('open', 'composer-session-flyout');
+  dd.removeAttribute('style');
+  const row = document.getElementById('creativeSessionThinkingRow');
+  if(row) row.setAttribute('aria-expanded', 'false');
+}
+
+function _creativeCloseWorkspace(){
+  const dd = document.getElementById('creativeWsDropdown');
+  if(!dd) return;
+  dd.classList.remove('open', 'composer-session-flyout');
+  dd.hidden = true;
+  dd.setAttribute('aria-hidden', 'true');
+  dd.removeAttribute('style');
+  const row = document.getElementById('creativeSessionWorkspaceRow');
+  if(row) row.setAttribute('aria-expanded', 'false');
+}
+
+function _creativeCloseSessionFlyouts(){
+  closeCreativeModelDropdown();
+  _creativeCloseThinking();
+  _creativeCloseWorkspace();
+  document.querySelectorAll('#creativeSessionMenu .composer-session-row.active').forEach(row => row.classList.remove('active'));
+}
+
+function _creativePositionFlyout(dd, row){
+  if(!dd || !row) return;
+  const menu = document.getElementById('creativeSessionMenu');
+  const menuRect = menu ? menu.getBoundingClientRect() : row.getBoundingClientRect();
+  const rowRect = row.getBoundingClientRect();
+  const margin = 8;
+  const gap = 8;
+  dd.style.position = 'fixed';
+  dd.style.right = 'auto';
+  dd.style.bottom = 'auto';
+  dd.style.zIndex = '220';
+  const width = Math.min(dd.offsetWidth || 280, window.innerWidth - margin * 2);
+  const spaceRight = window.innerWidth - menuRect.right - margin;
+  const placeLeft = spaceRight < width + gap;
+  let left = placeLeft ? menuRect.left - gap - width : menuRect.right + gap;
+  left = Math.max(margin, Math.min(left, window.innerWidth - margin - width));
+  const height = dd.offsetHeight || 240;
+  let top = rowRect.top;
+  top = Math.max(margin, Math.min(top, window.innerHeight - margin - height));
+  dd.style.left = left + 'px';
+  dd.style.top = top + 'px';
+  dd.style.width = width + 'px';
+  dd.classList.add('composer-session-flyout');
+  dd.classList.toggle('composer-session-flyout-left', placeLeft);
+}
+
+function _creativePositionSessionMenu(){
+  const menu = document.getElementById('creativeSessionMenu');
+  const chip = document.getElementById('creativeSessionChip');
+  if(!menu || !chip) return;
+  const rect = chip.getBoundingClientRect();
+  const margin = 8;
+  menu.style.position = 'fixed';
+  menu.style.bottom = 'auto';
+  const width = menu.offsetWidth || 280;
+  let left = rect.left;
+  if(left + width > window.innerWidth - margin) left = Math.max(margin, window.innerWidth - width - margin);
+  menu.style.left = left + 'px';
+  menu.style.top = Math.max(margin, rect.top - (menu.offsetHeight || 160) - 8) + 'px';
+}
+
+function _creativeMarkSessionRow(action){
+  document.querySelectorAll('#creativeSessionMenu .composer-session-row').forEach(row => {
+    const on = row.getAttribute('data-session-action') === action;
+    row.classList.toggle('active', on);
+    row.setAttribute('aria-expanded', on ? 'true' : 'false');
+  });
 }
 
 function _creativePositionModelDropdown(){
   const dd = document.getElementById('creativeModelDropdown');
-  const chip = document.getElementById('creativeModelChip');
-  if(!dd || !chip) return;
+  const row = document.getElementById('creativeSessionModelRow');
+  if(!dd || !row) return;
   if(!_creativeModelDropdownHome){
     _creativeModelDropdownHome = {parent: dd.parentNode, next: dd.nextSibling};
   }
   if(dd.parentNode !== document.body) document.body.appendChild(dd);
   dd.classList.add('model-dropdown--floating');
-  const rect = chip.getBoundingClientRect();
   const margin = 8;
   const width = Math.min(420, Math.max(240, window.innerWidth - margin * 2));
-  let left = rect.left;
-  if(left + width > window.innerWidth - margin) left = Math.max(margin, window.innerWidth - width - margin);
-  dd.style.left = left + 'px';
   dd.style.width = width + 'px';
-  dd.style.right = 'auto';
-  dd.style.bottom = 'auto';
-  const spaceAbove = Math.max(160, rect.top - margin - 6);
-  dd.style.maxHeight = Math.min(spaceAbove, Math.round(window.innerHeight * 0.7)) + 'px';
-  const height = dd.offsetHeight || 280;
-  dd.style.top = Math.max(margin, rect.top - height - 6) + 'px';
+  dd.style.maxHeight = Math.round(window.innerHeight * 0.7) + 'px';
+  _creativePositionFlyout(dd, row);
 }
 
 function selectCreativeModelFromDropdown(value, preferredProviderId){
@@ -688,10 +823,11 @@ function selectCreativeModelFromDropdown(value, preferredProviderId){
 function toggleCreativeModelDropdown(event){
   if(event){ event.preventDefault(); event.stopPropagation(); }
   const dd = document.getElementById('creativeModelDropdown');
-  const chip = document.getElementById('creativeModelChip');
   const sel = document.getElementById('creativeModelSelect');
-  if(!dd || !chip || !sel) return;
+  if(!dd || !sel) return;
   if(dd.classList.contains('open')){ closeCreativeModelDropdown(); return; }
+  _creativeCloseThinking();
+  _creativeCloseWorkspace();
   if(typeof closeModelDropdown === 'function') closeModelDropdown();
   if(typeof closeSettingsModelDropdown === 'function') closeSettingsModelDropdown();
   _creativeCopyModelOptions();
@@ -705,16 +841,95 @@ function toggleCreativeModelDropdown(event){
     scopeNoteText: 'Used for Creative Studio chat replies.',
   });
   dd.classList.add('open');
-  chip.classList.add('active');
-  chip.setAttribute('aria-expanded', 'true');
+  _creativeMarkSessionRow('model');
   _creativePositionModelDropdown();
   const activeRow = dd.querySelector('.model-opt.active');
   if(activeRow && typeof activeRow.scrollIntoView === 'function') activeRow.scrollIntoView({block: 'nearest'});
 }
 
-document.addEventListener('click', event => {
-  if(event.target.closest('#creativeModelChip') || event.target.closest('#creativeModelDropdown')) return;
+function _creativeOpenThinking(){
+  const source = document.getElementById('composerReasoningDropdown');
+  const dd = document.getElementById('creativeThinkingDropdown');
+  const row = document.getElementById('creativeSessionThinkingRow');
+  if(!source || !dd || !row || row.hidden) return;
+  if(dd.classList.contains('open')){ _creativeCloseThinking(); return; }
   closeCreativeModelDropdown();
+  _creativeCloseWorkspace();
+  dd.innerHTML = source.innerHTML;
+  dd.classList.add('open');
+  _creativeMarkSessionRow('thinking');
+  _creativePositionFlyout(dd, row);
+}
+
+function _creativeOpenWorkspace(){
+  const dd = document.getElementById('creativeWsDropdown');
+  const row = document.getElementById('creativeSessionWorkspaceRow');
+  if(!dd || !row || typeof loadWorkspaceList !== 'function' || typeof renderWorkspaceDropdownInto !== 'function') return;
+  if(dd.classList.contains('open')){ _creativeCloseWorkspace(); return; }
+  closeCreativeModelDropdown();
+  _creativeCloseThinking();
+  const current = (typeof S !== 'undefined' && S.session && S.session.workspace) || '';
+  loadWorkspaceList().then(data => {
+    if(!document.getElementById('creativeSessionMenu') || document.getElementById('creativeSessionMenu').hidden) return;
+    renderWorkspaceDropdownInto(dd, data.workspaces || [], current || data.last || '');
+    dd.hidden = false;
+    dd.setAttribute('aria-hidden', 'false');
+    dd.classList.add('open');
+    _creativeMarkSessionRow('workspace');
+    _creativePositionFlyout(dd, row);
+  }).catch(() => {});
+}
+
+function closeCreativeSessionMenu(){
+  const menu = document.getElementById('creativeSessionMenu');
+  const chip = document.getElementById('creativeSessionChip');
+  if(menu) menu.hidden = true;
+  if(chip){
+    chip.classList.remove('active');
+    chip.setAttribute('aria-expanded', 'false');
+  }
+  _creativeCloseSessionFlyouts();
+}
+
+function toggleCreativeSessionMenu(event){
+  if(event){ event.preventDefault(); event.stopPropagation(); }
+  const menu = document.getElementById('creativeSessionMenu');
+  const chip = document.getElementById('creativeSessionChip');
+  if(!menu || !chip) return;
+  if(!menu.hidden){ closeCreativeSessionMenu(); return; }
+  if(typeof closeComposerSessionMenu === 'function') closeComposerSessionMenu();
+  if(typeof closeModelDropdown === 'function') closeModelDropdown();
+  if(typeof closeReasoningDropdown === 'function') closeReasoningDropdown();
+  if(typeof closeWsDropdown === 'function') closeWsDropdown();
+  _creativeSyncSessionChip();
+  menu.hidden = false;
+  chip.classList.add('active');
+  chip.setAttribute('aria-expanded', 'true');
+  _creativePositionSessionMenu();
+}
+
+function openCreativeSessionAction(event, action){
+  if(event){ event.preventDefault(); event.stopPropagation(); }
+  if(action === 'model') toggleCreativeModelDropdown(event);
+  else if(action === 'thinking') _creativeOpenThinking();
+  else if(action === 'workspace') _creativeOpenWorkspace();
+}
+
+document.addEventListener('click', event => {
+  if(event.target.closest('#creativeSessionChip') || event.target.closest('#creativeSessionMenu') || event.target.closest('#creativeModelDropdown') || event.target.closest('#creativeThinkingDropdown') || event.target.closest('#creativeWsDropdown')){
+    if(event.target.closest('#creativeThinkingDropdown .reasoning-option')){
+      const option = event.target.closest('.reasoning-option');
+      const thinkingValue = document.getElementById('creativeSessionThinkingValue');
+      const effortEl = document.getElementById('creativeSessionEffort');
+      const text = option ? option.textContent.trim() : '';
+      if(thinkingValue) thinkingValue.textContent = text;
+      if(effortEl) effortEl.textContent = text;
+      _creativeCloseThinking();
+    }
+    if(event.target.closest('#creativeWsDropdown .ws-opt')) closeCreativeSessionMenu();
+    return;
+  }
+  closeCreativeSessionMenu();
 });
 
 async function creativeSendChat(){
@@ -741,9 +956,11 @@ async function creativeSendChat(){
         field: _creativeFocusField || '',
         model,
         model_provider: modelProvider,
+        thread_id: _creativeProject.active_thread || '',
       }),
     });
-    _creativeProject.chat = result.chat || _creativeProject.chat || [];
+    _creativeApplyThreads(result);
+    if(!result.threads) _creativeProject.chat = result.chat || _creativeProject.chat || [];
     if(result.proposals && result.proposals.length){
       await creativeReloadQuiet();
     }

@@ -134,31 +134,45 @@ _REGULATED = re.compile(
 _LOCKS: dict[str, threading.Lock] = {}
 _LOCKS_GUARD = threading.Lock()
 
+# Luke Iha field purposes. The chat uses these so a question about a field
+# is answered from the job of that field, not from a blank prompt.
 FIELD_HELP = {
-    "outcome": "The change the audience wants.",
-    "demographic": "Who they are in observable terms.",
-    "facet": "The specific situation or belief that makes the message land.",
-    "segment": "Outcome + demographic + facet, written as one audience.",
-    "concept": "One idea the ad is about.",
-    "angle": "The point of view on that idea.",
-    "ump": "Unique mechanism of the problem.",
-    "ums": "Unique mechanism of the solution.",
-    "mechanism": "How the product produces the outcome, in plain language.",
-    "hook_type": "The hook pattern you are using.",
-    "visual_hook": "What the viewer sees first.",
-    "verbal_hook": "What they hear or read first.",
-    "core_trigger": "The emotion or tension the hook pulls.",
-    "caveman_simple": "The idea in the fewest concrete words.",
-    "deep_fry": "A sharper, more specific version.",
-    "walk_it_back": "The support line that keeps the hook honest.",
-    "make_it_bang": "The line that earns the next second.",
-    "final_hook": "The hook you are willing to ship.",
-    "format": "Length and placement shape.",
-    "conceit": "The central execution idea.",
+    "product_offer": "The product this creative is about. Every later field stays about this product.",
+    "product_facts": "Verified facts about the product. Do not invent capabilities beyond these.",
+    "audience_notes": "What is already known about who buys, before the Who stage is written.",
+    "objective": "The job of this creative: what it should make the viewer do or believe.",
+    "channel": "Where the creative will run.",
+    "format_length": "Length and placement the hook and format have to fit.",
+    "outcome": "The result the audience wants. Not a feature list.",
+    "demographic": "Observable traits of the audience.",
+    "facet": "The specific circumstance that makes the message land.",
+    "segment": "One audience: outcome × demographic × facet.",
+    "concept": "One idea, 8–10 words, no 'and'. It is the collision between the market's false belief and the real mechanism (UMP), not the product's features. It must be immediately plausible, showable, and point at a villain that is not the customer. Archetypes: the trap, the missing mechanism, the category killer.",
+    "angle": "The point of view on the concept: villain/false solution, root-cause mechanism, us vs them, a daily micro-moment, a counter-intuitive warning, or a functional before/after.",
+    "ump": "Unique mechanism of the problem: why the problem actually happens.",
+    "ums": "Unique mechanism of the solution: how this product physically fixes that fault.",
+    "mechanism": "UMP plus UMS in plain language: how the product produces the outcome.",
+    "hook_type": "Which hook pattern to build: pattern interrupt, counter-intuitive why, visceral micro-moment, visual us-vs-them, or insider confession.",
+    "visual_hook": "What is seen in the first three seconds: motion, a pattern break, or a physical demo. Not a talking head.",
+    "verbal_hook": "The first spoken or written line, about 7–10 words. It opens a curiosity gap or attacks a false belief.",
+    "core_trigger": "The psychological engine holding the viewer: dissonance, specificity, or an information gap.",
+    "caveman_simple": "The central idea stripped to one primitive sentence. A hook does not also carry the problem, the solution, and the mechanism.",
+    "deep_fry": "Sharpen the line: a good thing that harms, reversed causation, a sticky rename, or a tightrope claim.",
+    "walk_it_back": "The next line that proves the extreme hook and returns it to the real mechanism without lying.",
+    "make_it_bang": "Pass the line through the five filters: interesting words in the first five, dramatic verbs, a specific time and scene, a statement not a lazy question, one sentence.",
+    "final_hook": "The shippable hook. It creates a prediction error, survives 'so what?', still reads as news with the logo removed, and the first five words stand alone.",
+    "format": "The content format the hook has to fit.",
+    "conceit": "The central execution idea for the creative.",
     "actors": "Who or what is on camera.",
-    "style": "How it looks.",
-    "terrain": "Where it happens.",
+    "style": "The visual style.",
+    "terrain": "The environment or set.",
     "setup": "What is already true in the first frame.",
+    "pain": "The concrete daily scene of the pain, not a generic ache.",
+    "promise": "The specific end state the product delivers.",
+    "proof": "Why it is believable: mechanism, demo, a sourced number, or real reviews. Do not invent proof.",
+    "curiosity": "An open information gap that stops the scroll.",
+    "constraints": "Why previous solutions failed, so the failure is the method and not the customer.",
+    "conditions": "Who it is for, who it is not for, and when to use it.",
 }
 
 
@@ -257,6 +271,8 @@ def _blank_project(name: str, product: str = "") -> dict:
             "excluded_blocks": [],
         },
         "chat": [],
+        "threads": [],
+        "active_thread": "",
     }
 
 
@@ -284,10 +300,125 @@ def _load(project_id: str) -> dict:
     project = _read_json(path)
     if not isinstance(project.get("chat"), list):
         project["chat"] = []
+    if _ensure_threads(project):
+        _write_json(path, project)
     return project
 
 
+def _thread_title(messages: list) -> str:
+    for message in messages:
+        if not isinstance(message, dict) or message.get("role") != "user":
+            continue
+        text = " ".join(str(message.get("text") or "").split())
+        if text:
+            return text[:32] + ("…" if len(text) > 32 else "")
+    return "New chat"
+
+
+def _sync_active_chat(project: dict) -> None:
+    threads = project.get("threads") or []
+    active_id = project.get("active_thread")
+    active = next((row for row in threads if row.get("id") == active_id), None)
+    if active is None and threads:
+        active = threads[-1]
+        project["active_thread"] = active["id"]
+    project["chat"] = list(active.get("messages") or []) if active else []
+
+
+def _ensure_threads(project: dict) -> bool:
+    """Keep one or more chat tabs. `chat` stays the active tab for older callers."""
+    raw = project.get("threads")
+    threads = []
+    changed = not isinstance(raw, list)
+    if isinstance(raw, list):
+        for row in raw:
+            if not isinstance(row, dict):
+                changed = True
+                continue
+            thread_id = str(row.get("id") or "")
+            if not re.fullmatch(r"[a-f0-9]{12}", thread_id):
+                thread_id = _new_id()
+                changed = True
+            messages = row.get("messages") if isinstance(row.get("messages"), list) else []
+            if messages is not row.get("messages"):
+                changed = True
+            title = str(row.get("title") or "").strip() or _thread_title(messages)
+            if title != row.get("title") or len(messages) > 200:
+                changed = True
+            threads.append({"id": thread_id, "title": title[:80], "messages": messages[-200:]})
+        if len(threads) != len(raw):
+            changed = True
+    if not threads:
+        chat = project.get("chat") if isinstance(project.get("chat"), list) else []
+        threads = [{"id": _new_id(), "title": _thread_title(chat), "messages": list(chat)[-200:]}]
+        changed = True
+    if len(threads) > 12:
+        threads = threads[-12:]
+        changed = True
+    project["threads"] = threads
+    active = str(project.get("active_thread") or "")
+    if active not in {row["id"] for row in project["threads"]}:
+        project["active_thread"] = project["threads"][-1]["id"]
+        changed = True
+    _sync_active_chat(project)
+    return changed
+
+
+def _thread_view(project: dict) -> dict:
+    return {
+        "threads": [
+            {"id": row["id"], "title": row["title"], "messages": row.get("messages") or []}
+            for row in project.get("threads") or []
+        ],
+        "active_thread": project.get("active_thread") or "",
+        "chat": project.get("chat") or [],
+    }
+
+
+def create_chat_thread(project_id: str) -> dict:
+    with _lock_for(_profile_dir()):
+        project = _load(project_id)
+        if len(project["threads"]) >= 12:
+            raise StudioError("too many chats")
+        thread = {"id": _new_id(), "title": "New chat", "messages": []}
+        project["threads"].append(thread)
+        project["active_thread"] = thread["id"]
+        _sync_active_chat(project)
+        _save(project)
+        return _thread_view(project)
+
+
+def activate_chat_thread(project_id: str, thread_id: str) -> dict:
+    thread_id = (thread_id or "").strip()
+    with _lock_for(_profile_dir()):
+        project = _load(project_id)
+        if thread_id not in {row["id"] for row in project["threads"]}:
+            raise StudioError("unknown chat")
+        project["active_thread"] = thread_id
+        _sync_active_chat(project)
+        _save(project)
+        return _thread_view(project)
+
+
+def close_chat_thread(project_id: str, thread_id: str) -> dict:
+    thread_id = (thread_id or "").strip()
+    with _lock_for(_profile_dir()):
+        project = _load(project_id)
+        remaining = [row for row in project["threads"] if row["id"] != thread_id]
+        if len(remaining) == len(project["threads"]):
+            raise StudioError("unknown chat")
+        if not remaining:
+            remaining = [{"id": _new_id(), "title": "New chat", "messages": []}]
+        project["threads"] = remaining
+        if project.get("active_thread") == thread_id:
+            project["active_thread"] = remaining[-1]["id"]
+        _sync_active_chat(project)
+        _save(project)
+        return _thread_view(project)
+
+
 def _save(project: dict) -> dict:
+    _ensure_threads(project)
     project["updated_at"] = _now()
     _write_json(_project_path(project["id"]), project)
     return project
@@ -1085,6 +1216,7 @@ def handle_creative_post(handler, parsed, body: dict):
             field=str(body.get("field") or ""),
             model=str(body.get("model") or ""),
             model_provider=str(body.get("model_provider") or ""),
+            thread_id=str(body.get("thread_id") or ""),
         ))
     if path == "/api/creative-studio/assist":
         return _http_call(handler, lambda: assist_message(
@@ -1105,6 +1237,12 @@ def handle_creative_post(handler, parsed, body: dict):
         return False
     project_id = _pid(parsed, prefix)
     tail = path[len(prefix) + len(project_id):]
+    if tail == "/threads":
+        return _http_call(handler, lambda: create_chat_thread(project_id))
+    if tail == "/threads/active":
+        return _http_call(handler, lambda: activate_chat_thread(project_id, str(body.get("thread_id") or "")))
+    if tail == "/threads/close":
+        return _http_call(handler, lambda: close_chat_thread(project_id, str(body.get("thread_id") or "")))
     if tail == "/rename":
         return _http_call(handler, lambda: rename_project(project_id, body.get("name") or ""))
     if tail == "/duplicate":
@@ -1196,6 +1334,59 @@ def handle_creative_delete(handler, parsed):
 _PROPOSAL_LINE = re.compile(
     r"(?im)^\s*(?:proposal|save(?:\s+as\s+proposal)?|apply\s+to)\s+([a-z_ ]+?)\s*:\s*(.+?)\s*$"
 )
+
+
+def _product_name(project: dict) -> str:
+    try:
+        return (project["stages"]["brief"]["fields"]["product_offer"]["text"] or "").strip()
+    except (KeyError, TypeError):
+        return ""
+
+
+def _studio_system(project: dict, instructions: str) -> str:
+    """Product name lives in the system prompt. Hermes looks the product up itself."""
+    name = _product_name(project)
+    if not name:
+        return instructions
+    return (
+        f"The product for this creative is {name}. "
+        "Use what you already know about this product. "
+        "Look it up the same way you look up any product you already know. "
+        "A product file is not required.\n\n"
+        + instructions
+    )
+
+
+def _field_guide(stage: str, field: str = "") -> str:
+    if field:
+        names = [field]
+    else:
+        names = list(FIELDS.get(stage) or ())
+    lines = []
+    for name in names:
+        purpose = FIELD_HELP.get(name)
+        if purpose:
+            lines.append(f"{name}: {purpose}")
+    return "\n".join(lines)
+
+
+_QUESTION = re.compile(
+    r"(\?|^(?:what|why|how|who|when|explain|tell me|describe|מה|למה|איך|מי|הסבר|תסביר)\b)",
+    re.IGNORECASE,
+)
+
+
+def _recent_turns(project: dict, thread_id: str, limit: int = 8) -> str:
+    thread_id = (thread_id or project.get("active_thread") or "").strip()
+    thread = next((row for row in project.get("threads") or [] if row.get("id") == thread_id), None)
+    messages = (thread or {}).get("messages") or project.get("chat") or []
+    lines = []
+    for item in messages[-limit:]:
+        role = item.get("role") or "user"
+        text = (item.get("text") or "").strip()
+        if text:
+            lines.append(f"{role}: {text[:1200]}")
+    return "\n".join(lines)
 
 
 def _chat_context_lines(project: dict, stage: str, scope: str, field: str = "") -> tuple[list[str], list[str]]:
@@ -1317,19 +1508,25 @@ def _draft_field_suggestions(project: dict, stage: str, scope: str, field: str, 
         state = item["text"] or "(empty)"
         blocks.append(f"{item['field']}: {state}")
     context = "\n".join(lines[:24]) or "(no other saved field text)"
-    system = (
-        "You draft Creative Studio field text. Reply with JSON only, no markdown: "
+    guide = _field_guide(stage, field if scope == "field" else "")
+    history = _recent_turns(project, "")
+    system = _studio_system(project, (
+        "You draft Creative Studio field text using the Luke Iha method. "
+        "Reply with JSON only, no markdown: "
         '{"suggestions":[{"field":"name","text":"replacement"}]}. '
         "Return one suggestion for every requested field. "
+        "Write each field for its stated purpose. Concept is one idea, not features. "
+        "UMP is why the problem happens. UMS is how this product fixes it. "
         "If the field is empty, write a first answer. "
         "If the field already has text, rewrite the whole value using the user's note. "
-        "Do not invent numbers, testimonials, or product capabilities that are not in the context. "
-        "When context is thin, keep the line short and exploratory."
-    )
+        "Write about the named product."
+    ))
     user = (
         f"Project: {project.get('name')}\n"
-        f"Stage: {stage}\n"
+        f"Stage: {stage}\n\n"
+        f"What each field is for:\n{guide}\n\n"
         f"User note:\n{user_text}\n\n"
+        f"Earlier in this chat:\n{history or '(none)'}\n\n"
         f"Saved context:\n{context}\n\n"
         "Fields to revise:\n" + "\n".join(blocks)
     )
@@ -1361,7 +1558,7 @@ def _studio_model_choice(model: str, provider: str) -> tuple[str, str]:
     return model, provider
 
 
-def post_studio_chat(project_id: str, stage: str, text: str, scope: str = "stage", field: str = "", model: str = "", model_provider: str = "") -> dict:
+def post_studio_chat(project_id: str, stage: str, text: str, scope: str = "stage", field: str = "", model: str = "", model_provider: str = "", thread_id: str = "") -> dict:
     """Append a studio thread turn. A suggestion replaces a field only when applied."""
     cleaned = (text or "").strip()
     if not cleaned:
@@ -1408,7 +1605,32 @@ def post_studio_chat(project_id: str, stage: str, text: str, scope: str = "stage
             "text": body,
             "previous": slot_text,
         })
-    if not saved:
+    answer = ""
+    asking = bool(_QUESTION.search(cleaned)) and not saved
+    if asking:
+        with _lock_for(_profile_dir()):
+            preview = _load(project_id)
+            preview_lines, _preview_missing = _chat_context_lines(preview, stage, scope, field)
+            guide = _field_guide(stage, field if scope == "field" else "")
+            history = _recent_turns(preview, thread_id)
+        answer = complete_studio_prompt(
+            _studio_system(preview, (
+                "You are Hermes inside Creative Studio, using the Luke Iha method. "
+                "Answer the user's question about this product or these fields. "
+                "Use the field purposes and what you already know about the product. "
+                "Plain sentences."
+            )),
+            (
+                f"Project: {preview.get('name')}\n\n"
+                f"Field purposes:\n{guide}\n\n"
+                f"Saved fields:\n" + ("\n".join(preview_lines[:24]) or "(none)") + "\n\n"
+                f"Earlier in this chat:\n{history or '(none)'}\n\n"
+                f"Question:\n{cleaned}"
+            ),
+            model,
+            model_provider,
+        )
+    if not saved and not asking:
         with _lock_for(_profile_dir()):
             preview = _load(project_id)
             preview_lines, _preview_missing = _chat_context_lines(preview, stage, scope, field)
@@ -1448,9 +1670,11 @@ def post_studio_chat(project_id: str, stage: str, text: str, scope: str = "stage
         else:
             where = "the whole project"
         parts = [f"{project['name']}, {where}."]
+        if answer:
+            parts.append(answer)
         if lines:
             parts.append("Already on the project:\n" + "\n".join(lines[:24]))
-        else:
+        elif not answer:
             parts.append("Nothing is saved here yet, so this chat can't fill the fields in.")
         stage_missing = [
             item.split(".", 1)[-1].replace("_", " ")
@@ -1466,7 +1690,7 @@ def post_studio_chat(project_id: str, stage: str, text: str, scope: str = "stage
                 f"Suggested replacements for {project['name']}, {where}. "
                 "The fields stay as they are until you replace them."
             ]
-        else:
+        elif not answer:
             example = field if scope == "field" and field else (FIELDS.get(stage) or ("outcome",))[0]
             parts.append(
                 "Hermes didn't return a suggestion. To hold a line yourself, send "
@@ -1482,10 +1706,19 @@ def post_studio_chat(project_id: str, stage: str, text: str, scope: str = "stage
             "created_at": now,
             "proposals": saved,
         }
-        project.setdefault("chat", []).extend([user_msg, assistant])
-        project["chat"] = project["chat"][-200:]
+        thread_id = (thread_id or project.get("active_thread") or "").strip()
+        thread = next((row for row in project["threads"] if row["id"] == thread_id), None)
+        if thread is None:
+            raise StudioError("unknown chat")
+        thread.setdefault("messages", []).extend([user_msg, assistant])
+        thread["messages"] = thread["messages"][-200:]
+        if thread.get("title") in {"", "New chat"}:
+            thread["title"] = _thread_title(thread["messages"])
+        project["active_thread"] = thread["id"]
+        _sync_active_chat(project)
         _save(project)
-    return {"messages": [user_msg, assistant], "chat": project["chat"], "proposals": saved}
+    view = _thread_view(project)
+    return {"messages": [user_msg, assistant], "chat": view["chat"], "proposals": saved, "threads": view["threads"], "active_thread": view["active_thread"]}
 
 
 def assist_message(project_id: str, stage: str, action: str) -> dict:

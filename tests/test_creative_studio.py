@@ -242,8 +242,16 @@ def test_static_panel_wires_stage_switch_proposals_and_export():
     assert "function creativeSetStage" in script
     assert "function creativeProposalAction" in script
     assert "function creativeSendChat" in script
-    assert 'id="creativeModelChip"' in script
-    assert "toggleCreativeModelDropdown" in script
+    assert "function creativeNewChatTab" in script
+    assert 'aria-label="Chats"' in script
+    assert 'id="creativeSessionChip"' in script
+    assert 'id="creativeSessionMenu"' in script
+    assert 'data-session-action="workspace"' in script
+    assert 'data-session-action="thinking"' in script
+    assert 'data-session-action="model"' in script
+    assert 'data-session-action="profile"' not in script
+    assert 'id="creativeModelChip"' not in script
+    assert "toggleCreativeSessionMenu" in script
     assert "renderModelDropdown" in script
     assert "role=\"tablist\"" in script
     assert "Suggest directions" not in script
@@ -278,6 +286,45 @@ def test_studio_chat_persists_without_changing_the_field(studio):
     assert isolated["messages"][0]["scope"] == "field"
     assert "who.segment only" in isolated["messages"][1]["text"]
     assert "who.segment: Night bakers" in isolated["messages"][1]["text"]
+
+
+def test_studio_chat_tabs_keep_separate_threads(studio):
+    project = studio.create_project("Tabs", "Mug")
+    first = studio.post_studio_chat(project["id"], "who", "First thread line")
+    opened = studio.create_chat_thread(project["id"])
+    assert opened["active_thread"] != first["active_thread"]
+    assert opened["chat"] == []
+    second = studio.post_studio_chat(project["id"], "who", "Second thread line", thread_id=opened["active_thread"])
+    saved = studio.get_project(project["id"])
+    by_id = {row["id"]: row for row in saved["threads"]}
+    assert "First thread line" in by_id[first["active_thread"]]["messages"][0]["text"]
+    assert "Second thread line" in by_id[second["active_thread"]]["messages"][0]["text"]
+    assert saved["chat"][0]["text"] == "Second thread line"
+    back = studio.activate_chat_thread(project["id"], first["active_thread"])
+    assert back["chat"][0]["text"] == "First thread line"
+    closed = studio.close_chat_thread(project["id"], first["active_thread"])
+    assert first["active_thread"] not in {row["id"] for row in closed["threads"]}
+    assert closed["chat"][0]["text"] == "Second thread line"
+
+
+def test_studio_chat_puts_the_typed_product_in_the_system_prompt(studio, monkeypatch):
+    seen = {}
+
+    def fake(system, user, model="", provider=""):
+        seen["system"] = system
+        seen["user"] = user
+        return "The concept is one idea: the market's false belief colliding with the real mechanism."
+
+    monkeypatch.setattr(studio, "complete_studio_prompt", fake)
+    project = studio.create_project("Launch", "Trail Shoes")
+    posted = studio.post_studio_chat(project["id"], "what", "What is concept for?")
+    assert posted["proposals"] == []
+    assert seen["system"].startswith("The product for this creative is Trail Shoes.")
+    assert "concept:" in seen["user"]
+    assert "false belief" in seen["user"]
+    assert "false belief colliding" in posted["messages"][1]["text"]
+    assert "Hermes didn't return a suggestion" not in posted["messages"][1]["text"]
+    assert "product file" not in seen["user"].lower()
 
 
 def test_studio_chat_sends_the_picked_model(studio, monkeypatch):
