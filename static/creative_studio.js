@@ -13,7 +13,6 @@ const CREATIVE_STATUS = {
   review_recommended:'Needs review',
   not_applicable:'Skipped',
 };
-const CREATIVE_SHORT = new Set(['outcome','demographic','facet','segment','concept','angle','ump','ums','hook_type','format','actors','style','terrain']);
 const CREATIVE_FIELDS = {
   brief:['product_offer','product_facts','audience_notes','objective','channel','format_length','assets','sources','summary_provided','summary_assumptions','summary_missing'],
   who:['outcome','demographic','facet','segment'],
@@ -170,9 +169,9 @@ function _creativeCreateMarkup(){
       <h2>Name it and name the product</h2>
       <p class="creative-wizard-lead">Type the product name. Every chat in this creative includes that name, and Hermes looks the product up the way it already knows it.</p>
       <label for="creativeCreateName">Creative name</label>
-      <input id="creativeCreateName" name="name" required maxlength="160" autocomplete="off" placeholder="Spring launch">
+      <input id="creativeCreateName" name="name" dir="auto" required maxlength="160" autocomplete="off" placeholder="Spring launch">
       <label for="creativeCreateProduct">Product</label>
-      <input id="creativeCreateProduct" name="product" autocomplete="off" placeholder="Product name">
+      <input id="creativeCreateProduct" name="product" dir="auto" autocomplete="off" placeholder="Product name">
       <p id="creativeCreateError" class="creative-save failed" role="alert"></p>
     </div>
     <div class="creative-wizard-footer">
@@ -597,7 +596,13 @@ function _creativeChatTabs(){
     const close = `<button type="button" class="creative-chat-tab-x" aria-label="Close ${ _creativeEsc(title) }" onclick="creativeCloseChatTab(event, '${thread.id}')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>`;
     return `<div class="creative-chat-tab${on ? ' active' : ''}" role="tab" aria-selected="${on ? 'true' : 'false'}"><button type="button" class="creative-chat-tab-main" onclick="creativeSelectChatTab('${thread.id}')">${icon}<span dir="auto">${_creativeEsc(title)}</span></button>${thread.id ? close : ''}</div>`;
   }).join('');
-  const menu = threads.map(thread => `<button type="button" onclick="creativeSelectChatTab('${thread.id}')">${_creativeEsc(thread.title || 'New chat')}</button>`).join('');
+  const menu = threads.map(thread => {
+    const title = thread.title || 'New chat';
+    const close = thread.id
+      ? `<button type="button" class="creative-chat-menu-x" aria-label="Close ${ _creativeEsc(title) }" onclick="creativeCloseChatTab(event, '${thread.id}')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>`
+      : '';
+    return `<div class="creative-chat-menu-row"><button type="button" onclick="creativeSelectChatTab('${thread.id}')">${_creativeEsc(title)}</button>${close}</div>`;
+  }).join('');
   return `<div class="creative-chat-tabs" role="tablist" aria-label="Chats"><div class="creative-chat-tab-scroll">${tabs}</div><button type="button" class="creative-chat-tab-tool" aria-label="New chat" onclick="creativeNewChatTab()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button><button type="button" class="creative-chat-tab-tool" aria-label="All chats" aria-expanded="false" onclick="creativeToggleChatMenu(event)"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></button><div class="creative-menu creative-chat-menu" id="creativeChatTabMenu" hidden>${menu}</div></div>`;
 }
 
@@ -680,12 +685,12 @@ function _creativeMessageSuggestions(item){
     const previous = (itemProposal.previous || '').trim();
     const next = ((live && (live.revised_text || live.text)) || itemProposal.text || '').trim();
     const before = previous
-      ? `<div class="creative-suggest-block"><span>Now</span><p>${_creativeEsc(previous)}</p></div>`
+      ? `<div class="creative-suggest-block"><span>Now</span><p dir="auto">${_creativeEsc(previous)}</p></div>`
       : `<div class="creative-suggest-block"><span>Now</span><p>Empty</p></div>`;
     return `<article class="creative-suggest" data-proposal="${_creativeEsc(itemProposal.id)}">
       <div class="creative-suggest-kicker">Replace ${_creativeEsc(label)}</div>
       ${before}
-      <div class="creative-suggest-block creative-suggest-next"><span>Suggestion</span><p>${_creativeEsc(next)}</p></div>
+      <div class="creative-suggest-block creative-suggest-next"><span>Suggestion</span><p dir="auto">${_creativeEsc(next)}</p></div>
       <div class="creative-actions">
         <button type="button" class="creative-primary" onclick="creativeProposalAction('${itemProposal.id}','accept')">Replace field</button>
         <button type="button" onclick="creativeProposalAction('${itemProposal.id}','dismiss')">Dismiss</button>
@@ -724,7 +729,7 @@ function _creativeOpenProposals(){
       if(shownInThread) return;
       cards.push(`<article class="creative-suggest" data-proposal="${_creativeEsc(proposal.id)}">
         <div class="creative-suggest-kicker">Replace ${_creativeEsc(label)}</div>
-        <div class="creative-suggest-block creative-suggest-next"><span>Suggestion</span><p>${_creativeEsc(proposal.revised_text || proposal.text)}</p></div>
+        <div class="creative-suggest-block creative-suggest-next"><span>Suggestion</span><p dir="auto">${_creativeEsc(proposal.revised_text || proposal.text)}</p></div>
         <div class="creative-actions">
           <button type="button" class="creative-primary" onclick="creativeProposalAction('${proposal.id}','accept')">Replace field</button>
           <button type="button" onclick="creativeProposalAction('${proposal.id}','dismiss')">Dismiss</button>
@@ -745,9 +750,7 @@ function _creativeFieldInputs(stage){
     const help = CREATIVE_HELP[name] ? `<p class="creative-help">${_creativeEsc(CREATIVE_HELP[name])}</p><details><summary>Examples stay copywriting examples, not evidence.</summary><p class="creative-help">Use project sources. Do not treat a framework sample line as proof.</p></details>` : '';
     const claim = (slot.claim === 'needs_verification' || slot.regulated) ? '<span class="creative-claim needs">Needs source</span>' : '';
     const copyTools = _creativeStage === 'copy' ? `<div class="creative-inline-tools"><label><input type="checkbox" ${slot.include ? 'checked' : ''} onchange="creativeToggleInclude('${name}', this.checked)"> Include</label> <button type="button" class="creative-inline-btn" onclick="creativeNudgeOrder('${name}', -1)">Up</button> <button type="button" class="creative-inline-btn" onclick="creativeNudgeOrder('${name}', 1)">Down</button></div>` : '';
-    const control = CREATIVE_SHORT.has(name)
-      ? `<input data-creative-field="${name}" value="${_creativeEsc(slot.text || '')}" oninput="creativeScheduleSave('${name}')">`
-      : `<textarea data-creative-field="${name}" rows="4" oninput="creativeScheduleSave('${name}')">${_creativeEsc(slot.text || '')}</textarea>`;
+    const control = `<textarea data-creative-field="${name}" dir="auto" rows="4" oninput="creativeScheduleSave('${name}')">${_creativeEsc(slot.text || '')}</textarea>`;
     const isolated = _creativeFocusField === name;
     return `<div class="creative-field${isolated ? ' isolated' : ''}" data-field="${name}">
       <div class="creative-field-label">
@@ -761,8 +764,13 @@ function _creativeFieldInputs(stage){
   }).join('');
 }
 
+const CREATIVE_AGENT_PROFILE = 'copywriting';
 let _creativeModel = '';
 let _creativeModelProvider = '';
+let _creativeModelChosen = false;
+let _creativeProfileModel = '';
+let _creativeProfileProvider = '';
+let _creativeProfileModelRequested = false;
 let _creativeModelDropdownHome = null;
 
 function _creativeSyncModelChip(){
@@ -828,24 +836,40 @@ function _creativeCopyModelOptions(){
   _creativeApplyRememberedModel();
 }
 
+function _creativeStudioModel(){
+  if(_creativeModelChosen && _creativeModel){
+    return {model: _creativeModel, provider: _creativeModelProvider || ''};
+  }
+  return {model: _creativeProfileModel || '', provider: _creativeProfileModel ? (_creativeProfileProvider || '') : ''};
+}
+
 function _creativeApplyRememberedModel(){
   const sel = document.getElementById('creativeModelSelect');
-  const source = document.getElementById('modelSelect');
   if(!sel) return;
-  const model = _creativeModel || (source && source.value) || '';
-  const provider = _creativeModel ? _creativeModelProvider : '';
-  if(model && typeof _applyModelToDropdown === 'function'){
-    const applied = _applyModelToDropdown(model, sel, provider || null);
-    if(!applied && source && source.value) sel.value = source.value;
-  }else if(source && source.value){
-    sel.value = source.value;
+  const choice = _creativeStudioModel();
+  if(choice.model && typeof _applyModelToDropdown === 'function'){
+    _applyModelToDropdown(choice.model, sel, choice.provider || null);
+  }else if(!choice.model){
+    sel.selectedIndex = -1;
   }
-  _creativeRememberModel();
   _creativeSyncModelChip();
+}
+
+function _creativeLoadProfileModel(){
+  if(_creativeProfileModelRequested || typeof api !== 'function') return;
+  _creativeProfileModelRequested = true;
+  api('/api/profiles', {timeoutToast:false}).then(data => {
+    const rows = data && Array.isArray(data.profiles) ? data.profiles : [];
+    const profile = rows.find(row => row && row.name === CREATIVE_AGENT_PROFILE);
+    _creativeProfileModel = (profile && profile.model) || '';
+    _creativeProfileProvider = (profile && profile.provider) || '';
+    if(!_creativeModelChosen) _creativeApplyRememberedModel();
+  }).catch(() => {});
 }
 
 function _creativeMountModelPicker(){
   _creativeCopyModelOptions();
+  _creativeLoadProfileModel();
 }
 
 function _creativeRestoreModelDropdown(){
@@ -967,6 +991,7 @@ function selectCreativeModelFromDropdown(value, preferredProviderId){
   }else{
     sel.value = value;
   }
+  _creativeModelChosen = true;
   _creativeRememberModel();
   if(provider) _creativeModelProvider = provider;
   _creativeSyncModelChip();
@@ -1091,9 +1116,9 @@ async function creativeSendChat(){
   const text = input ? input.value.trim() : '';
   if(!text) return;
   const scopeBox = document.getElementById('creativeChatScope');
-  _creativeRememberModel();
-  const model = _creativeModel;
-  const modelProvider = _creativeModelProvider;
+  const choice = _creativeStudioModel();
+  const model = choice.model;
+  const modelProvider = choice.provider;
   _creativeChatBusy = true;
   _creativeChatError = '';
   if(input) input.value = '';

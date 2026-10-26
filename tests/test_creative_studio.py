@@ -243,6 +243,10 @@ def test_static_panel_wires_stage_switch_proposals_and_export():
     assert "function creativeProposalAction" in script
     assert "function creativeSendChat" in script
     assert "function creativeNewChatTab" in script
+    assert "function creativeCloseChatTab" in script
+    assert "creative-chat-menu-x" in script
+    assert "CREATIVE_AGENT_PROFILE = 'copywriting'" in script
+    assert "api('/api/profiles'" in script
     assert 'aria-label="Chats"' in script
     assert 'id="creativeSessionChip"' in script
     assert 'id="creativeSessionMenu"' in script
