@@ -1082,6 +1082,7 @@ def handle_creative_post(handler, parsed, body: dict):
             str(body.get("stage") or ""),
             body.get("text") or "",
             scope=str(body.get("scope") or "stage"),
+            field=str(body.get("field") or ""),
         ))
     if path == "/api/creative-studio/assist":
         return _http_call(handler, lambda: assist_message(
@@ -1195,7 +1196,20 @@ _PROPOSAL_LINE = re.compile(
 )
 
 
-def _chat_context_lines(project: dict, stage: str, scope: str) -> tuple[list[str], list[str]]:
+def _chat_context_lines(project: dict, stage: str, scope: str, field: str = "") -> tuple[list[str], list[str]]:
+    if scope == "field" and field:
+        slot = project["stages"][stage]["fields"][field]
+        text = (slot.get("text") or "").strip()
+        lines = [f"{stage}.{field}: {text or '(empty)'}"]
+        context, missing = _suggestion_bundle(project, field)
+        for key, value in context.items():
+            if key == "brief":
+                for bit in value:
+                    lines.append(f"{bit['stage']}.{bit['field']}: {bit['text']}")
+                continue
+            if value.get("text"):
+                lines.append(f"{key}: {value['text']}")
+        return lines, missing
     stages = [stage] if scope != "project" else [name for name in STAGES if name != "review"]
     lines = []
     missing = []
@@ -1218,7 +1232,7 @@ def _chat_context_lines(project: dict, stage: str, scope: str) -> tuple[list[str
     return lines, missing
 
 
-def post_studio_chat(project_id: str, stage: str, text: str, scope: str = "stage") -> dict:
+def post_studio_chat(project_id: str, stage: str, text: str, scope: str = "stage", field: str = "") -> dict:
     """Append a studio thread turn. Writes a proposal only when the user names one."""
     cleaned = (text or "").strip()
     if not cleaned:
@@ -1227,7 +1241,16 @@ def post_studio_chat(project_id: str, stage: str, text: str, scope: str = "stage
         raise StudioError("message is too long")
     if stage not in FIELDS or stage in {"brief", "review"}:
         raise StudioError("unknown stage")
-    scope = "project" if scope == "project" else "stage"
+    field = (field or "").strip()
+    if scope == "field":
+        if field not in FIELDS[stage]:
+            raise StudioError("unknown field")
+    elif scope == "project":
+        scope = "project"
+        field = ""
+    else:
+        scope = "stage"
+        field = ""
     saved = []
     for match in _PROPOSAL_LINE.finditer(cleaned):
         raw_field = match.group(1).strip().lower().replace(" ", "_")
@@ -1251,19 +1274,25 @@ def post_studio_chat(project_id: str, stage: str, text: str, scope: str = "stage
         })
     with _lock_for(_profile_dir()):
         project = _load(project_id)
-        lines, missing = _chat_context_lines(project, stage, scope)
+        lines, missing = _chat_context_lines(project, stage, scope, field)
         now = _now()
         user_msg = {
             "id": _new_id(),
             "role": "user",
             "text": cleaned,
             "stage": stage,
+            "field": field,
             "scope": scope,
             "created_at": now,
         }
+        if scope == "field":
+            where = f", {stage}.{field} only."
+        elif scope == "stage":
+            where = f", stage {stage}."
+        else:
+            where = ", across the project."
         parts = [
-            f"Looking at {project['name']}"
-            + (f", stage {stage}." if scope == "stage" else ", across the project."),
+            f"Looking at {project['name']}" + where,
         ]
         if lines:
             parts.append("Saved context:\n" + "\n".join(lines[:24]))
@@ -1287,6 +1316,7 @@ def post_studio_chat(project_id: str, stage: str, text: str, scope: str = "stage
             "role": "assistant",
             "text": "\n\n".join(parts),
             "stage": stage,
+            "field": field,
             "scope": scope,
             "created_at": now,
             "proposals": saved,

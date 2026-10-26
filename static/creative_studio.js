@@ -41,6 +41,7 @@ let _creativeProjects = [];
 let _creativeProject = null;
 let _creativeStage = 'who';
 let _creativeChatOpen = true;
+let _creativeFocusField = '';
 let _creativeChatWidth = 340;
 let _creativeChatError = '';
 let _creativeChatBusy = false;
@@ -228,6 +229,7 @@ function _creativeStatusLabel(status){
 
 function creativeSetStage(stage){
   if(!CREATIVE_STAGES.some(item => item.id === stage)) return;
+  if(stage !== _creativeStage) _creativeFocusField = '';
   Object.keys(_creativeTimers).forEach(field => {
     clearTimeout(_creativeTimers[field]);
     creativeSaveField(field);
@@ -275,17 +277,25 @@ function creativeRenderWorkspace(){
   const chatClass = _creativeChatOpen ? 'creative-chat' : 'creative-chat collapsed';
   root.innerHTML = `
     <div class="creative-header">
-      <div class="creative-header-title">
-        <strong>${_creativeEsc(project.name)}</strong>
+      <div class="creative-project-chip">
+        <svg class="creative-chip-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-8 8H7l-4 3V12a8 8 0 1 1 18 0z"/><path d="M12 8v8M8 12h8"/></svg>
+        <span class="creative-project-name">${_creativeEsc(project.name)}</span>
         <span class="creative-save ${_creativeSaveState === 'Save failed' ? 'failed' : ''}" id="creativeSaveState">${_creativeEsc(_creativeSaveState)}</span>
+        <button type="button" class="creative-icon-btn" aria-label="Project actions" aria-expanded="false" onclick="creativeToggleMenu(event)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
+        </button>
+        <div class="creative-menu" id="creativeProjectMenu" hidden>
+          <button type="button" onclick="creativeRenameProject('${project.id}')">Rename</button>
+          <button type="button" onclick="creativeDuplicateProject('${project.id}')">Duplicate</button>
+          <button type="button" onclick="creativeToggleExport()">Export</button>
+          ${_creativeSaveState === 'Save failed' ? '<button type="button" onclick="creativeRetrySave()">Retry save</button>' : ''}
+          <button type="button" class="creative-menu-danger" onclick="creativeDeleteProject('${project.id}')">Delete</button>
+        </div>
       </div>
-      <div class="creative-actions">
-        <button type="button" onclick="creativeRenameProject('${project.id}')">Rename</button>
-        <button type="button" onclick="creativeDuplicateProject('${project.id}')">Duplicate</button>
-        <button type="button" onclick="creativeDeleteProject('${project.id}')">Delete</button>
-        <button type="button" onclick="creativeToggleExport()">Export</button>
-        ${_creativeSaveState === 'Save failed' ? '<button type="button" onclick="creativeRetrySave()">Retry</button>' : ''}
-        <button type="button" class="creative-ghost" onclick="creativeToggleChat()" aria-pressed="${_creativeChatOpen ? 'true' : 'false'}">${_creativeChatOpen ? 'Hide chat' : 'Show chat'}</button>
+      <div class="creative-header-tools">
+        <button type="button" class="creative-icon-btn${_creativeChatOpen ? ' on' : ''}" aria-label="${_creativeChatOpen ? 'Hide chat' : 'Show chat'}" aria-pressed="${_creativeChatOpen ? 'true' : 'false'}" onclick="creativeToggleChat()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M14 4v16"/></svg>
+        </button>
       </div>
     </div>
     <div class="creative-stagebar" role="tablist" aria-label="Framework stages" onkeydown="creativeStageKey(event)">${CREATIVE_STAGES.map(item => {
@@ -302,8 +312,25 @@ function creativeRenderWorkspace(){
     </div>`;
   const log = document.getElementById('creativeChatLog');
   if(log) log.scrollTop = log.scrollHeight;
-  const composer = document.getElementById('creativeChatInput');
-  if(composer && !_creativeChatBusy) composer.focus();
+}
+
+function creativeToggleMenu(event){
+  if(event) event.stopPropagation();
+  const menu = document.getElementById('creativeProjectMenu');
+  const button = event && event.currentTarget;
+  if(!menu) return;
+  const open = menu.hidden;
+  menu.hidden = !open;
+  if(button) button.setAttribute('aria-expanded', open ? 'true' : 'false');
+  if(open){
+    const close = (ev) => {
+      if(menu.contains(ev.target) || (button && button.contains(ev.target))) return;
+      menu.hidden = true;
+      if(button) button.setAttribute('aria-expanded', 'false');
+      document.removeEventListener('click', close);
+    };
+    setTimeout(() => document.addEventListener('click', close), 0);
+  }
 }
 
 function creativeToggleChat(){
@@ -347,36 +374,75 @@ function _creativeStageMarkup(stage){
   return `<div class="creative-stage-head"><div><h2>${_creativeEsc(meta ? meta.title : '')}</h2><p class="creative-help">Ask in the side chat to suggest, clarify, or critique. Nothing is selected for you.</p></div><label class="creative-status-select">Stage <select aria-label="Stage status" onchange="creativeMarkStage(this.value)">${options}</select></label></div>${exportBox}${extra}${_creativeFieldInputs(stage)}`;
 }
 
+function creativeIsolateField(field){
+  _creativeFocusField = _creativeFocusField === field ? '' : field;
+  _creativeChatOpen = true;
+  creativeRenderWorkspace();
+}
+
 function _creativeChatMarkup(){
   const project = _creativeProject;
-  const messages = (project.chat || []).filter(item => item && item.text);
+  const focus = _creativeFocusField;
+  const messages = (project.chat || []).filter(item => {
+    if(!item || !item.text) return false;
+    if(!focus) return true;
+    return item.field === focus;
+  });
   const stageMeta = CREATIVE_STAGES.find(item => item.id === _creativeStage);
+  const focusLabel = focus ? _creativeLabel(focus) : '';
   const history = messages.length ? messages.map(item => {
-    const who = item.role === 'user' ? 'You' : 'Hermes';
-    return `<article class="creative-msg creative-msg-${_creativeEsc(item.role || 'assistant')}"><header>${who}${item.stage ? ` · ${_creativeEsc(item.stage)}` : ''}</header><p>${_creativeEsc(item.text)}</p></article>`;
-  }).join('') : '<p class="creative-help" id="creativeChatEmpty">No messages yet. Ask about this stage, or send <code>proposal field_name: the line</code> to save a proposal without changing the field.</p>';
+    return `<article class="creative-msg creative-msg-${_creativeEsc(item.role || 'assistant')}"><p>${_creativeEsc(item.text)}</p></article>`;
+  }).join('') : `<p class="creative-help" id="creativeChatEmpty">${focus ? `Nothing on ${ _creativeEsc(focusLabel) } yet.` : 'Ask about this stage. A line becomes a proposal only if you write proposal field_name: the line.'}</p>`;
   const pending = _creativeOpenProposals();
-  return `<header class="creative-chat-head"><div><strong>Chat</strong><p>${_creativeEsc(project.name)} · ${_creativeEsc(stageMeta ? stageMeta.label : _creativeStage)}</p></div></header>
+  const contextLine = focus
+    ? `${project.name} · ${focusLabel}`
+    : `${project.name} · ${stageMeta ? stageMeta.label : _creativeStage}`;
+  const clear = focus ? `<button type="button" class="creative-text-btn" onclick="creativeIsolateField('${focus}')">Leave field</button>` : '';
+  const scope = focus ? '' : `<button type="button" class="creative-scope-chip" id="creativeChatScope" aria-pressed="false" onclick="creativeToggleProjectScope(event)">Whole project</button>`;
+  const placeholder = focus ? `Message about ${_creativeEsc(focusLabel)}` : 'Message Hermes…';
+  return `<header class="creative-chat-head"><p>${_creativeEsc(contextLine)}</p>${clear}</header>
     <div class="creative-chat-log" id="creativeChatLog">${_creativeChatError ? `<p class="creative-save failed" role="alert">${_creativeEsc(_creativeChatError)}</p>` : ''}${history}${pending}</div>
     <form class="creative-composer" onsubmit="creativeSendChat(); return false;">
-      <label class="creative-scope"><input type="checkbox" id="creativeChatScope"> Discuss the whole project</label>
-      <textarea id="creativeChatInput" rows="3" placeholder="Discuss, challenge, or refine this stage" ${_creativeChatBusy ? 'disabled' : ''}></textarea>
-      <button type="submit" class="creative-primary" ${_creativeChatBusy ? 'disabled' : ''}>${_creativeChatBusy ? 'Sending…' : 'Send'}</button>
+      <div class="composer-box creative-composer-box">
+        <textarea id="creativeChatInput" rows="1" placeholder="${placeholder}" onkeydown="creativeChatKey(event)" ${_creativeChatBusy ? 'disabled' : ''}></textarea>
+        <div class="composer-footer">
+          <div class="composer-left">${scope}</div>
+          <div class="composer-right">
+            <button type="submit" class="send-btn" aria-label="Send" ${_creativeChatBusy ? 'disabled' : ''}>
+              <svg viewBox="0 0 10 10" fill="none" aria-hidden="true"><path d="M0.93 4.775L5.00143 0.5M5.00143 0.5L9.07286 4.775M5.00143 0.5V10" stroke="currentColor" stroke-width="0.7" stroke-linejoin="round"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
     </form>`;
 }
+
+function creativeToggleProjectScope(event){
+  event.preventDefault();
+  const button = event.currentTarget;
+  const on = button.getAttribute('aria-pressed') !== 'true';
+  button.setAttribute('aria-pressed', on ? 'true' : 'false');
+}
+
+function creativeChatKey(event){
+  if(event.key === 'Enter' && !event.shiftKey){
+    event.preventDefault();
+    creativeSendChat();
+  }
 
 function _creativeOpenProposals(){
   const stage = _creativeProject.stages[_creativeStage];
   if(!stage) return '';
   const cards = [];
   Object.entries(stage.fields || {}).forEach(([field, slot]) => {
+    if(_creativeFocusField && field !== _creativeFocusField) return;
     (slot.proposals || []).forEach(proposal => {
       if(proposal.status === 'dismissed' || proposal.status === 'accepted' || proposal.status === 'edited_accepted') return;
       const label = _creativeLabel(field);
       cards.push(`<article class="creative-card" data-proposal="${_creativeEsc(proposal.id)}">
         <div><strong>${_creativeEsc(label)}</strong> · proposal</div>
         <p>${_creativeEsc(proposal.revised_text || proposal.text)}</p>
-        <div class="creative-actions">
+        <div class="creative-actions creative-quiet-actions">
           <button type="button" onclick="creativeProposalAction('${proposal.id}','accept')">Apply to ${_creativeEsc(label)}</button>
           <button type="button" onclick="creativeProposalAction('${proposal.id}','alternative')">Save as alternative</button>
           <button type="button" onclick="creativeProposalAction('${proposal.id}','dismiss')">Dismiss</button>
@@ -400,8 +466,12 @@ function _creativeFieldInputs(stage){
     const control = CREATIVE_SHORT.has(name)
       ? `<input data-creative-field="${name}" value="${_creativeEsc(slot.text || '')}" oninput="creativeScheduleSave('${name}')">`
       : `<textarea data-creative-field="${name}" rows="4" oninput="creativeScheduleSave('${name}')">${_creativeEsc(slot.text || '')}</textarea>`;
-    return `<div class="creative-field" data-field="${name}">
-      <label for="">${_creativeEsc(_creativeLabel(name))} ${claim}</label>
+    const isolated = _creativeFocusField === name;
+    return `<div class="creative-field${isolated ? ' isolated' : ''}" data-field="${name}">
+      <div class="creative-field-label">
+        <label>${_creativeEsc(_creativeLabel(name))} ${claim}</label>
+        <button type="button" class="creative-isolate${isolated ? ' on' : ''}" aria-pressed="${isolated ? 'true' : 'false'}" onclick="creativeIsolateField('${name}')">${isolated ? 'Isolated' : 'Isolate'}</button>
+      </div>
       ${help ? `<details class="creative-help-more"><summary>What does this mean?</summary>${help}</details>` : ''}
       ${copyTools}
       ${control}
@@ -426,7 +496,8 @@ async function creativeSendChat(){
         project_id:_creativeProject.id,
         stage:_creativeStage,
         text,
-        scope: scopeBox && scopeBox.checked ? 'project' : 'stage',
+        scope: _creativeFocusField ? 'field' : (scopeBox && scopeBox.getAttribute('aria-pressed') === 'true' ? 'project' : 'stage'),
+        field: _creativeFocusField || '',
       }),
     });
     _creativeProject.chat = result.chat || _creativeProject.chat || [];

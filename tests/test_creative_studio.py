@@ -261,6 +261,13 @@ def test_studio_chat_persists_without_changing_the_field(studio):
     reopened = studio.get_project(project["id"])
     assert len(reopened["chat"]) == 4
     assert "Night bakers" in reopened["chat"][1]["text"]
+    isolated = studio.post_studio_chat(
+        project["id"], "who", "Tighten this line", scope="field", field="segment"
+    )
+    assert isolated["messages"][0]["field"] == "segment"
+    assert isolated["messages"][0]["scope"] == "field"
+    assert "who.segment only" in isolated["messages"][1]["text"]
+    assert "who.segment: Night bakers" in isolated["messages"][1]["text"]
 
 
 def test_legacy_project_without_chat_still_opens(studio, tmp_path):
