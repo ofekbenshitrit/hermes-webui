@@ -1202,10 +1202,10 @@ async function creativeSendChat(){
       const created = await api('/api/session/new', {
         method:'POST',
         headers:{'Content-Type':'application/json'},
+        timeoutMs:60000,
         body:JSON.stringify({
           worktree:false,
           profile:(typeof S !== 'undefined' && S.activeProfile) || 'default',
-          workspace:(typeof S !== 'undefined' && ((S.session && S.session.workspace) || S._profileDefaultWorkspace)) || undefined,
           model: model || undefined,
           model_provider: modelProvider || undefined,
         }),
@@ -1225,30 +1225,37 @@ async function creativeSendChat(){
     const start = await api('/api/chat/start', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
+      timeoutMs:60000,
       body:JSON.stringify({
         session_id:sessionId,
         message,
         model: model || undefined,
         model_provider: modelProvider || undefined,
         profile:(typeof S !== 'undefined' && S.activeProfile) || 'default',
-        workspace:(typeof S !== 'undefined' && S.session && S.session.workspace) || undefined,
       }),
     });
     const streamId = start && start.stream_id;
     if(!streamId) throw new Error('The agent did not start.');
     _creativeAgentLog.push({role:'assistant', text:''});
-    await new Promise((resolve, reject) => {
+    await new Promise(resolve => {
       _creativeStopAgentStream();
-      const src = new EventSource(new URL('api/chat/stream?stream_id=' + encodeURIComponent(streamId), document.baseURI || location.href).href);
+      const src = new EventSource(
+        new URL('api/chat/stream?stream_id=' + encodeURIComponent(streamId), document.baseURI || location.href).href,
+        {withCredentials:true},
+      );
       _creativeAgentStream = src;
       let settled = false;
-      const finish = (err) => {
+      let seenActive = false;
+      let quietPolls = 0;
+      const started = Date.now();
+      let timer = null;
+      const finish = () => {
         if(settled) return;
         settled = true;
+        if(timer) clearInterval(timer);
         src.close();
         if(_creativeAgentStream === src) _creativeAgentStream = null;
-        if(err) reject(err);
-        else resolve();
+        resolve();
       };
       src.addEventListener('token', event => {
         try{
@@ -1258,14 +1265,33 @@ async function creativeSendChat(){
           _creativeSyncLive();
         }catch(_){ }
       });
-      src.addEventListener('done', () => finish());
-      src.addEventListener('stream_end', () => finish());
-      src.addEventListener('apperror', event => {
-        let messageText = 'The agent run failed.';
-        try{ messageText = JSON.parse(event.data).message || messageText; }catch(_){ }
-        finish(new Error(messageText));
-      });
-      src.onerror = () => finish(new Error('The agent stream closed.'));
+      src.addEventListener('done', finish);
+      src.addEventListener('stream_end', finish);
+      src.addEventListener('apperror', finish);
+      // A proxy often drops the live stream and the browser reports that as
+      // an error. The run is still going, so wait until the server says it
+      // has finished, then load the session transcript.
+      const watch = async () => {
+        if(settled) return;
+        if(Date.now() - started > 180000){ finish(); return; }
+        let active = null;
+        try{
+          const status = await api('/api/chat/stream/status?stream_id=' + encodeURIComponent(streamId), {timeoutToast:false, retries:0});
+          active = !!(status && status.active);
+        }catch(_){
+          return;
+        }
+        if(active){
+          seenActive = true;
+          quietPolls = 0;
+          return;
+        }
+        if(!seenActive && Date.now() - started < 15000) return;
+        quietPolls += 1;
+        if(quietPolls >= 2) finish();
+      };
+      src.onerror = () => { void watch(); };
+      timer = setInterval(() => { void watch(); }, 2000);
     });
     await _creativeLoadAgentTranscript();
     await creativeReloadQuiet();
