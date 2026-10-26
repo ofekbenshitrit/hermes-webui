@@ -39,6 +39,18 @@ let _creativeTimers = {};
 let _creativePoll = null;
 let _creativeAssistantOpen = false;
 let _creativeDirty = false;
+let _creativeCreating = false;
+
+const CREATIVE_CREATE_FIELDS = [
+  ['product_offer', 'Product / offer', 'What you are advertising.'],
+  ['product_facts', 'Product facts', 'Only facts you can stand behind. Leave claims blank rather than guessing.'],
+  ['audience_notes', 'Audience', 'Who this is for, if you already know.'],
+  ['objective', 'Campaign objective', 'What the ad should get someone to do.'],
+  ['channel', 'Channel', 'Where it will run.'],
+  ['format_length', 'Format / length', 'Placement and length, if you know them.'],
+  ['assets', 'Available assets', 'Footage, photos, logos, or other material you can use.'],
+  ['sources', 'Source materials', 'Paste the text you want suggestions to rely on.'],
+];
 
 function _creativeEsc(value){
   return String(value == null ? '' : value)
@@ -65,7 +77,7 @@ async function creativeRefreshList(){
   const root = document.getElementById('creativeProjectList');
   if(!root) return;
   if(!_creativeProjects.length){
-    root.innerHTML = '<div style="padding:12px;color:var(--muted);font-size:12px">No creative projects yet.</div>';
+    root.innerHTML = '<div style="padding:12px;color:var(--muted);font-size:12px">No creative projects yet. <button type="button" class="creative-inline-btn" onclick="creativeNewProject()">Create a project</button></div>';
     return;
   }
   root.innerHTML = _creativeProjects.map(row => {
@@ -78,15 +90,56 @@ async function creativeRefreshList(){
   }).join('');
 }
 
-async function creativeNewProject(){
-  const name = window.prompt('Project name');
-  if(!name) return;
-  const product = window.prompt('Product or campaign (optional)') || '';
-  const project = await api('/api/creative-studio/projects', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name, product})});
-  _creativeStage = 'brief';
-  _creativeProject = project;
-  await creativeRefreshList();
+function creativeNewProject(){
+  _creativeCreating = true;
+  _creativeProject = null;
   creativeRenderWorkspace();
+  const name = document.getElementById('creativeCreateName');
+  if(name) name.focus();
+}
+
+function creativeCancelCreate(){
+  _creativeCreating = false;
+  creativeRenderWorkspace();
+}
+
+async function creativeSubmitCreate(){
+  const form = document.getElementById('creativeCreateForm');
+  if(!form) return;
+  const name = (form.elements.name.value || '').trim();
+  const error = document.getElementById('creativeCreateError');
+  if(!name){
+    if(error) error.textContent = 'A project name is required.';
+    return;
+  }
+  const values = {};
+  CREATIVE_CREATE_FIELDS.forEach(([field]) => {
+    values[field] = (form.elements[field].value || '').trim();
+  });
+  const submit = form.querySelector('[type="submit"]');
+  if(submit) submit.disabled = true;
+  try{
+    const project = await api('/api/creative-studio/projects', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({name, product: values.product_offer}),
+    });
+    for(const [field, text] of Object.entries(values)){
+      if(!text || field === 'product_offer') continue;
+      await api('/api/creative-studio/projects/' + project.id + '/fields', {
+        method:'PUT',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({stage:'brief', field, text, author:'user'}),
+      });
+    }
+    _creativeCreating = false;
+    _creativeStage = 'brief';
+    _creativeSaveState = 'Saved';
+    await creativeOpenProject(project.id);
+  }catch(err){
+    if(submit) submit.disabled = false;
+    if(error) error.textContent = err && err.message ? err.message : 'Could not create the project.';
+  }
 }
 
 async function creativeOpenProject(id, opts){
@@ -118,6 +171,30 @@ async function creativeDeleteProject(id){
   creativeRenderWorkspace();
 }
 
+function _creativeCreateMarkup(){
+  const fields = CREATIVE_CREATE_FIELDS.map(([field, label, help]) => `<div class="creative-field">
+      <label for="creativeCreate_${field}">${_creativeEsc(label)}</label>
+      <p class="creative-help">${_creativeEsc(help)}</p>
+      <textarea id="creativeCreate_${field}" name="${field}" rows="2"></textarea>
+    </div>`).join('');
+  return `<form id="creativeCreateForm" class="creative-create" onsubmit="creativeSubmitCreate(); return false;">
+    <div class="creative-header"><strong>New creative project</strong></div>
+    <div class="creative-fields">
+      <p class="creative-help">Start with a name. The brief fields are the minimum context for later suggestions. Assumptions are not filled in for you.</p>
+      <div class="creative-field">
+        <label for="creativeCreateName">Project name</label>
+        <input id="creativeCreateName" name="name" required maxlength="160" autocomplete="off">
+      </div>
+      ${fields}
+      <p id="creativeCreateError" class="creative-save failed"></p>
+      <div class="creative-actions">
+        <button type="submit">Create project</button>
+        <button type="button" onclick="creativeCancelCreate()">Cancel</button>
+      </div>
+    </div>
+  </form>`;
+}
+
 function creativeSetStage(stage){
   _creativeStage = stage;
   creativeRenderWorkspace();
@@ -134,8 +211,12 @@ function creativeMoveStage(delta){
 function creativeRenderWorkspace(){
   const root = document.getElementById('creativeWorkspace');
   if(!root) return;
+  if(_creativeCreating){
+    root.innerHTML = _creativeCreateMarkup();
+    return;
+  }
   if(!_creativeProject){
-    root.innerHTML = '<div class="main-view-empty"><div class="main-view-empty-title">Creative Studio</div><div class="main-view-empty-sub">Create a project to edit the brief, framework fields, and proposals. Continue never accepts agent text for you.</div></div>';
+    root.innerHTML = '<div class="main-view-empty"><div class="main-view-empty-title">Creative Studio</div><div class="main-view-empty-sub">Create a project and enter the brief. You can leave fields blank and fill them later. Continue never accepts agent text for you.</div><button type="button" class="creative-inline-btn" onclick="creativeNewProject()">Create a project</button></div>';
     return;
   }
   const project = _creativeProject;

@@ -5210,6 +5210,8 @@ main.main > #mainPlugin{display:none;}
 .creative-card{border:1px solid var(--border);border-radius:8px;padding:8px;margin:8px 0;}
 .creative-actions{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 12px;}
 .creative-save.failed{color:#c44;}
+.creative-create{flex:1;min-height:0;display:flex;flex-direction:column;}
+.creative-create .creative-fields{max-width:720px;}
 @media (max-width: 860px){
   .creative-body{grid-template-columns:1fr;}
   .creative-stages,.creative-assistant{border:none;}

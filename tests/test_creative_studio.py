@@ -214,6 +214,10 @@ def test_static_panel_wires_stage_switch_proposals_and_export():
     assert 'id="mainCreative"' in html
     assert "'creative'" in panels.split("const MAIN_VIEW_PANELS =", 1)[1].split("];", 1)[0]
     assert "loadCreativeStudio" in panels
+    assert "function creativeNewProject" in script
+    assert "function creativeSubmitCreate" in script
+    assert 'id="creativeCreateForm"' in script
+    assert "window.prompt('Project name')" not in script
     assert "function creativeSetStage" in script
     assert "function creativeProposalAction" in script
     assert "function creativeExport" in script
