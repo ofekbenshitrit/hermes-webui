@@ -52,6 +52,7 @@ let _creativePoll = null;
 let _creativeAssistantOpen = false;
 let _creativeDirty = false;
 let _creativeCreating = false;
+let _creativeOpenDetails = [];
 let _creativeCatalog = [];
 let _creativeProductMatches = [];
 
@@ -261,9 +262,32 @@ function creativeMoveStage(delta){
   creativeRenderWorkspace();
 }
 
+function _creativeDetailKey(node){
+  const field = node.closest && node.closest('[data-field]');
+  const summary = node.querySelector && node.querySelector('summary');
+  if(!field || !summary) return '';
+  return field.getAttribute('data-field') + '|' + summary.textContent;
+}
+
+function _creativeRememberOpenDetails(){
+  const root = document.getElementById('creativeFields');
+  if(!root) return;
+  _creativeOpenDetails = Array.from(root.querySelectorAll('details[open]')).map(_creativeDetailKey).filter(Boolean);
+}
+
+function _creativeRestoreOpenDetails(){
+  const root = document.getElementById('creativeFields');
+  if(!root || !_creativeOpenDetails.length) return;
+  const open = new Set(_creativeOpenDetails);
+  root.querySelectorAll('details').forEach(node => {
+    if(open.has(_creativeDetailKey(node))) node.open = true;
+  });
+}
+
 function creativeRenderWorkspace(){
   const root = document.getElementById('creativeWorkspace');
   if(!root) return;
+  _creativeRememberOpenDetails();
   if(_creativeCreating){
     root.innerHTML = _creativeCreateMarkup();
     return;
@@ -292,17 +316,17 @@ function creativeRenderWorkspace(){
           <button type="button" class="creative-menu-danger" onclick="creativeDeleteProject('${project.id}')">Delete</button>
         </div>
       </div>
+      <div class="creative-stagebar" role="tablist" aria-label="Framework stages" onkeydown="creativeStageKey(event)">${CREATIVE_STAGES.map(item => {
+      const status = (project.stages[item.id] && project.stages[item.id].status) || 'not_started';
+      const selected = item.id === _creativeStage;
+      return `<button type="button" role="tab" id="creativeTab-${item.id}" class="creative-stage-tab${selected ? ' active' : ''}" aria-selected="${selected ? 'true' : 'false'}" tabindex="${selected ? '0' : '-1'}" title="${_creativeEsc(item.title)}" onclick="creativeSetStage('${item.id}')"><span>${item.label}</span><i class="creative-dot creative-dot-${_creativeEsc(status)}" title="${_creativeEsc(_creativeStatusLabel(status))}"></i></button>`;
+    }).join('')}</div>
       <div class="creative-header-tools">
         <button type="button" class="creative-icon-btn${_creativeChatOpen ? ' on' : ''}" aria-label="${_creativeChatOpen ? 'Hide chat' : 'Show chat'}" aria-pressed="${_creativeChatOpen ? 'true' : 'false'}" onclick="creativeToggleChat()">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M14 4v16"/></svg>
         </button>
       </div>
     </div>
-    <div class="creative-stagebar" role="tablist" aria-label="Framework stages" onkeydown="creativeStageKey(event)">${CREATIVE_STAGES.map(item => {
-      const status = (project.stages[item.id] && project.stages[item.id].status) || 'not_started';
-      const selected = item.id === _creativeStage;
-      return `<button type="button" role="tab" id="creativeTab-${item.id}" class="creative-stage-tab${selected ? ' active' : ''}" aria-selected="${selected ? 'true' : 'false'}" tabindex="${selected ? '0' : '-1'}" title="${_creativeEsc(item.title)}" onclick="creativeSetStage('${item.id}')"><span>${item.label}</span><i class="creative-dot creative-dot-${_creativeEsc(status)}" title="${_creativeEsc(_creativeStatusLabel(status))}"></i></button>`;
-    }).join('')}</div>
     <div class="creative-body${_creativeChatOpen ? '' : ' chat-closed'}" style="--creative-chat-width:${_creativeChatWidth}px">
       <div class="creative-fields" id="creativeFields" role="tabpanel" aria-labelledby="creativeTab-${_creativeStage}">${_creativeStageMarkup(stage)}</div>
       <div class="creative-chat-resizer" role="separator" aria-orientation="vertical" aria-label="Resize chat" onpointerdown="creativeChatResizeStart(event)"></div>
@@ -312,6 +336,14 @@ function creativeRenderWorkspace(){
     </div>`;
   const log = document.getElementById('creativeChatLog');
   if(log) log.scrollTop = log.scrollHeight;
+  _creativeRestoreOpenDetails();
+  const fields = document.getElementById('creativeFields');
+  if(fields && !fields.dataset.detailsBound){
+    fields.dataset.detailsBound = '1';
+    fields.addEventListener('toggle', event => {
+      if(event.target && event.target.tagName === 'DETAILS') _creativeRememberOpenDetails();
+    }, true);
+  }
 }
 
 function creativeToggleMenu(event){
@@ -402,9 +434,9 @@ function _creativeChatMarkup(){
   const placeholder = focus ? `Message about ${_creativeEsc(focusLabel)}` : 'Message Hermes…';
   return `<header class="creative-chat-head"><p>${_creativeEsc(contextLine)}</p>${clear}</header>
     <div class="creative-chat-log" id="creativeChatLog">${_creativeChatError ? `<p class="creative-save failed" role="alert">${_creativeEsc(_creativeChatError)}</p>` : ''}${history}${pending}</div>
-    <form class="creative-composer" onsubmit="creativeSendChat(); return false;">
-      <div class="composer-box creative-composer-box">
-        <textarea id="creativeChatInput" rows="1" placeholder="${placeholder}" onkeydown="creativeChatKey(event)" ${_creativeChatBusy ? 'disabled' : ''}></textarea>
+    <form class="composer-wrap creative-composer" onsubmit="creativeSendChat(); return false;">
+      <div class="composer-box" id="creativeComposerBox">
+        <textarea id="creativeChatInput" dir="auto" rows="1" enterkeyhint="enter" placeholder="${placeholder}" onkeydown="creativeChatKey(event)" ${_creativeChatBusy ? 'disabled' : ''}></textarea>
         <div class="composer-footer">
           <div class="composer-left">${scope}</div>
           <div class="composer-right">
