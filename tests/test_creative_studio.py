@@ -246,6 +246,7 @@ def test_static_panel_wires_stage_switch_proposals_and_export():
     assert 'aria-label="Chats"' in script
     assert 'id="creativeSessionChip"' in script
     assert 'id="creativeSessionMenu"' in script
+    assert 'id="creativeSessionProfileValue">copywriting' in script
     assert 'data-session-action="workspace"' in script
     assert 'data-session-action="thinking"' in script
     assert 'data-session-action="model"' in script
@@ -295,8 +296,14 @@ def test_studio_chat_tabs_keep_separate_threads(studio):
     assert opened["active_thread"] != first["active_thread"]
     assert opened["chat"] == []
     second = studio.post_studio_chat(project["id"], "who", "Second thread line", thread_id=opened["active_thread"])
+    studio.post_studio_chat(project["id"], "who", "proposal outcome: Keep this on the second tab", thread_id=opened["active_thread"])
     saved = studio.get_project(project["id"])
+    proposal = saved["stages"]["who"]["fields"]["outcome"]["proposals"][-1]
+    assert proposal["thread_id"] == opened["active_thread"]
     by_id = {row["id"]: row for row in saved["threads"]}
+    first_blob = json.dumps(by_id[first["active_thread"]]["messages"])
+    assert proposal["id"] not in first_blob
+    assert proposal["id"] in json.dumps(by_id[opened["active_thread"]]["messages"])
     assert "First thread line" in by_id[first["active_thread"]]["messages"][0]["text"]
     assert "Second thread line" in by_id[second["active_thread"]]["messages"][0]["text"]
     assert saved["chat"][0]["text"] == "Second thread line"
@@ -325,6 +332,21 @@ def test_studio_chat_puts_the_typed_product_in_the_system_prompt(studio, monkeyp
     assert "false belief colliding" in posted["messages"][1]["text"]
     assert "Hermes didn't return a suggestion" not in posted["messages"][1]["text"]
     assert "product file" not in seen["user"].lower()
+
+
+def test_studio_prompt_uses_the_copywriting_profile(studio, monkeypatch):
+    captured = {}
+
+    def fake_summary(system, user, active_profile=None, model_override=None, provider_override=None):
+        captured["profile"] = active_profile
+        return "A first line."
+
+    import api.routes as routes
+
+    monkeypatch.setattr(routes, "_llm_update_summary", fake_summary)
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    assert studio.complete_studio_prompt("system", "user") == "A first line."
+    assert captured["profile"] == "copywriting"
 
 
 def test_studio_chat_sends_the_picked_model(studio, monkeypatch):

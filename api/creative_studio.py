@@ -780,7 +780,7 @@ def _pending_count(slot: dict) -> int:
 
 def save_proposal(project_id: str, stage: str, field: str, text: str, *,
                   exploratory: bool = False, missing: list | None = None,
-                  discussion: str = "") -> dict:
+                  discussion: str = "", thread_id: str = "") -> dict:
     _require_field(stage, field)
     body = (text or "").strip()
     if not body:
@@ -802,6 +802,8 @@ def save_proposal(project_id: str, stage: str, field: str, text: str, *,
             "created_at": _now(),
             "updated_at": _now(),
         }
+        if thread_id:
+            proposal["thread_id"] = thread_id
         slot.setdefault("proposals", []).append(proposal)
         selected = slot.get("text") or ""
         saved = _save(project)
@@ -1476,6 +1478,9 @@ def _parse_suggestion_payload(raw: str, allowed: set[str]) -> list[dict]:
     return found
 
 
+STUDIO_AGENT_PROFILE = "copywriting"
+
+
 def complete_studio_prompt(system: str, user: str, model: str = "", provider: str = "") -> str:
     """Ask the configured Hermes model for field suggestions.
 
@@ -1492,6 +1497,7 @@ def complete_studio_prompt(system: str, user: str, model: str = "", provider: st
         return (_llm_update_summary(
             system,
             user,
+            active_profile=STUDIO_AGENT_PROFILE,
             model_override=(model or "").strip() or None,
             provider_override=(provider or "").strip() or None,
         ) or "").strip()
@@ -1578,6 +1584,11 @@ def post_studio_chat(project_id: str, stage: str, text: str, scope: str = "stage
         scope = "stage"
         field = ""
     model, model_provider = _studio_model_choice(model, model_provider)
+    with _lock_for(_profile_dir()):
+        bound = _load(project_id)
+        thread_id = (thread_id or bound.get("active_thread") or "").strip()
+        if thread_id not in {row["id"] for row in bound.get("threads") or []}:
+            raise StudioError("unknown chat")
     saved = []
     for match in _PROPOSAL_LINE.finditer(cleaned):
         raw_field = match.group(1).strip().lower().replace(" ", "_")
@@ -1592,7 +1603,9 @@ def post_studio_chat(project_id: str, stage: str, text: str, scope: str = "stage
                 continue
             if raw_field not in FIELDS[owner]:
                 continue
-        result = save_proposal(project_id, owner, raw_field, body, discussion=cleaned[:500])
+        result = save_proposal(
+            project_id, owner, raw_field, body, discussion=cleaned[:500], thread_id=thread_id,
+        )
         slot_text = ""
         try:
             slot_text = ((get_project(project_id, field=raw_field).get("data") or {}).get("text") or "")
@@ -1640,6 +1653,7 @@ def post_studio_chat(project_id: str, stage: str, text: str, scope: str = "stage
             try:
                 result = save_proposal(
                     project_id, stage, draft["field"], draft["text"], discussion=cleaned[:500],
+                    thread_id=thread_id,
                 )
             except StudioError:
                 continue
@@ -1706,7 +1720,6 @@ def post_studio_chat(project_id: str, stage: str, text: str, scope: str = "stage
             "created_at": now,
             "proposals": saved,
         }
-        thread_id = (thread_id or project.get("active_thread") or "").strip()
         thread = next((row for row in project["threads"] if row["id"] == thread_id), None)
         if thread is None:
             raise StudioError("unknown chat")
