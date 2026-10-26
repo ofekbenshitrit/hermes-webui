@@ -12986,7 +12986,7 @@ def _run_agent_streaming(
                     # getattr() to read the attribute correctly.
                     # (Opus pre-release advisor finding for v0.50.257.)
                     _override = getattr(_session_meta, 'enabled_toolsets', None) if _session_meta else None
-                    if _override:
+                    if _override is not None:
                         _toolsets = _override
             except Exception as _ts_err:
                 print(f"[webui] WARNING: failed to read per-session toolsets for {session_id}: {_ts_err}", flush=True)

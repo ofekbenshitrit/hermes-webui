@@ -16035,8 +16035,10 @@ def _validate_session_toolsets_shape(toolsets):
     """Validate per-session toolset override shape without catalog lookup."""
     if toolsets is None:
         return None
-    if not isinstance(toolsets, list) or not toolsets:
-        raise ValueError("toolsets must be a non-empty list or null")
+    if not isinstance(toolsets, list):
+        raise ValueError("toolsets must be a list or null")
+    if not toolsets:
+        return []
     if not all(isinstance(t, str) and t for t in toolsets):
         raise ValueError("each toolset must be a non-empty string")
     return toolsets

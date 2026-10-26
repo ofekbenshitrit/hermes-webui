@@ -313,6 +313,18 @@ def test_studio_chat_persists_without_changing_the_field(studio, monkeypatch):
     assert "who.segment:" not in seen["user"].split("Rest of the project", 1)[1]
 
 
+def test_studio_prompt_pack_includes_the_product_note_and_framework(studio, tmp_path, monkeypatch):
+    vault = tmp_path / "Products"
+    vault.mkdir()
+    (vault / "Trail Shoes.md").write_text("Cushioned daily trainer. No carbon plate.", encoding="utf-8")
+    monkeypatch.setattr(studio, "product_catalog_roots", lambda: [("obsidian", vault)])
+    project = studio.create_project("Run", "Trail Shoes", product_source=str(vault / "Trail Shoes.md"))
+    pack = studio.studio_prompt_pack(project["id"], "what")
+    assert "Cushioned daily trainer" in pack["product_note"]
+    assert "concept:" in pack["framework"]
+    assert "Unique mechanism" in pack["framework"]
+
+
 def test_studio_chat_tab_binds_one_agent_session(studio):
     project = studio.create_project("Bound", "Mug")
     opened = studio.create_chat_thread(project["id"])

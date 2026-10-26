@@ -471,8 +471,20 @@ function _creativeMessageText(item){
   return '';
 }
 
+function _creativeSavedContext(){
+  const stages = (_creativeProject && _creativeProject.stages) || {};
+  const lines = [];
+  Object.entries(stages).forEach(([stage, row]) => {
+    Object.entries((row && row.fields) || {}).forEach(([name, slot]) => {
+      const text = String((slot && slot.text) || '').trim();
+      if(text) lines.push(stage + '.' + name + ': ' + text.slice(0, 500));
+    });
+  });
+  return lines.slice(0, 40).join('\n');
+}
+
 function _creativeVisibleTurn(text){
-  return String(text || '').replace(/\n*\[studio project=[^\]]*\]\s*$/g, '').trim();
+  return String(text || '').replace(/\n*\[studio project=[\s\S]*$/, '').trim();
 }
 
 async function _creativeLoadAgentTranscript(){
@@ -1208,6 +1220,7 @@ async function creativeSendChat(){
           profile:(typeof S !== 'undefined' && S.activeProfile) || 'default',
           model: model || undefined,
           model_provider: modelProvider || undefined,
+          enabled_toolsets: ['file', 'skills', 'memory'],
         }),
       });
       sessionId = created && created.session && created.session.session_id;
@@ -1220,8 +1233,26 @@ async function creativeSendChat(){
       _creativeApplyThreads(view);
       if(typeof renderSessionList === 'function') void renderSessionList();
     }
-    const marker = `[studio project=${_creativeProject.id} name=${_creativeProject.name} stage=${_creativeStage} scope=${scope}${field ? ' field=' + field : ''}]`;
-    const message = text + '\n\n' + marker + ' Read this Creative Studio project with the Creative Studio tools before you answer. Save drafts with save_creative_proposal. Change a field only when I explicitly ask.';
+    await api('/api/session/toolsets', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      timeoutMs:15000,
+      timeoutToast:false,
+      body:JSON.stringify({session_id:sessionId, toolsets:['file', 'skills', 'memory']}),
+    });
+    const saved = _creativeSavedContext();
+    let pack = {};
+    try{
+      pack = await api('/api/creative-studio/projects/' + _creativeProject.id + '/prompt?stage=' + encodeURIComponent(_creativeStage), {timeoutToast:false});
+    }catch(_){ pack = {}; }
+    const marker = `[studio project=${_creativeProject.id} stage=${_creativeStage} scope=${scope}${field ? ' field=' + field : ''}]`;
+    const roots = (pack.search_roots || []).join('\n');
+    const message = text + '\n\n' + marker
+      + '\nProduct notes already loaded:\n' + (pack.product_note || '(none loaded)')
+      + '\n\nLuke Iha purposes for this stage:\n' + (pack.framework || '(none)')
+      + '\n\nSaved fields:\n' + (saved || '(none yet)')
+      + '\n\nHermes files you may search:\n' + (roots || '(skills, memory, and product notes)')
+      + '\n\nIf the loaded notes are not enough, search those Hermes files for the product or the framework. Read only what the question needs, then answer. Do not run commands and do not search the workspace.';
     const start = await api('/api/chat/start', {
       method:'POST',
       headers:{'Content-Type':'application/json'},

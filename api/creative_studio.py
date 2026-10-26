@@ -1226,6 +1226,8 @@ def handle_creative_get(handler, parsed):
             field=qs.get("field") or None,
             for_suggestion=qs.get("for_suggestion") == "1",
         ))
+    if tail == "/prompt":
+        return _http_call(handler, lambda: studio_prompt_pack(project_id, qs.get("stage") or ""))
     if tail == "/export":
         include = qs.get("include_alternatives")
         flag = None if include is None else include == "1"
@@ -1377,6 +1379,78 @@ def handle_creative_delete(handler, parsed):
 _PROPOSAL_LINE = re.compile(
     r"(?im)^\s*(?:proposal|save(?:\s+as\s+proposal)?|apply\s+to)\s+([a-z_ ]+?)\s*:\s*(.+?)\s*$"
 )
+
+
+def _note_under_catalog(path: Path) -> bool:
+    try:
+        resolved = path.resolve()
+    except OSError:
+        return False
+    if not resolved.is_file():
+        return False
+    for _kind, root in product_catalog_roots():
+        try:
+            root_resolved = root.resolve()
+        except OSError:
+            continue
+        if resolved == root_resolved or root_resolved in resolved.parents:
+            return True
+    return False
+
+
+def _read_bounded_note(path: Path, limit: int = 3500) -> str:
+    if not _note_under_catalog(path):
+        return ""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return ""
+    collapsed = text.strip()
+    if len(collapsed) <= limit:
+        return collapsed
+    return collapsed[: limit - 1].rstrip() + "…"
+
+
+def _product_note(project: dict) -> str:
+    """The product file Hermes already has, bounded so a reply stays one completion."""
+    source = str(project.get("product_source") or "").strip()
+    if source:
+        text = _read_bounded_note(Path(source).expanduser())
+        if text:
+            return text
+    name = _product_name(project).casefold()
+    if not name:
+        return ""
+    for item in list_known_products().get("products") or []:
+        if str(item.get("name") or "").casefold() != name:
+            continue
+        text = _read_bounded_note(Path(str(item.get("source") or "")).expanduser())
+        if text:
+            return text
+    return ""
+
+
+def studio_prompt_pack(project_id: str, stage: str = "") -> dict:
+    """Product note plus the Luke Iha purposes for this stage. No tool calls."""
+    if stage and stage not in FIELDS:
+        raise StudioError("unknown stage")
+    with _lock_for(_profile_dir()):
+        project = _load(project_id)
+    names = list(FIELDS.get(stage) or ()) if stage else []
+    purposes = []
+    for name in names:
+        purpose = FIELD_HELP.get(name)
+        if purpose:
+            purposes.append(f"{name}: {purpose}")
+    roots = []
+    for kind, root in product_catalog_roots():
+        roots.append(f"{kind}: {root}")
+    return {
+        "product": _product_name(project),
+        "product_note": _product_note(project),
+        "framework": "\n".join(purposes),
+        "search_roots": roots,
+    }
 
 
 def _product_name(project: dict) -> str:
