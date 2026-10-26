@@ -429,6 +429,7 @@ function creativeChatKey(event){
     event.preventDefault();
     creativeSendChat();
   }
+}
 
 function _creativeOpenProposals(){
   const stage = _creativeProject.stages[_creativeStage];
