@@ -2316,6 +2316,12 @@
   .toolkit-mark,.toolkit-tab,.toolkit-search{font:inherit;color:var(--muted);background:transparent;border:0;cursor:pointer;}
   .toolkit-mark{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:8px;color:var(--text);flex-shrink:0;}
   .toolkit-mark:hover{background:color-mix(in srgb,var(--text) 8%,transparent);}
+  .toolkit-mark-pane{display:none;}
+  .toolkit-mark:hover .toolkit-mark-symbol,
+  .toolkit-mark:focus-visible .toolkit-mark-symbol{display:none;}
+  .toolkit-mark:hover .toolkit-mark-pane,
+  .toolkit-mark:focus-visible .toolkit-mark-pane{display:block;}
+  .layout.sidebar-collapsed .toolkit-mark-pane{transform:scaleX(-1);}
   .toolkit-tabs{display:flex;align-items:center;gap:2px;min-width:0;max-width:calc(50% - 110px);overflow-x:auto;scrollbar-width:none;}
   .toolkit-tabs::-webkit-scrollbar{display:none;}
   .toolkit-tab{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border-radius:8px;font-size:13px;font-weight:500;white-space:nowrap;flex-shrink:0;}
