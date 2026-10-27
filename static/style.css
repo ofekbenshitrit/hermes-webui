@@ -5354,7 +5354,7 @@ main.main > #mainPlugin{display:none;}
 .creative-chat-tab-main svg{flex-shrink:0;display:block;opacity:.7;}
 .creative-chat-tab.active .creative-chat-tab-main svg{opacity:1;}
 .creative-chat-tab-main span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;}
-#mainCreative .creative-chat-tab-x{display:none;align-items:center;justify-content:center;width:18px;height:18px;margin:0 4px 0 0;padding:0;border-radius:4px;flex-shrink:0;cursor:pointer;}
+#mainCreative .creative-chat-tab-x{display:none;align-items:center;justify-content:center;width:18px;height:18px;margin:0 4px 0 0;padding:0;border-radius:4px;flex-shrink:0;cursor:pointer;font-size:15px;line-height:1;color:var(--muted);}
 #mainCreative .creative-chat-tab.active .creative-chat-tab-x,
 #mainCreative .creative-chat-tab:hover .creative-chat-tab-x,
 #mainCreative .creative-chat-tab:focus-within .creative-chat-tab-x{display:flex;}

@@ -244,8 +244,12 @@ def test_static_panel_wires_stage_switch_proposals_and_export():
     assert "function creativeReleaseChat" in script
     assert "function creativeIsolateField" in script
     assert 'id="creativeChatMount"' in script
+    assert "creative-chat-tabs" in script
+    assert "function creativeNewChatTab" in script
+    assert "function creativeCloseChat" in script
     assert "preserveHome:true" in script
     assert "/chat-session" in script
+    assert "/api/projects/create" in script
     assert "/chat-focus" in script
     assert "function creativeSendChat" not in script
     assert "EventSource" not in script
@@ -293,6 +297,22 @@ def test_studio_chat_tab_binds_one_agent_session(studio):
         raise AssertionError("expected a second session to be rejected")
     copy = studio.duplicate_project(project["id"])
     assert all(not row.get("session_id") for row in copy["threads"])
+
+
+def test_each_chat_tab_keeps_its_own_session(studio):
+    project = studio.create_project("Tabs", "Mug")
+    studio.bind_scope_session(project["id"], "sess_tab_1", stage="who")
+    opened = studio.create_chat_thread(project["id"])
+    studio.bind_chat_session(project["id"], opened["active_thread"], "sess_tab_2")
+    stored = studio.get_project(project["id"])
+    assert stored["chat_session_id"] == "sess_tab_2"
+    assert studio.lookup_studio_session("sess_tab_1")["scope"] == "project"
+    assert studio.lookup_studio_session("sess_tab_2")["scope"] == "project"
+    studio.activate_chat_thread(project["id"], stored["threads"][0]["id"])
+    assert studio.get_project(project["id"])["chat_session_id"] == "sess_tab_1"
+    text = studio.studio_ephemeral_context("sess_tab_1")
+    assert "Product: Mug" in text
+    assert "Selected stage: who" in text
 
 
 def test_new_project_stores_the_creative_without_a_chat_tab(studio):

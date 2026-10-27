@@ -291,6 +291,7 @@ function creativeRenderWorkspace(){
       <div class="creative-fields" id="creativeFields" role="tabpanel" aria-labelledby="creativeTab-${_creativeStage}">${_creativeStageMarkup(stage)}</div>
       <div class="creative-chat-resizer" role="separator" aria-orientation="vertical" aria-label="Resize chat" onpointerdown="creativeChatResizeStart(event)"></div>
       <aside class="${chatClass}" id="creativeAssistant" aria-label="Project chat">
+        ${_creativeChatTabsMarkup()}
         <div id="creativeChatMount"></div>
       </aside>
     </div>`;
@@ -413,6 +414,171 @@ function _creativeScope(){
   return {scope:'project', stage:_creativeStage, field:''};
 }
 
+function _creativeChatIcon(){
+  return '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 3.5h11a1 1 0 0 1 1 1V10a1 1 0 0 1-1 1H6.5L4 13.2V11h-1.5a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1z"/></svg>';
+}
+
+function _creativeTabTitle(thread){
+  const sid = (thread && thread.session_id) || '';
+  let title = '';
+  if(sid && typeof S !== 'undefined' && S.session && S.session.session_id === sid && S.session.title) title = S.session.title;
+  if(!title && sid && typeof _allSessions !== 'undefined' && Array.isArray(_allSessions)){
+    const listed = _allSessions.find(row => row && row.session_id === sid);
+    if(listed && listed.title) title = listed.title;
+  }
+  if(!title) title = (thread && thread.title) || '';
+  title = String(title || '').trim();
+  if(!title || title === 'Untitled') return 'New chat';
+  return title;
+}
+
+function _creativeActiveChat(){
+  const project = _creativeProject;
+  const chats = (project && project.threads) || [];
+  return chats.find(row => row && row.id === project.active_thread) || null;
+}
+
+function _creativeApplyThreads(data){
+  if(!_creativeProject || !data) return;
+  if(Array.isArray(data.threads)){
+    _creativeProject.threads = data.threads.map(row => ({
+      id: row.id,
+      title: row.title || 'New chat',
+      session_id: row.session_id || '',
+    }));
+  }
+  if(typeof data.active_thread === 'string') _creativeProject.active_thread = data.active_thread;
+  const active = _creativeActiveChat();
+  if(active && active.session_id) _creativeProject.chat_session_id = active.session_id;
+}
+
+function _creativeChatTabsMarkup(){
+  const project = _creativeProject;
+  const chats = (project && project.threads) || [];
+  const activeId = project && project.active_thread;
+  const tabs = chats.map(thread => {
+    const active = !_creativeFocusField && thread.id === activeId;
+    const title = _creativeTabTitle(thread);
+    return `<div class="creative-chat-tab${active ? ' active' : ''}" role="tab" aria-selected="${active ? 'true' : 'false'}">
+      <button type="button" class="creative-chat-tab-main" title="${_creativeEsc(title)}" onclick="creativeSelectChat('${thread.id}')">${_creativeChatIcon()}<span>${_creativeEsc(title)}</span></button>
+      <button type="button" class="creative-chat-tab-x" aria-label="Close" onclick="creativeCloseChat(event, '${thread.id}')">&times;</button>
+    </div>`;
+  }).join('');
+  const fieldTab = _creativeFocusField ? `<div class="creative-chat-tab active" role="tab" aria-selected="true">
+      <button type="button" class="creative-chat-tab-main" title="${_creativeEsc(_creativeLabel(_creativeFocusField))}">${_creativeChatIcon()}<span>${_creativeEsc(_creativeLabel(_creativeFocusField))}</span></button>
+      <button type="button" class="creative-chat-tab-x" aria-label="Close" onclick="creativeCloseFieldTab(event)">&times;</button>
+    </div>` : '';
+  const menu = chats.map(thread => `<div class="creative-chat-menu-row"><button type="button" onclick="creativeSelectChat('${thread.id}')">${_creativeEsc(_creativeTabTitle(thread))}</button></div>`).join('');
+  return `<div class="creative-chat-tabs">
+    <div class="creative-chat-tab-scroll" role="tablist" aria-label="Chat sessions">${tabs}${fieldTab}</div>
+    <button type="button" class="creative-chat-tab-tool" aria-label="New chat" onclick="creativeNewChatTab()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+    <button type="button" class="creative-chat-tab-tool" aria-label="All chats" aria-expanded="false" onclick="creativeToggleChatMenu(event)"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></button>
+    <div class="creative-menu creative-chat-menu" id="creativeChatMenu" hidden>${menu}</div>
+  </div>`;
+}
+
+function _creativePaintChatTabs(){
+  const aside = document.getElementById('creativeAssistant');
+  if(!aside) return;
+  const existing = aside.querySelector('.creative-chat-tabs');
+  const html = _creativeChatTabsMarkup();
+  if(existing) existing.outerHTML = html;
+  else {
+    const mount = document.getElementById('creativeChatMount');
+    if(mount) mount.insertAdjacentHTML('beforebegin', html);
+  }
+}
+
+function creativeToggleChatMenu(event){
+  if(event) event.stopPropagation();
+  const menu = document.getElementById('creativeChatMenu');
+  const button = event && event.currentTarget;
+  if(!menu) return;
+  const open = menu.hidden;
+  menu.hidden = !open;
+  if(button) button.setAttribute('aria-expanded', open ? 'true' : 'false');
+  if(open){
+    const close = (ev) => {
+      if(menu.contains(ev.target) || (button && button.contains(ev.target))) return;
+      menu.hidden = true;
+      if(button) button.setAttribute('aria-expanded', 'false');
+      document.removeEventListener('click', close);
+    };
+    setTimeout(() => document.addEventListener('click', close), 0);
+  }
+}
+
+async function creativeSelectChat(id){
+  const menu = document.getElementById('creativeChatMenu');
+  if(menu) menu.hidden = true;
+  if(!_creativeProject || !id) return;
+  if(_creativeFocusField){
+    _creativeFocusField = '';
+    _creativeSyncLive();
+  }
+  try{
+    const data = await api('/api/creative-studio/projects/' + _creativeProject.id + '/threads/active', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({thread_id:id}),
+    });
+    _creativeApplyThreads(data);
+  }catch(err){
+    if(typeof showToast === 'function') showToast((err && err.message) || 'Could not switch chat', 3000, 'error');
+    return;
+  }
+  _creativeShowing = '';
+  _creativePaintChatTabs();
+  await _creativeShowBoundChat();
+}
+
+async function creativeCloseChat(event, id){
+  if(event){ event.preventDefault(); event.stopPropagation(); }
+  if(!_creativeProject || !id) return;
+  try{
+    const data = await api('/api/creative-studio/projects/' + _creativeProject.id + '/threads/close', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({thread_id:id}),
+    });
+    _creativeApplyThreads(data);
+  }catch(err){
+    if(typeof showToast === 'function') showToast((err && err.message) || 'Could not close chat', 3000, 'error');
+    return;
+  }
+  _creativeFocusField = '';
+  _creativeShowing = '';
+  _creativePaintChatTabs();
+  await _creativeShowBoundChat();
+}
+
+function creativeCloseFieldTab(event){
+  if(event){ event.preventDefault(); event.stopPropagation(); }
+  if(_creativeFocusField) creativeIsolateField(_creativeFocusField);
+}
+
+async function creativeNewChatTab(){
+  if(!_creativeProject) return;
+  if(_creativeFocusField){
+    _creativeFocusField = '';
+    _creativeSyncLive();
+  }
+  try{
+    const data = await api('/api/creative-studio/projects/' + _creativeProject.id + '/threads', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:'{}',
+    });
+    _creativeApplyThreads(data);
+  }catch(err){
+    if(typeof showToast === 'function') showToast((err && err.message) || 'Could not open a chat', 3000, 'error');
+    return;
+  }
+  _creativeShowing = '';
+  _creativePaintChatTabs();
+  await _creativeShowBoundChat();
+}
+
 function _creativeBoundId(scope){
   const project = _creativeProject;
   if(!project) return '';
@@ -421,25 +587,31 @@ function _creativeBoundId(scope){
     const slot = stage && stage.fields && stage.fields[scope.field];
     return (slot && slot.chat_session_id) || '';
   }
+  const active = _creativeActiveChat();
+  if(active) return active.session_id || '';
   return project.chat_session_id || '';
 }
 
 async function _creativeSessionProjectId(){
   if(_creativeSessionProjectIdCache) return _creativeSessionProjectIdCache;
-  const data = await api('/api/projects');
-  const rows = (data && data.projects) || [];
-  const found = rows.find(row => row && row.name === 'Creative Studio');
-  if(found && found.project_id){
-    _creativeSessionProjectIdCache = found.project_id;
-    return found.project_id;
+  try{
+    const data = await api('/api/projects');
+    const rows = (data && data.projects) || [];
+    const found = rows.find(row => row && row.name === 'Creative Studio');
+    if(found && found.project_id){
+      _creativeSessionProjectIdCache = found.project_id;
+      return found.project_id;
+    }
+    const created = await api('/api/projects/create', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({name:'Creative Studio', color:'#c47b2b'}),
+    });
+    _creativeSessionProjectIdCache = (created && created.project && created.project.project_id) || '';
+    return _creativeSessionProjectIdCache;
+  }catch(_){
+    return '';
   }
-  const created = await api('/api/projects', {
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({name:'Creative Studio', color:'#c47b2b'}),
-  });
-  _creativeSessionProjectIdCache = (created && created.project && created.project.project_id) || '';
-  return _creativeSessionProjectIdCache;
 }
 
 async function _creativeEnsureBoundSession(){
@@ -459,21 +631,34 @@ async function _creativeEnsureBoundSession(){
   });
   const sessionId = created && created.session && created.session.session_id;
   if(!sessionId) throw new Error('Could not start a chat.');
-  await api('/api/creative-studio/projects/' + _creativeProject.id + '/chat-session', {
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({
-      session_id:sessionId,
-      scope:scope.scope,
-      stage:scope.stage,
-      field:scope.field,
-    }),
-  });
-  if(scope.scope === 'field'){
-    const slot = _creativeProject.stages[scope.stage].fields[scope.field];
-    if(slot) slot.chat_session_id = sessionId;
-  }else{
+  const active = scope.scope === 'field' ? null : _creativeActiveChat();
+  if(active && !active.session_id){
+    const bound = await api('/api/creative-studio/projects/' + _creativeProject.id + '/threads/session', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({thread_id:active.id, session_id:sessionId}),
+    });
+    _creativeApplyThreads(bound);
+    active.session_id = sessionId;
     _creativeProject.chat_session_id = sessionId;
+  }else{
+    const bound = await api('/api/creative-studio/projects/' + _creativeProject.id + '/chat-session', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        session_id:sessionId,
+        scope:scope.scope,
+        stage:scope.stage,
+        field:scope.field,
+      }),
+    });
+    if(scope.scope === 'field'){
+      const slot = _creativeProject.stages[scope.stage].fields[scope.field];
+      if(slot) slot.chat_session_id = sessionId;
+    }else{
+      _creativeApplyThreads(bound);
+      _creativeProject.chat_session_id = sessionId;
+    }
   }
   if(typeof renderSessionList === 'function') void renderSessionList();
   return sessionId;
@@ -527,6 +712,7 @@ async function _creativeShowBoundChat(){
     _creativeShowing = id;
     if(typeof loadSession === 'function') await loadSession(id, {preserveHome:true});
     if(token !== _creativeShowToken) return;
+    _creativePaintChatTabs();
   }catch(err){
     if(_creativeShowing && token === _creativeShowToken) _creativeShowing = '';
     if(token !== _creativeShowToken) return;

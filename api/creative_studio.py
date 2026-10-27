@@ -412,7 +412,8 @@ def _prepare_project(project: dict) -> bool:
     if not isinstance(project.get("chat"), list):
         project["chat"] = []
     changed = _ensure_threads(project)
-    return _migrate_chat_session(project) or changed
+    changed = _migrate_chat_session(project) or changed
+    return _ensure_tab_for_bound_session(project) or changed
 
 
 def _load(project_id: str) -> dict:
@@ -537,6 +538,10 @@ def activate_chat_thread(project_id: str, thread_id: str) -> dict:
             raise StudioError("unknown chat")
         project["active_thread"] = thread_id
         _sync_active_chat(project)
+        active = next((row for row in project["threads"] if row["id"] == thread_id), None)
+        session_id = _valid_session_id((active or {}).get("session_id") or "")
+        if session_id:
+            project["chat_session_id"] = session_id
         _save(project)
         return _thread_view(project)
 
@@ -556,6 +561,9 @@ def bind_chat_session(project_id: str, thread_id: str, session_id: str) -> dict:
         if existing and existing != session_id:
             raise StudioError("chat already has a session")
         thread["session_id"] = session_id
+        if project.get("active_thread") == thread_id or not _valid_session_id(project.get("chat_session_id") or ""):
+            project["active_thread"] = thread_id
+            project["chat_session_id"] = session_id
         _save(project)
         return _thread_view(project)
 
@@ -573,6 +581,8 @@ def close_chat_thread(project_id: str, thread_id: str) -> dict:
         if project.get("active_thread") == thread_id:
             project["active_thread"] = remaining[-1]["id"]
         _sync_active_chat(project)
+        active = next((row for row in remaining if row["id"] == project.get("active_thread")), None)
+        project["chat_session_id"] = _valid_session_id((active or {}).get("session_id") or "")
         _save(project)
         return _thread_view(project)
 
@@ -580,6 +590,7 @@ def close_chat_thread(project_id: str, thread_id: str) -> dict:
 def _save(project: dict) -> dict:
     _ensure_threads(project)
     _migrate_chat_session(project)
+    _ensure_tab_for_bound_session(project)
     project["updated_at"] = _now()
     store = _read_store()
     store["projects"][project["id"]] = project
@@ -1668,6 +1679,28 @@ def _migrate_chat_session(project: dict) -> bool:
     return changed
 
 
+def _ensure_tab_for_bound_session(project: dict) -> bool:
+    """Give the open project chat a tab. An empty tab is a new chat, so leave it alone."""
+    session_id = _valid_session_id(project.get("chat_session_id") or "")
+    if not session_id:
+        return False
+    threads = project.get("threads") if isinstance(project.get("threads"), list) else []
+    project["threads"] = threads
+    for row in threads:
+        if isinstance(row, dict) and _valid_session_id(row.get("session_id") or "") == session_id:
+            return False
+    thread_id = _new_id()
+    threads.append({
+        "id": thread_id,
+        "title": "New chat",
+        "messages": [],
+        "session_id": session_id,
+    })
+    if not project.get("active_thread"):
+        project["active_thread"] = thread_id
+    return True
+
+
 def _scope_bindings(project: dict) -> dict:
     found = {}
     project_id = project.get("id") or ""
@@ -1679,6 +1712,17 @@ def _scope_bindings(project: dict) -> dict:
             "stage": str(project.get("chat_stage") or ""),
             "field": str(project.get("chat_field") or ""),
         }
+    for thread in project.get("threads") or []:
+        if not isinstance(thread, dict):
+            continue
+        session_id = _valid_session_id(thread.get("session_id") or "")
+        if session_id and session_id not in found:
+            found[session_id] = {
+                "project_id": project_id,
+                "scope": "project",
+                "stage": str(project.get("chat_stage") or ""),
+                "field": str(project.get("chat_field") or ""),
+            }
     for stage, row in (project.get("stages") or {}).items():
         for field, slot in ((row or {}).get("fields") or {}).items():
             session_id = _valid_session_id((slot or {}).get("chat_session_id") or "")
@@ -1730,12 +1774,15 @@ def bind_scope_session(project_id: str, session_id: str, scope: str = "project",
             project["chat_field"] = field
         _save(project)
         binding = _scope_bindings(project).get(session_id) or {}
+        view = _thread_view(project)
         return {
             "session_id": session_id,
             "chat_session_id": project.get("chat_session_id") or "",
             "scope": binding.get("scope") or scope,
             "stage": binding.get("stage") or "",
             "field": binding.get("field") or "",
+            "threads": view["threads"],
+            "active_thread": view["active_thread"],
         }
 
 
@@ -1754,9 +1801,19 @@ def set_chat_focus(project_id: str, session_id: str, stage: str = "", field: str
         _require_field(stage, field)
     with _studio_lock():
         project = _load(project_id)
-        if session_id == _valid_session_id(project.get("chat_session_id") or ""):
+        thread = next(
+            (
+                row for row in (project.get("threads") or [])
+                if isinstance(row, dict) and _valid_session_id(row.get("session_id") or "") == session_id
+            ),
+            None,
+        )
+        if thread is not None or session_id == _valid_session_id(project.get("chat_session_id") or ""):
             project["chat_stage"] = stage
             project["chat_field"] = field
+            if thread is not None:
+                project["active_thread"] = thread.get("id") or ""
+                project["chat_session_id"] = session_id
             _save(project)
             return {"session_id": session_id, "scope": "project", "stage": stage, "field": field}
         for stage_name, row in (project.get("stages") or {}).items():
