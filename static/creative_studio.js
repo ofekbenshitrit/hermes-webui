@@ -54,6 +54,7 @@ let _creativeChatHosted = false;
 let _creativeShowToken = 0;
 let _creativeShowing = '';
 let _creativeSessionProjectIdCache = '';
+let _creativeFocusJob = Promise.resolve();
 function _creativeEsc(value){
   return String(value == null ? '' : value)
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -215,9 +216,7 @@ function creativeStageKey(event){
 function creativeMoveStage(delta){
   const index = CREATIVE_STAGES.findIndex(stage => stage.id === _creativeStage);
   const next = CREATIVE_STAGES[index + delta];
-  if(!next) return;
-  _creativeStage = next.id;
-  creativeRenderWorkspace();
+  if(next) creativeSetStage(next.id);
 }
 
 function _creativeDetailKey(node){
@@ -411,7 +410,7 @@ async function creativeReleaseChat(){
 
 function _creativeScope(){
   if(_creativeFocusField) return {scope:'field', stage:_creativeStage, field:_creativeFocusField};
-  return {scope:'project', stage:'', field:''};
+  return {scope:'project', stage:_creativeStage, field:''};
 }
 
 function _creativeBoundId(scope){
@@ -480,12 +479,47 @@ async function _creativeEnsureBoundSession(){
   return sessionId;
 }
 
+function _creativeApplyProject(fresh){
+  if(!fresh || !fresh.id) return;
+  const current = _creativeProject;
+  if(current && current.id === fresh.id && current.updated_at && fresh.updated_at && fresh.updated_at < current.updated_at) return;
+  _creativeProject = fresh;
+}
+
+function _creativePublishFocus(sessionId){
+  const projectId = _creativeProject && _creativeProject.id;
+  const run = async () => {
+    const project = _creativeProject;
+    if(!project || project.id !== projectId || !sessionId) return;
+    const scope = _creativeScope();
+    if(scope.scope === 'field') return;
+    if((project.chat_session_id || '') !== sessionId) return;
+    if((project.chat_stage || '') === (scope.stage || '') && !(project.chat_field || '')) return;
+    try{
+      await api('/api/creative-studio/projects/' + projectId + '/chat-focus', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({session_id:sessionId, stage:scope.stage, field:''}),
+      });
+      if(_creativeProject && _creativeProject.id === projectId && _creativeScope().stage === scope.stage && !_creativeFocusField){
+        _creativeProject.chat_stage = scope.stage;
+        _creativeProject.chat_field = '';
+      }
+    }catch(_){}
+  };
+  const next = _creativeFocusJob.then(run, run);
+  _creativeFocusJob = next;
+  return next;
+}
+
 async function _creativeShowBoundChat(){
   const token = ++_creativeShowToken;
   try{
     _creativeMountChat();
     const id = await _creativeEnsureBoundSession();
     if(token !== _creativeShowToken || !id) return;
+    await _creativePublishFocus(id);
+    if(token !== _creativeShowToken) return;
     if(_creativeShowing === id || (typeof S !== 'undefined' && S.session && S.session.session_id === id)){
       _creativeShowing = id;
       return;
@@ -631,7 +665,7 @@ async function creativeSaveField(field){
       showToast('Later stages marked Review recommended', 2200);
     }
     const fresh = await api('/api/creative-studio/projects/' + _creativeProject.id);
-    _creativeProject = fresh;
+    _creativeApplyProject(fresh);
     _creativeSyncLive();
   }catch(err){
     _creativeSaveState = 'Save failed';
@@ -649,7 +683,7 @@ async function creativeReloadQuiet(){
   if(!_creativeProject || _creativeDirty) return;
   const fresh = await api('/api/creative-studio/projects/' + _creativeProject.id);
   if(_creativeDirty) return;
-  _creativeProject = fresh;
+  _creativeApplyProject(fresh);
   _creativeSyncLive();
 }
 

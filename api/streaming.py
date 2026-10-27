@@ -13397,7 +13397,9 @@ def _run_agent_streaming(
             try:
                 from api.creative_studio import append_studio_ephemeral
                 agent.ephemeral_system_prompt = append_studio_ephemeral(
-                    agent.ephemeral_system_prompt, session_id
+                    agent.ephemeral_system_prompt,
+                    session_id,
+                    profile=_resolved_profile_name,
                 )
             except Exception:
                 logger.debug("creative studio context skipped", exc_info=True)

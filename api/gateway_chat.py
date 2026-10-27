@@ -2116,7 +2116,9 @@ def _run_gateway_chat_streaming(
             try:
                 from api.creative_studio import append_studio_ephemeral
                 _gateway_system_prompt = append_studio_ephemeral(
-                    _gateway_system_prompt, session_id
+                    _gateway_system_prompt,
+                    session_id,
+                    profile=getattr(s, "profile", None),
                 )
             except Exception:
                 logger.debug("creative studio context skipped", exc_info=True)

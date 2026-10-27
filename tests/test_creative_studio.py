@@ -246,6 +246,7 @@ def test_static_panel_wires_stage_switch_proposals_and_export():
     assert 'id="creativeChatMount"' in script
     assert "preserveHome:true" in script
     assert "/chat-session" in script
+    assert "/chat-focus" in script
     assert "function creativeSendChat" not in script
     assert "EventSource" not in script
     assert "/api/creative-studio/chat" not in script
@@ -259,6 +260,9 @@ def test_static_panel_wires_stage_switch_proposals_and_export():
     streaming = (root / "api" / "streaming.py").read_text(encoding="utf-8")
     call = streaming.index("agent.ephemeral_system_prompt = _webui_ephemeral_system_prompt(")
     assert streaming.index("append_studio_ephemeral(", call) > call
+    assert "profile=_resolved_profile_name" in streaming[call:]
+    gateway = (root / "api" / "gateway_chat.py").read_text(encoding="utf-8")
+    assert 'profile=getattr(s, "profile", None)' in gateway
 
 
 def test_studio_prompt_pack_includes_the_product_note_and_framework(studio, tmp_path, monkeypatch):
@@ -291,16 +295,45 @@ def test_studio_chat_tab_binds_one_agent_session(studio):
     assert all(not row.get("session_id") for row in copy["threads"])
 
 
-def test_legacy_project_without_chat_still_opens(studio, tmp_path):
+def test_new_project_stores_the_creative_without_a_chat_tab(studio):
+    project = studio.create_project("Plain", "Trail Shoes")
+    assert project["threads"] == []
+    assert project["chat"] == []
+    assert project["chat_session_id"] == ""
+
+
+def test_legacy_project_without_chat_still_opens(studio):
     project = studio.create_project("Legacy")
-    path = studio._project_path(project["id"])
+    path = studio._store_path()
     raw = json.loads(path.read_text(encoding="utf-8"))
-    raw.pop("chat", None)
+    raw["projects"][project["id"]].pop("chat", None)
     path.write_text(json.dumps(raw), encoding="utf-8")
     loaded = studio.get_project(project["id"])
     assert loaded["chat"] == []
     assert "brief" in loaded["stages"]
     assert loaded["stages"]["who"]["fields"]["outcome"]["text"] == ""
+
+
+def test_split_files_collapse_into_one_store(studio, tmp_path):
+    legacy = tmp_path / "creative_studio" / "creative-test"
+    legacy.mkdir(parents=True)
+    project = studio._blank_project("Old")
+    project["chat_session_id"] = "sess_old_store"
+    (legacy / f"{project['id']}.json").write_text(json.dumps(project), encoding="utf-8")
+    (legacy / "active.json").write_text(json.dumps({"project_id": project["id"]}), encoding="utf-8")
+    (legacy / "session-index.json").write_text("{}", encoding="utf-8")
+    loaded = studio.get_project(project["id"])
+    assert loaded["name"] == "Old"
+    assert studio.get_active_project_id() == project["id"]
+    assert studio.lookup_studio_session("sess_old_store")["scope"] == "project"
+    store_path = tmp_path / "creative_studio" / "creative-test.json"
+    assert store_path.is_file()
+    assert not legacy.exists()
+    second = studio.create_project("Second")
+    files = [path for path in (tmp_path / "creative_studio").rglob("*") if path.is_file()]
+    assert [path.name for path in files] == ["creative-test.json"]
+    stored = json.loads(store_path.read_text(encoding="utf-8"))
+    assert set(stored["projects"]) == {project["id"], second["id"]}
 
 
 def test_scope_sessions_stay_separate_and_duplicate_clears_them(studio):
@@ -355,6 +388,34 @@ def test_field_context_puts_the_field_first_and_leaves_other_chats_alone(studio,
     appended = studio.append_studio_ephemeral(shared, "sess_field_ctx")
     assert appended.startswith(shared + "\n\n")
     assert "who.segment: Night bakers" in appended
+
+
+def test_context_uses_the_session_profile_and_names_the_selection(studio, monkeypatch):
+    import api.profiles as profiles
+
+    project = studio.create_project("Run", "Trail Shoes")
+    studio.update_field(project["id"], "who", "outcome", "Fewer blisters", author="user")
+    studio.bind_scope_session(project["id"], "sess_who_ctx", stage="who")
+    focused = studio.set_chat_focus(project["id"], "sess_who_ctx", stage="who", field="outcome")
+    assert focused == {"session_id": "sess_who_ctx", "scope": "project", "stage": "who", "field": "outcome"}
+    studio.bind_scope_session(
+        project["id"], "sess_who_field", scope="field", stage="who", field="outcome"
+    )
+    studio.update_field(project["id"], "who", "segment", "Night bakers", author="user")
+    stored = studio.get_project(project["id"])
+    assert stored["chat_stage"] == "who"
+    assert stored["chat_field"] == "outcome"
+    monkeypatch.setattr(profiles, "get_active_profile_name", lambda: "default")
+    assert studio.studio_ephemeral_context("sess_who_ctx") == ""
+    text = studio.studio_ephemeral_context("sess_who_ctx", profile="creative-test")
+    assert "Product: Trail Shoes" in text
+    assert "Selected stage: who" in text
+    assert "Selected field: outcome" in text
+    assert text.index("who.outcome: Fewer blisters") < text.index("Other fields, for reference only")
+    field_text = studio.studio_ephemeral_context("sess_who_field", profile="creative-test")
+    assert "This conversation is only this field." in field_text
+    assert "Selected field: outcome" in field_text
+    assert "Product: Trail Shoes" in field_text
 
 
 def test_legacy_thread_session_becomes_the_project_chat(studio):

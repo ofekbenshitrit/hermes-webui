@@ -189,12 +189,15 @@ def _now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
+def _profile_slug(name: str | None) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", str(name or "default")).strip("._") or "default"
+    return cleaned[:80]
+
+
 def _profile_name() -> str:
     from api.profiles import get_active_profile_name
 
-    name = get_active_profile_name() or "default"
-    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", str(name)).strip("._") or "default"
-    return cleaned[:80]
+    return _profile_slug(get_active_profile_name() or "default")
 
 
 def _state_dir() -> Path:
@@ -203,10 +206,24 @@ def _state_dir() -> Path:
     return Path(config.STATE_DIR)
 
 
-def _profile_dir() -> Path:
-    path = _state_dir() / "creative_studio" / _profile_name()
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+def _profile_slug_for(profile: str | None = None) -> str:
+    """None uses the request profile. Chat workers must pass the session profile."""
+    if profile is None:
+        return _profile_name()
+    return _profile_slug(profile)
+
+
+def _store_path(profile: str | None = None) -> Path:
+    """One JSON document for every creative in this profile."""
+    return _state_dir() / "creative_studio" / f"{_profile_slug_for(profile)}.json"
+
+
+def _legacy_dir(profile: str | None = None) -> Path:
+    return _state_dir() / "creative_studio" / _profile_slug_for(profile)
+
+
+def _studio_lock(profile: str | None = None) -> threading.Lock:
+    return _lock_for(_store_path(profile))
 
 
 def _lock_for(path: Path) -> threading.Lock:
@@ -274,13 +291,9 @@ def _blank_project(name: str, product: str = "") -> dict:
         "threads": [],
         "active_thread": "",
         "chat_session_id": "",
+        "chat_stage": "",
+        "chat_field": "",
     }
-
-
-def _project_path(project_id: str) -> Path:
-    if not re.fullmatch(r"[a-f0-9]{12}", project_id or ""):
-        raise StudioError("invalid project id")
-    return _profile_dir() / f"{project_id}.json"
 
 
 def _read_json(path: Path) -> dict:
@@ -294,18 +307,123 @@ def _write_json(path: Path, payload: dict) -> None:
     os.replace(tmp, path)
 
 
-def _load(project_id: str) -> dict:
-    path = _project_path(project_id)
-    if not path.is_file():
-        raise StudioError("project not found", status=404)
-    project = _read_json(path)
+def _empty_store() -> dict:
+    return {"active_project_id": "", "projects": {}}
+
+
+def _normalize_store(payload: dict) -> dict:
+    projects = payload.get("projects") if isinstance(payload, dict) else None
+    rows: dict[str, dict] = {}
+    if isinstance(projects, dict):
+        items = projects.items()
+    elif isinstance(projects, list):
+        items = ((row.get("id") if isinstance(row, dict) else "", row) for row in projects)
+    else:
+        items = ()
+    for key, row in items:
+        if not isinstance(row, dict):
+            continue
+        project_id = str(row.get("id") or key or "")
+        if not re.fullmatch(r"[a-f0-9]{12}", project_id):
+            continue
+        row["id"] = project_id
+        rows[project_id] = row
+    active = ""
+    if isinstance(payload, dict):
+        active = str(payload.get("active_project_id") or "")
+    if active not in rows:
+        active = ""
+    return {"active_project_id": active, "projects": rows}
+
+
+def _import_legacy(directory: Path, store: dict) -> bool:
+    """Fold the old per-project files into the one store. Returns whether any were present."""
+    if not directory.is_dir():
+        return False
+    found = False
+    for path in sorted(directory.glob("*.json")):
+        if path.name in {"active.json", "session-index.json"}:
+            found = True
+            continue
+        if not re.fullmatch(r"[a-f0-9]{12}\.json", path.name):
+            continue
+        found = True
+        try:
+            project = _read_json(path)
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(project, dict):
+            continue
+        project_id = str(project.get("id") or path.stem)
+        if not re.fullmatch(r"[a-f0-9]{12}", project_id) or project_id in store["projects"]:
+            continue
+        project["id"] = project_id
+        store["projects"][project_id] = project
+    active_path = directory / "active.json"
+    if active_path.is_file() and not store["active_project_id"]:
+        try:
+            active_id = str(_read_json(active_path).get("project_id") or "")
+        except (OSError, json.JSONDecodeError):
+            active_id = ""
+        if active_id in store["projects"]:
+            store["active_project_id"] = active_id
+    return found
+
+
+def _remove_legacy(directory: Path) -> None:
+    if not directory.is_dir():
+        return
+    for path in directory.glob("*.json"):
+        if path.name in {"active.json", "session-index.json"} or re.fullmatch(r"[a-f0-9]{12}\.json", path.name):
+            try:
+                path.unlink()
+            except OSError:
+                return
+    try:
+        directory.rmdir()
+    except OSError:
+        return
+
+
+def _read_store(profile: str | None = None) -> dict:
+    path = _store_path(profile)
+    store = _empty_store()
+    if path.is_file():
+        try:
+            payload = _read_json(path)
+        except (OSError, json.JSONDecodeError):
+            payload = {}
+        store = _normalize_store(payload if isinstance(payload, dict) else {})
+    legacy = _legacy_dir(profile)
+    if _import_legacy(legacy, store):
+        _write_store(store, path)
+        _remove_legacy(legacy)
+    return store
+
+
+def _write_store(store: dict, path: Path | None = None) -> None:
+    _write_json(path or _store_path(), {
+        "active_project_id": store.get("active_project_id") or "",
+        "projects": store.get("projects") or {},
+    })
+
+
+def _prepare_project(project: dict) -> bool:
     if not isinstance(project.get("chat"), list):
         project["chat"] = []
     changed = _ensure_threads(project)
-    changed = _migrate_chat_session(project) or changed
-    if changed:
-        _write_json(path, project)
-    _sync_session_index(project)
+    return _migrate_chat_session(project) or changed
+
+
+def _load(project_id: str) -> dict:
+    if not re.fullmatch(r"[a-f0-9]{12}", project_id or ""):
+        raise StudioError("invalid project id")
+    store = _read_store()
+    project = store["projects"].get(project_id)
+    if not isinstance(project, dict):
+        raise StudioError("project not found", status=404)
+    if _prepare_project(project):
+        _write_store(store)
     return project
 
 
@@ -363,6 +481,11 @@ def _ensure_threads(project: dict) -> bool:
             changed = True
     if not threads:
         chat = project.get("chat") if isinstance(project.get("chat"), list) else []
+        if not chat:
+            project["threads"] = []
+            project["active_thread"] = ""
+            project["chat"] = []
+            return changed
         threads = [{"id": _new_id(), "title": _thread_title(chat), "messages": list(chat)[-200:], "session_id": ""}]
         changed = True
     if len(threads) > 12:
@@ -394,7 +517,7 @@ def _thread_view(project: dict) -> dict:
 
 
 def create_chat_thread(project_id: str) -> dict:
-    with _lock_for(_profile_dir()):
+    with _studio_lock():
         project = _load(project_id)
         if len(project["threads"]) >= 12:
             raise StudioError("too many chats")
@@ -408,7 +531,7 @@ def create_chat_thread(project_id: str) -> dict:
 
 def activate_chat_thread(project_id: str, thread_id: str) -> dict:
     thread_id = (thread_id or "").strip()
-    with _lock_for(_profile_dir()):
+    with _studio_lock():
         project = _load(project_id)
         if thread_id not in {row["id"] for row in project["threads"]}:
             raise StudioError("unknown chat")
@@ -424,7 +547,7 @@ def bind_chat_session(project_id: str, thread_id: str, session_id: str) -> dict:
     session_id = (session_id or "").strip()
     if not re.fullmatch(r"[A-Za-z0-9_-]{8,80}", session_id):
         raise StudioError("invalid session id")
-    with _lock_for(_profile_dir()):
+    with _studio_lock():
         project = _load(project_id)
         thread = next((row for row in project["threads"] if row["id"] == thread_id), None)
         if thread is None:
@@ -439,7 +562,7 @@ def bind_chat_session(project_id: str, thread_id: str, session_id: str) -> dict:
 
 def close_chat_thread(project_id: str, thread_id: str) -> dict:
     thread_id = (thread_id or "").strip()
-    with _lock_for(_profile_dir()):
+    with _studio_lock():
         project = _load(project_id)
         remaining = [row for row in project["threads"] if row["id"] != thread_id]
         if len(remaining) == len(project["threads"]):
@@ -458,21 +581,17 @@ def _save(project: dict) -> dict:
     _ensure_threads(project)
     _migrate_chat_session(project)
     project["updated_at"] = _now()
-    _write_json(_project_path(project["id"]), project)
-    _sync_session_index(project)
+    store = _read_store()
+    store["projects"][project["id"]] = project
+    _write_store(store)
     return project
 
 
 def _iter_projects() -> list[dict]:
-    root = _profile_dir()
-    projects = []
-    for path in sorted(root.glob("*.json")):
-        if not re.fullmatch(r"[a-f0-9]{12}\.json", path.name):
-            continue
-        try:
-            projects.append(_read_json(path))
-        except (OSError, json.JSONDecodeError):
-            continue
+    projects = [
+        row for row in _read_store()["projects"].values()
+        if isinstance(row, dict)
+    ]
     projects.sort(key=lambda row: row.get("updated_at") or "", reverse=True)
     return projects
 
@@ -544,7 +663,7 @@ def _resolve(project_id: str | None = None, name: str | None = None) -> dict:
         return _load(project_id)
     needle = (name or "").strip().casefold()
     if not needle:
-        active = get_active_project_id()
+        active = _read_store()["active_project_id"]
         if not active:
             raise StudioError("project_id is required")
         return _load(active)
@@ -561,7 +680,7 @@ def _resolve(project_id: str | None = None, name: str | None = None) -> dict:
 
 
 def list_projects() -> dict:
-    with _lock_for(_profile_dir()):
+    with _studio_lock():
         return {"projects": [_summary(row) for row in _iter_projects()]}
 
 
@@ -581,11 +700,7 @@ def _env_assignment(home: Path, key: str) -> str:
     return ""
 
 
-def product_catalog_roots() -> list[tuple[str, Path]]:
-    """Places Hermes already keeps product knowledge: Obsidian, the wiki, and skills."""
-    from api.profiles import get_active_hermes_home
-
-    home = get_active_hermes_home()
+def _catalog_roots(home: Path) -> list[tuple[str, Path]]:
     vault = _env_assignment(home, "OBSIDIAN_VAULT_PATH") or os.environ.get("OBSIDIAN_VAULT_PATH") or ""
     wiki = _env_assignment(home, "WIKI_PATH") or os.environ.get("WIKI_PATH") or ""
     vault_path = Path(vault).expanduser() if vault else Path.home() / "Documents" / "Obsidian Vault"
@@ -597,7 +712,14 @@ def product_catalog_roots() -> list[tuple[str, Path]]:
     ]
 
 
-def list_known_products() -> dict:
+def product_catalog_roots() -> list[tuple[str, Path]]:
+    """Places Hermes already keeps product knowledge: Obsidian, the wiki, and skills."""
+    from api.profiles import get_active_hermes_home
+
+    return _catalog_roots(get_active_hermes_home())
+
+
+def list_known_products(roots: list[tuple[str, Path]] | None = None) -> dict:
     """Product names only. Note bodies stay in the vault, wiki, or skill."""
     found: list[dict] = []
     seen: set[str] = set()
@@ -610,7 +732,7 @@ def list_known_products() -> dict:
         seen.add(key)
         found.append({"name": cleaned, "source": source, "kind": kind})
 
-    for kind, root in product_catalog_roots():
+    for kind, root in (product_catalog_roots() if roots is None else roots):
         if not root.is_dir():
             continue
         folders = [root / "products", root / "Products", root / "Product"]
@@ -633,17 +755,17 @@ def create_project(name: str, product: str = "", product_source: str = "") -> di
         raise StudioError("name is required")
     if len(cleaned) > 160:
         raise StudioError("name is too long")
-    with _lock_for(_profile_dir()):
+    with _studio_lock():
         project = _blank_project(cleaned, product=(product or "").strip())
         project["product_source"] = (product_source or "").strip()
         _save(project)
-        _write_active(project["id"])
+        _set_active_id(project["id"])
         return project
 
 
 def get_project(project_id: str | None = None, name: str | None = None, stage: str | None = None,
                 field: str | None = None, for_suggestion: bool = False) -> dict:
-    with _lock_for(_profile_dir()):
+    with _studio_lock():
         project = _resolve(project_id, name)
         if stage and stage not in FIELDS:
             raise StudioError("unknown stage")
@@ -716,26 +838,26 @@ def rename_project(project_id: str, name: str) -> dict:
     cleaned = (name or "").strip()
     if not cleaned:
         raise StudioError("name is required")
-    with _lock_for(_profile_dir()):
+    with _studio_lock():
         project = _load(project_id)
         project["name"] = cleaned[:160]
         return _save(project)
 
 
 def delete_project(project_id: str) -> dict:
-    with _lock_for(_profile_dir()):
-        path = _project_path(project_id)
-        if not path.is_file():
+    with _studio_lock():
+        store = _read_store()
+        if project_id not in store["projects"]:
             raise StudioError("project not found", status=404)
-        path.unlink()
-        if get_active_project_id() == project_id:
-            _write_active("")
-        _forget_project_sessions(project_id)
+        del store["projects"][project_id]
+        if store["active_project_id"] == project_id:
+            store["active_project_id"] = ""
+        _write_store(store)
         return {"ok": True, "id": project_id}
 
 
 def duplicate_project(project_id: str, name: str | None = None) -> dict:
-    with _lock_for(_profile_dir()):
+    with _studio_lock():
         source = _load(project_id)
         project = copy.deepcopy(source)
         project["id"] = _new_id()
@@ -748,6 +870,8 @@ def duplicate_project(project_id: str, name: str | None = None) -> dict:
         for thread in project.get("threads") or []:
             thread["session_id"] = ""
         project["chat_session_id"] = ""
+        project["chat_stage"] = ""
+        project["chat_field"] = ""
         for stage in project.get("stages", {}).values():
             for slot in (stage.get("fields") or {}).values():
                 slot.pop("chat_session_id", None)
@@ -761,7 +885,7 @@ def update_field(project_id: str, stage: str, field: str, text: str, *,
     if author not in {"user", "agent"}:
         raise StudioError("invalid author")
     _require_field(stage, field)
-    with _lock_for(_profile_dir()):
+    with _studio_lock():
         project = _load(project_id)
         slot = _field(project, stage, field)
         previous = slot.get("text") or ""
@@ -800,7 +924,7 @@ def update_field(project_id: str, stage: str, field: str, text: str, *,
 
 def confirm_brief_summary(project_id: str, provided: str, assumptions: str, missing: str) -> dict:
     """Store the three summary sections. Does not copy assumptions into fact fields."""
-    with _lock_for(_profile_dir()):
+    with _studio_lock():
         project = _load(project_id)
         brief = project["stages"]["brief"]["fields"]
         facts_before = brief["product_facts"]["text"]
@@ -831,7 +955,7 @@ def save_proposal(project_id: str, stage: str, field: str, text: str, *,
     body = (text or "").strip()
     if not body:
         raise StudioError("proposal text is required")
-    with _lock_for(_profile_dir()):
+    with _studio_lock():
         project = _load(project_id)
         slot = _field(project, stage, field)
         if _pending_count(slot) >= MAX_PENDING_PROPOSALS:
@@ -877,7 +1001,7 @@ def update_proposal(project_id: str, proposal_id: str, *, status: str | None = N
                     revised_text: str | None = None, discussion: str | None = None) -> dict:
     if status is not None and status not in {"proposed", "in_discussion"}:
         raise StudioError("update_proposal only sets proposed or in_discussion; use accept, dismiss, or alternative")
-    with _lock_for(_profile_dir()):
+    with _studio_lock():
         project = _load(project_id)
         stage, field, slot, proposal = _find_proposal(project, proposal_id)
         before = slot.get("text")
@@ -904,7 +1028,7 @@ def update_proposal(project_id: str, proposal_id: str, *, status: str | None = N
 
 
 def _accept(project_id: str, proposal_id: str, edited_text: str | None) -> dict:
-    with _lock_for(_profile_dir()):
+    with _studio_lock():
         project = _load(project_id)
         stage, field, slot, proposal = _find_proposal(project, proposal_id)
         if edited_text is None:
@@ -959,7 +1083,7 @@ def save_alternative(project_id: str, proposal_id: str) -> dict:
 
 
 def _set_proposal_status(project_id: str, proposal_id: str, status: str) -> dict:
-    with _lock_for(_profile_dir()):
+    with _studio_lock():
         project = _load(project_id)
         stage, field, slot, proposal = _find_proposal(project, proposal_id)
         before = slot.get("text")
@@ -979,7 +1103,7 @@ def _set_proposal_status(project_id: str, proposal_id: str, status: str) -> dict
 
 
 def select_alternative(project_id: str, proposal_id: str) -> dict:
-    with _lock_for(_profile_dir()):
+    with _studio_lock():
         project = _load(project_id)
         stage, field, slot, proposal = _find_proposal(project, proposal_id)
         if proposal.get("status") != "alternative":
@@ -1016,7 +1140,7 @@ def record_decision(project_id: str, stage: str, field: str, text: str) -> dict:
     body = (text or "").strip()
     if not body:
         raise StudioError("decision text is required")
-    with _lock_for(_profile_dir()):
+    with _studio_lock():
         project = _load(project_id)
         before = ""
         if field:
@@ -1049,7 +1173,7 @@ def set_stage_status(project_id: str, stage: str, status: str, reason: str = "")
         raise StudioError("invalid stage status")
     if status == "not_applicable" and not (reason or "").strip():
         raise StudioError("not_applicable requires a short reason")
-    with _lock_for(_profile_dir()):
+    with _studio_lock():
         project = _load(project_id)
         project["stages"][stage]["status"] = status
         project["stages"][stage]["reason"] = (reason or "").strip()
@@ -1069,7 +1193,7 @@ def update_concept_checks(project_id: str, checks: dict) -> dict:
     unknown = set(checks or {}) - allowed
     if unknown:
         raise StudioError("unknown concept check")
-    with _lock_for(_profile_dir()):
+    with _studio_lock():
         project = _load(project_id)
         for key, value in (checks or {}).items():
             project["concept_checks"][key] = bool(value)
@@ -1079,7 +1203,7 @@ def update_concept_checks(project_id: str, checks: dict) -> dict:
 
 def set_export_options(project_id: str, *, include_alternatives: bool | None = None,
                        excluded_blocks: list | None = None) -> dict:
-    with _lock_for(_profile_dir()):
+    with _studio_lock():
         project = _load(project_id)
         options = project.setdefault("export_options", {})
         if include_alternatives is not None:
@@ -1093,35 +1217,28 @@ def set_export_options(project_id: str, *, include_alternatives: bool | None = N
         return {"project_id": project_id, "export_options": saved["export_options"], "updated_at": saved["updated_at"]}
 
 
-def _active_path() -> Path:
-    return _profile_dir() / "active.json"
-
-
-def _write_active(project_id: str) -> None:
-    _write_json(_active_path(), {"project_id": project_id or ""})
+def _set_active_id(project_id: str) -> None:
+    store = _read_store()
+    store["active_project_id"] = project_id if project_id in store["projects"] else ""
+    _write_store(store)
 
 
 def get_active_project_id() -> str:
-    path = _active_path()
-    if not path.is_file():
-        return ""
-    try:
-        return str(_read_json(path).get("project_id") or "")
-    except (OSError, json.JSONDecodeError):
-        return ""
+    with _studio_lock():
+        return _read_store()["active_project_id"]
 
 
 def set_active_project(project_id: str) -> dict:
-    with _lock_for(_profile_dir()):
+    with _studio_lock():
         if project_id:
             _load(project_id)
-        _write_active(project_id or "")
+        _set_active_id(project_id or "")
         return {"project_id": project_id or ""}
 
 
 def export_markdown(project_id: str, include_alternatives: bool | None = None,
                     excluded_blocks: list | None = None) -> dict:
-    with _lock_for(_profile_dir()):
+    with _studio_lock():
         project = _load(project_id)
         options = dict(project.get("export_options") or {})
         if include_alternatives is not None:
@@ -1290,6 +1407,13 @@ def handle_creative_post(handler, parsed, body: dict):
             stage=str(body.get("stage") or ""),
             field=str(body.get("field") or ""),
         ))
+    if tail == "/chat-focus":
+        return _http_call(handler, lambda: set_chat_focus(
+            project_id,
+            str(body.get("session_id") or ""),
+            stage=str(body.get("stage") or ""),
+            field=str(body.get("field") or ""),
+        ))
     if tail == "/rename":
         return _http_call(handler, lambda: rename_project(project_id, body.get("name") or ""))
     if tail == "/duplicate":
@@ -1378,14 +1502,14 @@ def handle_creative_delete(handler, parsed):
     return _http_call(handler, lambda: delete_project(project_id))
 
 
-def _note_under_catalog(path: Path) -> bool:
+def _note_under_catalog(path: Path, roots: list[tuple[str, Path]] | None = None) -> bool:
     try:
         resolved = path.resolve()
     except OSError:
         return False
     if not resolved.is_file():
         return False
-    for _kind, root in product_catalog_roots():
+    for _kind, root in (product_catalog_roots() if roots is None else roots):
         try:
             root_resolved = root.resolve()
         except OSError:
@@ -1395,8 +1519,8 @@ def _note_under_catalog(path: Path) -> bool:
     return False
 
 
-def _read_bounded_note(path: Path, limit: int = 3500) -> str:
-    if not _note_under_catalog(path):
+def _read_bounded_note(path: Path, limit: int = 3500, roots: list[tuple[str, Path]] | None = None) -> str:
+    if not _note_under_catalog(path, roots=roots):
         return ""
     try:
         text = path.read_text(encoding="utf-8")
@@ -1408,20 +1532,28 @@ def _read_bounded_note(path: Path, limit: int = 3500) -> str:
     return collapsed[: limit - 1].rstrip() + "…"
 
 
-def _product_note(project: dict) -> str:
+def _product_note(project: dict, profile: str | None = None) -> str:
     """The product file Hermes already has, bounded so a reply stays one completion."""
+    roots = None
+    if profile:
+        try:
+            from api.profiles import get_hermes_home_for_profile
+
+            roots = _catalog_roots(get_hermes_home_for_profile(profile))
+        except Exception:
+            roots = None
     source = str(project.get("product_source") or "").strip()
     if source:
-        text = _read_bounded_note(Path(source).expanduser())
+        text = _read_bounded_note(Path(source).expanduser(), roots=roots)
         if text:
             return text
     name = _product_name(project).casefold()
     if not name:
         return ""
-    for item in list_known_products().get("products") or []:
+    for item in (list_known_products(roots).get("products") or []):
         if str(item.get("name") or "").casefold() != name:
             continue
-        text = _read_bounded_note(Path(str(item.get("source") or "")).expanduser())
+        text = _read_bounded_note(Path(str(item.get("source") or "")).expanduser(), roots=roots)
         if text:
             return text
     return ""
@@ -1431,7 +1563,7 @@ def studio_prompt_pack(project_id: str, stage: str = "") -> dict:
     """Product note plus the Luke Iha purposes for this stage. No tool calls."""
     if stage and stage not in FIELDS:
         raise StudioError("unknown stage")
-    with _lock_for(_profile_dir()):
+    with _studio_lock():
         project = _load(project_id)
     names = list(FIELDS.get(stage) or ()) if stage else []
     purposes = []
@@ -1504,7 +1636,6 @@ def _isolated_field_block(project: dict, stage: str, field: str) -> str:
 
 
 
-_SESSION_INDEX = "session-index.json"
 _CONTEXT_CAP = 12000
 
 
@@ -1513,21 +1644,6 @@ def _valid_session_id(value: str) -> str:
     if _SESSION_ID.fullmatch(value):
         return value
     return ""
-
-
-def _session_index_path() -> Path:
-    return _profile_dir() / _SESSION_INDEX
-
-
-def _read_session_index() -> dict:
-    path = _session_index_path()
-    if not path.is_file():
-        return {}
-    try:
-        payload = _read_json(path)
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return payload if isinstance(payload, dict) else {}
 
 
 def _migrate_chat_session(project: dict) -> bool:
@@ -1560,8 +1676,8 @@ def _scope_bindings(project: dict) -> dict:
         found[project_session] = {
             "project_id": project_id,
             "scope": "project",
-            "stage": "",
-            "field": "",
+            "stage": str(project.get("chat_stage") or ""),
+            "field": str(project.get("chat_field") or ""),
         }
     for stage, row in (project.get("stages") or {}).items():
         for field, slot in ((row or {}).get("fields") or {}).items():
@@ -1576,29 +1692,15 @@ def _scope_bindings(project: dict) -> dict:
     return found
 
 
-def _sync_session_index(project: dict) -> None:
-    wanted = _scope_bindings(project)
-    if not wanted:
-        return
-    index = _read_session_index()
-    changed = False
-    for session_id, binding in wanted.items():
-        if index.get(session_id) != binding:
-            index[session_id] = binding
-            changed = True
-    if changed:
-        _write_json(_session_index_path(), index)
-
-
-def _forget_project_sessions(project_id: str) -> None:
-    index = _read_session_index()
-    kept = {
-        session_id: row
-        for session_id, row in index.items()
-        if not (isinstance(row, dict) and row.get("project_id") == project_id)
-    }
-    if len(kept) != len(index):
-        _write_json(_session_index_path(), kept)
+def _find_session(store: dict, session_id: str) -> tuple[dict, dict] | None:
+    for project in store.get("projects", {}).values():
+        if not isinstance(project, dict):
+            continue
+        _prepare_project(project)
+        binding = _scope_bindings(project).get(session_id)
+        if binding:
+            return project, binding
+    return None
 
 
 def bind_scope_session(project_id: str, session_id: str, scope: str = "project", stage: str = "", field: str = "") -> dict:
@@ -1611,7 +1713,7 @@ def bind_scope_session(project_id: str, session_id: str, scope: str = "project",
     field = (field or "").strip()
     if scope == "field":
         _require_field(stage, field)
-    with _lock_for(_profile_dir()):
+    with _studio_lock():
         project = _load(project_id)
         if scope == "field":
             slot = _field(project, stage, field)
@@ -1624,6 +1726,8 @@ def bind_scope_session(project_id: str, session_id: str, scope: str = "project",
             if existing and existing != session_id:
                 raise StudioError("project already has a session")
             project["chat_session_id"] = session_id
+            project["chat_stage"] = stage
+            project["chat_field"] = field
         _save(project)
         binding = _scope_bindings(project).get(session_id) or {}
         return {
@@ -1635,34 +1739,71 @@ def bind_scope_session(project_id: str, session_id: str, scope: str = "project",
         }
 
 
-def lookup_studio_session(session_id: str) -> dict | None:
+def set_chat_focus(project_id: str, session_id: str, stage: str = "", field: str = "") -> dict:
+    """Remember the stage and field the user is editing for this chat."""
+    session_id = _valid_session_id(session_id)
+    if not session_id:
+        raise StudioError("invalid session id")
+    stage = (stage or "").strip()
+    field = (field or "").strip()
+    if stage and stage not in FIELDS:
+        raise StudioError("unknown stage")
+    if field:
+        if not stage:
+            stage = _stage_for_field(field)
+        _require_field(stage, field)
+    with _studio_lock():
+        project = _load(project_id)
+        if session_id == _valid_session_id(project.get("chat_session_id") or ""):
+            project["chat_stage"] = stage
+            project["chat_field"] = field
+            _save(project)
+            return {"session_id": session_id, "scope": "project", "stage": stage, "field": field}
+        for stage_name, row in (project.get("stages") or {}).items():
+            for field_name, slot in ((row or {}).get("fields") or {}).items():
+                if _valid_session_id((slot or {}).get("chat_session_id") or "") != session_id:
+                    continue
+                return {
+                    "session_id": session_id,
+                    "scope": "field",
+                    "stage": stage_name,
+                    "field": field_name,
+                }
+        raise StudioError("unknown session")
+
+
+def lookup_studio_session(session_id: str, profile: str | None = None) -> dict | None:
     session_id = _valid_session_id(session_id)
     if not session_id:
         return None
-    with _lock_for(_profile_dir()):
-        row = _read_session_index().get(session_id)
-    if not isinstance(row, dict):
+    with _studio_lock(profile):
+        found = _find_session(_read_store(profile), session_id)
+    if found is None:
         return None
-    if not row.get("project_id"):
-        return None
-    return row
+    return found[1]
 
 
 def _render_studio_context(project: dict, binding: dict, note: str) -> str:
     scope = binding.get("scope") or "project"
-    stage = binding.get("stage") or ""
-    field = binding.get("field") or ""
+    stage = str(binding.get("stage") or "")
+    field = str(binding.get("field") or "")
     parts = [
         "Creative Studio document:",
         f"Project: {project.get('name') or ''}",
+        f"Product: {_product_name(project) or '(none)'}",
     ]
-    product = _product_name(project)
-    if product:
-        parts.append(f"Product: {product}")
     if note:
         parts.append("Product note:\n" + note)
-    if scope == "field" and stage and field:
-        parts.append("This conversation is only this field.")
+    if stage:
+        status = ((project.get("stages") or {}).get(stage) or {}).get("status") or "not_started"
+        parts.append(f"Selected stage: {stage} ({status})")
+    if field:
+        parts.append(f"Selected field: {field}")
+    if field and stage:
+        if scope == "field":
+            parts.append("This conversation is only this field.")
+        else:
+            parts.append("The user has this field selected.")
         parts.append(_isolated_field_block(project, stage, field))
         rest = _project_context_lines(project, omit=(stage, field))
         parts.append("Other fields, for reference only:\n" + ("\n".join(rest) or "(none)"))
@@ -1671,6 +1812,8 @@ def _render_studio_context(project: dict, binding: dict, note: str) -> str:
             "Do not rewrite other fields from this chat."
         )
     else:
+        if stage:
+            parts.append(f"The user is editing the {stage} stage.")
         parts.append("This conversation is the whole project.")
         parts.append("Document:\n" + ("\n".join(_project_context_lines(project)) or "(empty)"))
         parts.append("Change a field only with the creative field tool.")
@@ -1680,24 +1823,24 @@ def _render_studio_context(project: dict, binding: dict, note: str) -> str:
     return text
 
 
-def studio_ephemeral_context(session_id: str) -> str:
+def studio_ephemeral_context(session_id: str, profile: str | None = None) -> str:
     """Bounded document context for a session bound to a creative. Empty otherwise."""
-    binding = lookup_studio_session(session_id)
-    if not binding:
+    session_id = _valid_session_id(session_id)
+    if not session_id:
         return ""
-    try:
-        with _lock_for(_profile_dir()):
-            project = _load(binding["project_id"])
-            note = _product_note(project)
-    except StudioError:
-        return ""
-    return _render_studio_context(project, binding, note)
+    with _studio_lock(profile):
+        found = _find_session(_read_store(profile), session_id)
+        if found is None:
+            return ""
+        project = copy.deepcopy(found[0])
+        binding = dict(found[1])
+    return _render_studio_context(project, binding, _product_note(project, profile=profile))
 
 
-def append_studio_ephemeral(prompt: str, session_id: str) -> str:
+def append_studio_ephemeral(prompt: str, session_id: str, profile: str | None = None) -> str:
     """Append studio context after the shared ephemeral prompt. Other chats stay unchanged."""
     try:
-        extra = studio_ephemeral_context(session_id)
+        extra = studio_ephemeral_context(session_id, profile=profile)
     except Exception:
         return prompt or ""
     base = prompt or ""
