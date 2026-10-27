@@ -618,7 +618,9 @@ def _field(project: dict, stage: str, field: str) -> dict:
 
 def _require_field(stage: str, field: str) -> None:
     if stage not in FIELDS or field not in FIELDS[stage]:
-        raise StudioError("unknown stage or field")
+        raise StudioError(
+            "unknown stage or field. Choose a field that exists and save the text there."
+        )
 
 
 def _stage_has_work(stage_row: dict) -> bool:
@@ -1851,14 +1853,25 @@ def _studio_job(project: dict) -> str:
     project_id = project.get("id") or ""
     return (
         f"You are the Creative Studio assistant for project {project_id}. "
-        "When the user requests a draft, concept, or update, propose or save "
-        "the structured fields (Brief, Who, What, Hook, CASTS, Copy) into the "
-        "project state with the hermes-webui tools save_creative_proposal and "
-        "update_creative_field. Call the registered tool whose name ends with "
-        "one of those. Save a draft as proposals. Use update_creative_field "
-        "when the user tells you to change the selected text. Do not edit the "
-        "project store any other way."
+        "A request for a draft, concept, or update is saved with the tool "
+        "whose name ends with save_creative_proposal. "
+        f"Pass project_id {project_id}. "
+        "The draft belongs in those proposals, not in the chat. "
+        "After the proposals are saved, reply with one short sentence. "
+        "Use the tool whose name ends with update_creative_field only when "
+        "the user tells you to change the selected text. "
+        "Do not edit the project store any other way."
     )
+
+
+def _field_index() -> str:
+    """Field ids the proposal tool accepts. Empty fields are omitted from the document."""
+    lines = []
+    for stage in STAGES:
+        names = FIELDS.get(stage) or ()
+        if names:
+            lines.append(f"{stage}: {', '.join(names)}")
+    return "Fields:\n" + "\n".join(lines)
 
 
 def _profile_config_path(profile: str | None) -> Path:
@@ -2007,8 +2020,13 @@ def _render_studio_context(project: dict, binding: dict, note: str) -> str:
         )
     else:
         if stage:
-            parts.append(f"The user is editing the {stage} stage.")
+            parts.append(f"The {stage} stage is on screen.")
+        parts.append("No field is selected.")
+        parts.append(
+            "Choose the stage and field you think each part belongs in, and save it there."
+        )
         parts.append("This conversation is the whole project.")
+        parts.append(_field_index())
         parts.append("Document:\n" + ("\n".join(_project_context_lines(project)) or "(empty)"))
     text = "\n\n".join(parts)
     if len(text) > _CONTEXT_CAP:

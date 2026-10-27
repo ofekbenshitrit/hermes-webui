@@ -33,6 +33,7 @@ import sys
 import time
 import uuid
 from pathlib import Path
+from typing import Literal
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
@@ -517,11 +518,20 @@ def _tool_callable(name: str, schema: dict, handler):
     names.sort(key=lambda key: key not in required)
     fields = []
     for key in names:
-        declared = (props.get(key) or {}).get("type") or "string"
+        spec = props.get(key) or {}
+        declared = spec.get("type") or "string"
         if isinstance(declared, list):
             declared = next((item for item in declared if item != "null"), "string")
-        kind = types.get(declared, "str")
-        if key in required and "null" not in ((props.get(key) or {}).get("type") or []):
+        enum_values = [
+            item for item in (spec.get("enum") or [])
+            if isinstance(item, str) and item.isidentifier()
+        ]
+        if enum_values and declared == "string":
+            kind = "Literal[" + ", ".join(repr(item) for item in enum_values) + "]"
+        else:
+            kind = types.get(declared, "str")
+        allows_null = isinstance(spec.get("type"), list) and "null" in spec.get("type")
+        if key in required and not allows_null:
             fields.append(f"{key}: {kind}")
         else:
             fields.append(f"{key}: {kind} | None = None")
@@ -532,7 +542,7 @@ def _tool_callable(name: str, schema: dict, handler):
         f"    result = await _handler(supplied)\n"
         f"    return _tool_text(result)\n"
     )
-    scope = {"_handler": handler, "_tool_text": _tool_text}
+    scope = {"_handler": handler, "_tool_text": _tool_text, "Literal": Literal}
     exec(source, scope, scope)
     return scope[name]
 
@@ -565,6 +575,27 @@ def _run_mcp_v2() -> None:
 # ═══════════════════════════════════════════════════════════════════════════
 #  MCP Server wiring
 # ═══════════════════════════════════════════════════════════════════════════
+
+_CREATIVE_STAGES = ("brief", "who", "what", "hook", "casts", "copy")
+_CREATIVE_FIELD_NAMES = (
+    "product_offer", "product_facts", "audience_notes", "objective", "channel",
+    "format_length", "assets", "sources", "summary_provided", "summary_assumptions",
+    "summary_missing", "outcome", "demographic", "facet", "segment", "concept",
+    "angle", "ump", "ums", "mechanism", "hook_type", "visual_hook", "verbal_hook",
+    "core_trigger", "caveman_simple", "deep_fry", "walk_it_back", "make_it_bang",
+    "final_hook", "format", "conceit", "actors", "style", "terrain", "setup",
+    "pain", "promise", "proof", "curiosity", "constraints", "conditions",
+)
+_CREATIVE_FIELD_INDEX = (
+    "brief: product_offer, product_facts, audience_notes, objective, channel, "
+    "format_length, assets, sources, summary_provided, summary_assumptions, summary_missing. "
+    "who: outcome, demographic, facet, segment. "
+    "what: concept, angle, ump, ums, mechanism. "
+    "hook: hook_type, visual_hook, verbal_hook, core_trigger, caveman_simple, "
+    "deep_fry, walk_it_back, make_it_bang, final_hook, format. "
+    "casts: conceit, actors, style, terrain, setup. "
+    "copy: pain, promise, proof, curiosity, constraints, conditions."
+)
 
 _CREATIVE_CONTRACT = (
     " Read the project with get_creative_project before proposing or updating a value. "
@@ -953,8 +984,8 @@ TOOLS = [
             "type": "object",
             "properties": {
                 "project_id": {"type": "string"},
-                "stage": {"type": "string"},
-                "field": {"type": "string"},
+                "stage": {"type": "string", "enum": list(_CREATIVE_STAGES)},
+                "field": {"type": "string", "enum": list(_CREATIVE_FIELD_NAMES)},
                 "text": {"type": "string"},
                 "claim": {"type": "string", "description": "user_approved, needs_verification, or supported_by_source"},
                 "source_ref": {"type": "string"},
@@ -965,13 +996,20 @@ TOOLS = [
     ),
     Tool(
         name="save_creative_proposal",
-        description="Save an agent suggestion as a pending proposal. Does not change the selected field value. At most three pending proposals per field." + _CREATIVE_CONTRACT,
+        description=(
+            "Deliver a draft by saving each part on the stage and field you think it belongs in. "
+            "If no field is selected, you choose. The chat message is not the draft. "
+            "The selected text stays unchanged until the user accepts the proposal. "
+            "At most three pending proposals per field. Do not invent proof, numbers, "
+            "testimonials, or product facts. "
+            + _CREATIVE_FIELD_INDEX
+        ),
         inputSchema={
             "type": "object",
             "properties": {
                 "project_id": {"type": "string"},
-                "stage": {"type": "string"},
-                "field": {"type": "string"},
+                "stage": {"type": "string", "enum": list(_CREATIVE_STAGES)},
+                "field": {"type": "string", "enum": list(_CREATIVE_FIELD_NAMES)},
                 "text": {"type": "string"},
                 "exploratory": {"type": "boolean"},
                 "missing": {"type": "array", "items": {"type": "string"}},

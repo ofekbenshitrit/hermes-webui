@@ -417,9 +417,12 @@ def test_field_context_puts_the_field_first_and_leaves_other_chats_alone(studio,
     project_prompt = studio.studio_ephemeral_context("sess_project_ctx")
     assert "This conversation is the whole project." in project_prompt
     assert f"You are the Creative Studio assistant for project {project['id']}" in project_prompt
-    assert "save_creative_proposal and" in project_prompt
+    assert "whose name ends with save_creative_proposal" in project_prompt
+    assert "No field is selected." in project_prompt
+    assert "Choose the stage and field you think each part belongs in, and save it there." in project_prompt
+    assert "The draft belongs in those proposals, not in the chat." in project_prompt
     assert "update_creative_field" in project_prompt
-    assert "Save a draft as proposals" in project_prompt
+    assert "hook: hook_type, visual_hook, verbal_hook" in project_prompt
     assert "Do not edit the project store any other way" in project_prompt
     assert "save_creative_proposal" in field_prompt
     assert "who.segment: Night bakers" in project_prompt
@@ -574,6 +577,13 @@ def test_mcp_v2_tool_callable_passes_named_fields():
         input_schema = {"type": "object", "properties": {"project_id": {"type": "string"}}}
 
     assert mcp_server._tool_input_schema(_Schema())["properties"]["project_id"]["type"] == "string"
+
+    listed = mcp_server._tool_callable(
+        "save_creative_proposal",
+        next(tool.inputSchema for tool in mcp_server.TOOLS if tool.name == "save_creative_proposal"),
+        handler,
+    )
+    assert listed.__annotations__["stage"].__args__ == mcp_server._CREATIVE_STAGES
 
     nullable = mcp_server._tool_callable(
         "move_session",
