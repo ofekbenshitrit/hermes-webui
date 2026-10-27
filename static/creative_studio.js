@@ -468,7 +468,8 @@ function _creativeChatTabsMarkup(){
       <button type="button" class="creative-chat-tab-main" title="${_creativeEsc(_creativeLabel(_creativeFocusField))}">${_creativeChatIcon()}<span>${_creativeEsc(_creativeLabel(_creativeFocusField))}</span></button>
       <button type="button" class="creative-chat-tab-x" aria-label="Close" onclick="creativeCloseFieldTab(event)">&times;</button>
     </div>` : '';
-  const menu = chats.map(thread => `<div class="creative-chat-menu-row"><button type="button" onclick="creativeSelectChat('${thread.id}')">${_creativeEsc(_creativeTabTitle(thread))}</button></div>`).join('');
+  const sessions = chats.map(thread => `<div class="creative-chat-menu-row"><button type="button" onclick="creativeSelectChat('${thread.id}')">${_creativeEsc(_creativeTabTitle(thread))}</button></div>`).join('');
+  const menu = `<button type="button" onclick="creativeToggleWorkspacePanel()">Workspace panel</button>${sessions ? `<div class="creative-chat-menu-sep"></div>${sessions}` : ''}`;
   return `<div class="creative-chat-tabs">
     <div class="creative-chat-tab-scroll" role="tablist" aria-label="Chat sessions">${tabs}${fieldTab}</div>
     <button type="button" class="creative-chat-tab-tool" aria-label="New chat" onclick="creativeNewChatTab()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
@@ -487,6 +488,12 @@ function _creativePaintChatTabs(){
     const header = frame.querySelector('.creative-header');
     if(header) header.insertAdjacentHTML('afterend', html);
   }
+}
+
+function creativeToggleWorkspacePanel(){
+  const menu = document.getElementById('creativeChatMenu');
+  if(menu) menu.hidden = true;
+  if(typeof toggleWorkspacePanel === 'function') toggleWorkspacePanel();
 }
 
 function creativeToggleChatMenu(event){

@@ -247,6 +247,8 @@ def test_static_panel_wires_stage_switch_proposals_and_export():
     assert "creative-chat-tabs" in script
     assert "function creativeNewChatTab" in script
     assert "function creativeCloseChat" in script
+    assert "function creativeToggleWorkspacePanel" in script
+    assert "Workspace panel" in script
     assert "preserveHome:true" in script
     assert "/chat-session" in script
     assert "/api/projects/create" in script
