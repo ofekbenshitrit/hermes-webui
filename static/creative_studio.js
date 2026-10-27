@@ -42,19 +42,18 @@ let _creativeStage = 'who';
 let _creativeChatOpen = true;
 let _creativeFocusField = '';
 let _creativeChatWidth = 340;
-let _creativeChatError = '';
-let _creativeChatBusy = false;
-let _creativeAgentLog = [];
-let _creativeAgentStream = null;
 let _creativeExportOpen = false;
 let _creativeSaveState = 'Saved';
 let _creativeTimers = {};
 let _creativePoll = null;
-let _creativeAssistantOpen = false;
 let _creativeDirty = false;
 let _creativeCreating = false;
 let _creativeOpenDetails = [];
-let _creativePaintedLog = '';
+let _creativeHomeSession = '';
+let _creativeChatHosted = false;
+let _creativeShowToken = 0;
+let _creativeShowing = '';
+let _creativeSessionProjectIdCache = '';
 function _creativeEsc(value){
   return String(value == null ? '' : value)
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -141,7 +140,6 @@ async function creativeOpenProject(id, opts){
   if(!(opts && opts.keepStage) || !CREATIVE_STAGES.some(stage => stage.id === _creativeStage)) _creativeStage = 'who';
   await api('/api/creative-studio/active', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({project_id:id})});
   await creativeRefreshList();
-  await _creativeLoadAgentTranscript();
   creativeRenderWorkspace();
 }
 
@@ -247,14 +245,16 @@ function _creativeRestoreOpenDetails(){
 function creativeRenderWorkspace(){
   const root = document.getElementById('creativeWorkspace');
   if(!root) return;
-  closeCreativeModelDropdown();
+  _creativeParkChat();
   _creativeRememberOpenDetails();
   if(_creativeCreating){
     root.innerHTML = _creativeCreateMarkup();
+    void creativeReleaseChat();
     return;
   }
   if(!_creativeProject){
     root.innerHTML = '<div class="main-view-empty"><div class="main-view-empty-title">Creative Studio</div><div class="main-view-empty-sub">Start a creative with a name and a product. Hermes already has the product notes, so this step only records which one you mean.</div><button type="button" class="creative-inline-btn" onclick="creativeNewProject()">New creative</button></div>';
+    void creativeReleaseChat();
     return;
   }
   const project = _creativeProject;
@@ -292,22 +292,15 @@ function creativeRenderWorkspace(){
       <div class="creative-fields" id="creativeFields" role="tabpanel" aria-labelledby="creativeTab-${_creativeStage}">${_creativeStageMarkup(stage)}</div>
       <div class="creative-chat-resizer" role="separator" aria-orientation="vertical" aria-label="Resize chat" onpointerdown="creativeChatResizeStart(event)"></div>
       <aside class="${chatClass}" id="creativeAssistant" aria-label="Project chat">
-        ${_creativeChatMarkup()}
+        <div id="creativeChatMount"></div>
       </aside>
     </div>`;
-  const log = document.getElementById('creativeChatLog');
-  if(log){
-    _creativePaintedLog = _creativeChatLogBody(_creativeChatHistory(), _creativeOpenProposals());
-    log.scrollTop = log.scrollHeight;
-  }
   const paintedFields = document.getElementById('creativeFields');
   if(paintedFields && _creativeProject && _creativeProject.stages){
     paintedFields.dataset.signature = _creativeFieldSignature(_creativeProject.stages[_creativeStage] || {fields:{}});
   }
-  const paintedTabs = document.querySelector('#creativeAssistant .creative-chat-tabs');
-  if(paintedTabs) paintedTabs.dataset.signature = _creativeTabSignature();
   _creativeRestoreOpenDetails();
-  _creativeMountModelPicker();
+  if(_creativeChatOpen) void _creativeShowBoundChat();
   const fields = document.getElementById('creativeFields');
   if(fields && !fields.dataset.detailsBound){
     fields.dataset.detailsBound = '1';
@@ -383,151 +376,129 @@ function creativeIsolateField(field){
   creativeRenderWorkspace();
 }
 
-function _creativeChatMarkup(){
-  const project = _creativeProject;
-  const focus = _creativeFocusField;
-  const stageMeta = CREATIVE_STAGES.find(item => item.id === _creativeStage);
-  const focusLabel = focus ? _creativeLabel(focus) : '';
-  const history = _creativeChatHistory();
-  const pending = _creativeOpenProposals();
-  const contextLine = focus
-    ? `${project.name} · ${focusLabel}`
-    : `${project.name} · ${stageMeta ? stageMeta.label : _creativeStage}`;
-  const clear = focus ? `<button type="button" class="creative-text-btn" onclick="creativeIsolateField('${focus}')">Leave field</button>` : '';
-  const scope = focus ? '' : `<button type="button" class="creative-scope-chip" id="creativeChatScope" aria-pressed="false" onclick="creativeToggleProjectScope(event)">Whole project</button>`;
-  const placeholder = focus ? `Revise ${_creativeEsc(focusLabel)}` : 'Ask Hermes…';
-  const chevron = `<span class="composer-session-chevron" aria-hidden="true"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>`;
-  const modelPicker = `<div class="composer-session-wrap" id="creativeSessionWrap">
-      <button class="composer-session-chip" id="creativeSessionChip" type="button" onclick="toggleCreativeSessionMenu(event)" title="Model and thinking level" aria-label="Model and thinking level" aria-haspopup="menu" aria-expanded="false" aria-controls="creativeSessionMenu">
-        <span class="composer-session-model" id="creativeSessionModel">Model</span>
-        <span class="composer-session-effort" id="creativeSessionEffort"></span>
-        ${chevron}
-      </button>
-    </div>
-    <select id="creativeModelSelect" class="composer-model-select" title="Conversation model" aria-hidden="true" tabindex="-1"></select>
-    <span id="creativeModelLabel" hidden></span>
-    <div class="composer-session-menu" id="creativeSessionMenu" role="menu" aria-label="Model, thinking, profile, and workspace" hidden>
-      <div class="composer-session-row" id="creativeSessionProfileRow">
-        <span class="composer-session-row-label">Profile</span>
-        <span class="composer-session-row-value" id="creativeSessionProfileValue">copywriting</span>
-      </div>
-      <button class="composer-session-row" id="creativeSessionWorkspaceRow" type="button" role="menuitem" data-session-action="workspace" aria-haspopup="menu" aria-expanded="false" onclick="openCreativeSessionAction(event,'workspace')">
-        <span class="composer-session-row-label">Workspace</span>
-        <span class="composer-session-row-value" id="creativeSessionWorkspaceValue"></span>
-        <span class="composer-session-row-chevron" aria-hidden="true">›</span>
-      </button>
-      <button class="composer-session-row" id="creativeSessionThinkingRow" type="button" role="menuitem" data-session-action="thinking" aria-haspopup="menu" aria-expanded="false" onclick="openCreativeSessionAction(event,'thinking')">
-        <span class="composer-session-row-label">Thinking</span>
-        <span class="composer-session-row-value" id="creativeSessionThinkingValue"></span>
-        <span class="composer-session-row-chevron" aria-hidden="true">›</span>
-      </button>
-      <button class="composer-session-row" id="creativeSessionModelRow" type="button" role="menuitem" data-session-action="model" aria-haspopup="menu" aria-expanded="false" onclick="openCreativeSessionAction(event,'model')">
-        <span class="composer-session-row-label">Model</span>
-        <span class="composer-session-row-value" id="creativeSessionModelValue"></span>
-        <span class="composer-session-row-chevron" aria-hidden="true">›</span>
-      </button>
-    </div>
-    <div class="model-dropdown" id="creativeModelDropdown"></div>
-    <div class="composer-reasoning-dropdown" id="creativeThinkingDropdown"></div>
-    <div class="ws-dropdown" id="creativeWsDropdown" hidden aria-hidden="true"></div>`;
-  return `${_creativeChatTabs()}<header class="creative-chat-head"><p id="creativeChatContext">${_creativeEsc(contextLine)}</p>${clear}</header>
-    <div class="creative-chat-log" id="creativeChatLog">${_creativeChatLogBody(history, pending)}</div>
-    <form class="composer-wrap creative-composer" onsubmit="creativeSendChat(); return false;">
-      <div class="composer-box" id="creativeComposerBox">
-        <textarea id="creativeChatInput" dir="auto" rows="1" enterkeyhint="enter" placeholder="${placeholder}" onkeydown="creativeChatKey(event)" ${_creativeChatBusy ? 'disabled' : ''}></textarea>
-        <div class="composer-footer">
-          <div class="composer-left">${modelPicker}${scope}</div>
-          <div class="composer-right">
-            <button type="submit" class="send-btn" aria-label="Send" ${_creativeChatBusy ? 'disabled' : ''}>
-              <svg viewBox="0 0 10 10" fill="none" aria-hidden="true"><path d="M0.93 4.775L5.00143 0.5M5.00143 0.5L9.07286 4.775M5.00143 0.5V10" stroke="currentColor" stroke-width="0.7" stroke-linejoin="round"/></svg>
-            </button>
-          </div>
-        </div>
-      </div>
-    </form>`;
+function _creativeParkChat(){
+  const chat = document.getElementById('mainChat');
+  const main = document.querySelector('main.main');
+  if(!chat || !main || chat.parentElement === main) return;
+  main.insertBefore(chat, main.firstChild);
 }
 
-function _creativeChatLogBody(history, pending){
-  const error = _creativeChatError ? `<p class="creative-save failed" role="alert">${_creativeEsc(_creativeChatError)}</p>` : '';
-  return `${error}${history}${pending}`;
-}
-
-function _creativeActiveThread(){
-  const project = _creativeProject;
-  if(!project) return null;
-  const threads = project.threads || [];
-  return threads.find(row => row.id === project.active_thread) || threads[threads.length - 1] || null;
-}
-
-function _creativeMessageText(item){
-  const raw = item && (item.content != null ? item.content : item.text);
-  if(typeof raw === 'string') return raw;
-  if(Array.isArray(raw)){
-    return raw.map(part => {
-      if(typeof part === 'string') return part;
-      return part && (part.text || part.content) || '';
-    }).join('');
+function _creativeMountChat(){
+  const mount = document.getElementById('creativeChatMount');
+  const chat = document.getElementById('mainChat');
+  if(!mount || !chat) return;
+  if(!_creativeChatHosted){
+    _creativeHomeSession = (typeof S !== 'undefined' && S.session && S.session.session_id) || '';
+    try{
+      if(!_creativeHomeSession) _creativeHomeSession = localStorage.getItem('hermes-webui-session') || '';
+    }catch(_){}
+    _creativeChatHosted = true;
   }
-  return '';
+  if(chat.parentElement !== mount) mount.appendChild(chat);
 }
 
-function _creativeSavedContext(){
-  const stages = (_creativeProject && _creativeProject.stages) || {};
-  const lines = [];
-  Object.entries(stages).forEach(([stage, row]) => {
-    Object.entries((row && row.fields) || {}).forEach(([name, slot]) => {
-      const text = String((slot && slot.text) || '').trim();
-      if(text) lines.push(stage + '.' + name + ': ' + text.slice(0, 500));
-    });
+async function creativeReleaseChat(){
+  _creativeShowToken++;
+  _creativeParkChat();
+  const home = _creativeHomeSession;
+  const hosted = _creativeChatHosted;
+  _creativeChatHosted = false;
+  _creativeShowing = '';
+  if(!hosted || !home || typeof loadSession !== 'function') return;
+  if(typeof S !== 'undefined' && S.session && S.session.session_id === home) return;
+  await loadSession(home);
+}
+
+function _creativeScope(){
+  if(_creativeFocusField) return {scope:'field', stage:_creativeStage, field:_creativeFocusField};
+  return {scope:'project', stage:'', field:''};
+}
+
+function _creativeBoundId(scope){
+  const project = _creativeProject;
+  if(!project) return '';
+  if(scope.scope === 'field'){
+    const stage = project.stages && project.stages[scope.stage];
+    const slot = stage && stage.fields && stage.fields[scope.field];
+    return (slot && slot.chat_session_id) || '';
+  }
+  return project.chat_session_id || '';
+}
+
+async function _creativeSessionProjectId(){
+  if(_creativeSessionProjectIdCache) return _creativeSessionProjectIdCache;
+  const data = await api('/api/projects');
+  const rows = (data && data.projects) || [];
+  const found = rows.find(row => row && row.name === 'Creative Studio');
+  if(found && found.project_id){
+    _creativeSessionProjectIdCache = found.project_id;
+    return found.project_id;
+  }
+  const created = await api('/api/projects', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({name:'Creative Studio', color:'#c47b2b'}),
   });
-  return lines.slice(0, 40).join('\n');
+  _creativeSessionProjectIdCache = (created && created.project && created.project.project_id) || '';
+  return _creativeSessionProjectIdCache;
 }
 
-function _creativeVisibleTurn(text){
-  return String(text || '').replace(/\n*\[studio project=[\s\S]*$/, '').trim();
+async function _creativeEnsureBoundSession(){
+  const scope = _creativeScope();
+  const existing = _creativeBoundId(scope);
+  if(existing) return existing;
+  const grouped = await _creativeSessionProjectId();
+  const created = await api('/api/session/new', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    timeoutMs:60000,
+    body:JSON.stringify({
+      worktree:false,
+      profile:(typeof S !== 'undefined' && S.activeProfile) || 'default',
+      project_id: grouped || undefined,
+    }),
+  });
+  const sessionId = created && created.session && created.session.session_id;
+  if(!sessionId) throw new Error('Could not start a chat.');
+  await api('/api/creative-studio/projects/' + _creativeProject.id + '/chat-session', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({
+      session_id:sessionId,
+      scope:scope.scope,
+      stage:scope.stage,
+      field:scope.field,
+    }),
+  });
+  if(scope.scope === 'field'){
+    const slot = _creativeProject.stages[scope.stage].fields[scope.field];
+    if(slot) slot.chat_session_id = sessionId;
+  }else{
+    _creativeProject.chat_session_id = sessionId;
+  }
+  if(typeof renderSessionList === 'function') void renderSessionList();
+  return sessionId;
 }
 
-async function _creativeLoadAgentTranscript(){
-  const thread = _creativeActiveThread();
-  _creativeAgentLog = [];
-  if(!thread || !thread.session_id) return;
-  const sessionId = thread.session_id;
+async function _creativeShowBoundChat(){
+  const token = ++_creativeShowToken;
   try{
-    const data = await api('/api/session?session_id=' + encodeURIComponent(sessionId));
-    if(!_creativeActiveThread() || _creativeActiveThread().session_id !== sessionId) return;
-    const rows = (data.session && data.session.messages) || [];
-    _creativeAgentLog = rows.map(item => {
-      const role = item.role === 'user' ? 'user' : (item.role === 'assistant' ? 'assistant' : '');
-      if(!role) return null;
-      const text = _creativeVisibleTurn(_creativeMessageText(item));
-      if(!text) return null;
-      return {role, text};
-    }).filter(Boolean);
+    _creativeMountChat();
+    const id = await _creativeEnsureBoundSession();
+    if(token !== _creativeShowToken || !id) return;
+    if(_creativeShowing === id || (typeof S !== 'undefined' && S.session && S.session.session_id === id)){
+      _creativeShowing = id;
+      return;
+    }
+    _creativeShowing = id;
+    if(typeof loadSession === 'function') await loadSession(id, {preserveHome:true});
+    if(token !== _creativeShowToken) return;
   }catch(err){
-    _creativeChatError = err && err.message ? err.message : 'Could not load the agent session.';
+    if(_creativeShowing && token === _creativeShowToken) _creativeShowing = '';
+    if(token !== _creativeShowToken) return;
+    const message = (err && err.message) || 'Could not open the studio chat';
+    if(typeof showToast === 'function') showToast(message, 3000, 'error');
   }
-}
-
-function _creativeChatHistory(){
-  const project = _creativeProject;
-  const focus = _creativeFocusField;
-  const thread = _creativeActiveThread();
-  const source = thread && thread.session_id
-    ? _creativeAgentLog
-    : (project.chat || []);
-  const messages = source.filter(item => {
-    if(!item || !item.text) return false;
-    if(thread && thread.session_id) return true;
-    if(!focus) return true;
-    return item.field === focus;
-  });
-  const focusLabel = focus ? _creativeLabel(focus) : '';
-  if(!messages.length){
-    return `<p class="creative-help" id="creativeChatEmpty">${focus ? `Nothing on ${ _creativeEsc(focusLabel) } yet.` : 'Ask Hermes to suggest the empty fields, or to revise the ones you already filled.'}</p>`;
-  }
-  return messages.map(item => {
-    return `<article class="creative-msg creative-msg-${_creativeEsc(item.role || 'assistant')}"><p>${_creativeEsc(item.text)}</p>${item.role === 'assistant' ? _creativeMessageSuggestions(item) : ''}</article>`;
-  }).join('');
 }
 
 function _creativeWorkspaceLive(){
@@ -535,18 +506,8 @@ function _creativeWorkspaceLive(){
     _creativeProject
     && !_creativeCreating
     && document.getElementById('creativeFields')
-    && document.getElementById('creativeChatLog')
-    && document.getElementById('creativeComposerBox')
+    && document.getElementById('creativeChatMount')
   );
-}
-
-function _creativeTabSignature(){
-  const project = _creativeProject || {};
-  const threads = (project.threads && project.threads.length)
-    ? project.threads
-    : [{id:'', title:'New chat'}];
-  const active = project.active_thread || '';
-  return active + '\n' + threads.map(thread => `${thread.id}|${thread.title || ''}`).join('\n');
 }
 
 function _creativeFieldSignature(stage){
@@ -557,18 +518,13 @@ function _creativeFieldSignature(stage){
     status: stage && stage.status,
     checks: _creativeProject.concept_checks || {},
     export: _creativeExportOpen,
+    focus: _creativeFocusField,
     fields: names.map(name => {
       const slot = fields[name] || {};
-      return [name, slot.claim || '', !!slot.include, slot.order || 0, !!slot.regulated];
+      const pending = (slot.proposals || []).filter(item => item.status === 'proposed' || item.status === 'in_discussion').length;
+      return [name, slot.claim || '', !!slot.include, slot.order || 0, !!slot.regulated, pending];
     }),
   });
-}
-
-function _creativeSyncBusy(){
-  const input = document.getElementById('creativeChatInput');
-  const send = document.querySelector('#creativeComposerBox .send-btn');
-  if(input) input.disabled = !!_creativeChatBusy;
-  if(send) send.disabled = !!_creativeChatBusy;
 }
 
 function _creativeSyncLive(){
@@ -611,200 +567,6 @@ function _creativeSyncLive(){
       if(node.value !== text) node.value = text;
     });
   }
-  const context = document.getElementById('creativeChatContext');
-  if(context){
-    const stageMeta = CREATIVE_STAGES.find(item => item.id === _creativeStage);
-    const focusLabel = _creativeFocusField ? _creativeLabel(_creativeFocusField) : '';
-    context.textContent = _creativeFocusField
-      ? `${project.name} · ${focusLabel}`
-      : `${project.name} · ${stageMeta ? stageMeta.label : _creativeStage}`;
-  }
-  const log = document.getElementById('creativeChatLog');
-  if(log){
-    const nextLog = _creativeChatLogBody(_creativeChatHistory(), _creativeOpenProposals());
-    if(_creativePaintedLog !== nextLog){
-      const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 48;
-      log.innerHTML = nextLog;
-      _creativePaintedLog = nextLog;
-      if(atBottom) log.scrollTop = log.scrollHeight;
-    }
-  }
-  const tabMenu = document.getElementById('creativeChatTabMenu');
-  const tabs = document.querySelector('#creativeAssistant .creative-chat-tabs');
-  const tabSig = _creativeTabSignature();
-  if(tabs && tabs.dataset.signature !== tabSig && (!tabMenu || tabMenu.hidden)){
-    tabs.outerHTML = _creativeChatTabs();
-    const freshTabs = document.querySelector('#creativeAssistant .creative-chat-tabs');
-    if(freshTabs) freshTabs.dataset.signature = tabSig;
-  }
-  _creativeSyncBusy();
-}
-
-function _creativeApplyThreads(view){
-  if(!_creativeProject || !view) return;
-  if(Array.isArray(view.threads)) _creativeProject.threads = view.threads;
-  if(Array.isArray(view.chat)) _creativeProject.chat = view.chat;
-  if(view.active_thread) _creativeProject.active_thread = view.active_thread;
-}
-
-function _creativeChatTabs(){
-  const project = _creativeProject;
-  const threads = (project.threads && project.threads.length)
-    ? project.threads
-    : [{id:'', title:'New chat', messages: project.chat || []}];
-  const active = project.active_thread || (threads[threads.length - 1] && threads[threads.length - 1].id) || '';
-  const icon = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-8 8H7l-4 3V12a8 8 0 1 1 18 0z"/></svg>`;
-  const tabs = threads.map(thread => {
-    const on = thread.id === active;
-    const title = thread.title || 'New chat';
-    const close = `<button type="button" class="creative-chat-tab-x" aria-label="Close ${ _creativeEsc(title) }" onclick="creativeCloseChatTab(event, '${thread.id}')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>`;
-    return `<div class="creative-chat-tab${on ? ' active' : ''}" role="tab" aria-selected="${on ? 'true' : 'false'}"><button type="button" class="creative-chat-tab-main" onclick="creativeSelectChatTab('${thread.id}')">${icon}<span dir="auto">${_creativeEsc(title)}</span></button>${thread.id ? close : ''}</div>`;
-  }).join('');
-  const menu = threads.map(thread => {
-    const title = thread.title || 'New chat';
-    const close = thread.id
-      ? `<button type="button" class="creative-chat-menu-x" aria-label="Close ${ _creativeEsc(title) }" onclick="creativeCloseChatTab(event, '${thread.id}')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>`
-      : '';
-    return `<div class="creative-chat-menu-row"><button type="button" onclick="creativeSelectChatTab('${thread.id}')">${_creativeEsc(title)}</button>${close}</div>`;
-  }).join('');
-  return `<div class="creative-chat-tabs" role="tablist" aria-label="Chats"><div class="creative-chat-tab-scroll">${tabs}</div><button type="button" class="creative-chat-tab-tool" aria-label="New chat" onclick="creativeNewChatTab()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button><button type="button" class="creative-chat-tab-tool" aria-label="All chats" aria-expanded="false" onclick="creativeToggleChatMenu(event)"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></button><div class="creative-menu creative-chat-menu" id="creativeChatTabMenu" hidden>${menu}</div></div>`;
-}
-
-async function creativeNewChatTab(){
-  if(!_creativeProject || _creativeChatBusy) return;
-  const view = await api('/api/creative-studio/projects/' + _creativeProject.id + '/threads', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
-  _creativeApplyThreads(view);
-  _creativeChatError = '';
-  await _creativeLoadAgentTranscript();
-  _creativeSyncLive();
-  const input = document.getElementById('creativeChatInput');
-  if(input) input.focus();
-}
-
-async function creativeSelectChatTab(id){
-  if(!_creativeProject || !id || id === _creativeProject.active_thread) return;
-  const view = await api('/api/creative-studio/projects/' + _creativeProject.id + '/threads/active', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({thread_id:id})});
-  _creativeApplyThreads(view);
-  _creativeChatError = '';
-  await _creativeLoadAgentTranscript();
-  _creativeSyncLive();
-}
-
-async function creativeCloseChatTab(event, id){
-  if(event) event.stopPropagation();
-  if(!_creativeProject || !id) return;
-  const view = await api('/api/creative-studio/projects/' + _creativeProject.id + '/threads/close', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({thread_id:id})});
-  _creativeApplyThreads(view);
-  await _creativeLoadAgentTranscript();
-  _creativeSyncLive();
-}
-
-function creativeToggleChatMenu(event){
-  if(event) event.stopPropagation();
-  const menu = document.getElementById('creativeChatTabMenu');
-  const button = event && event.currentTarget;
-  if(!menu) return;
-  const open = menu.hidden;
-  menu.hidden = !open;
-  if(button) button.setAttribute('aria-expanded', open ? 'true' : 'false');
-  if(open){
-    const close = (ev) => {
-      if(menu.contains(ev.target) || (button && button.contains(ev.target))) return;
-      menu.hidden = true;
-      if(button) button.setAttribute('aria-expanded', 'false');
-      document.removeEventListener('click', close);
-    };
-    setTimeout(() => document.addEventListener('click', close), 0);
-  }
-}
-
-function creativeToggleProjectScope(event){
-  event.preventDefault();
-  const button = event.currentTarget;
-  const on = button.getAttribute('aria-pressed') !== 'true';
-  button.setAttribute('aria-pressed', on ? 'true' : 'false');
-}
-
-function creativeChatKey(event){
-  if(event.key === 'Enter' && !event.shiftKey){
-    event.preventDefault();
-    creativeSendChat();
-  }
-}
-
-function _creativeLiveProposal(proposalId){
-  const stages = (_creativeProject && _creativeProject.stages) || {};
-  for(const stage of Object.values(stages)){
-    for(const slot of Object.values((stage && stage.fields) || {})){
-      for(const proposal of slot.proposals || []){
-        if(proposal.id === proposalId) return proposal;
-      }
-    }
-  }
-  return null;
-}
-
-function _creativeMessageSuggestions(item){
-  const cards = (item.proposals || []).map(itemProposal => {
-    const live = _creativeLiveProposal(itemProposal.id);
-    if(live && live.status !== 'proposed' && live.status !== 'in_discussion') return '';
-    const label = _creativeLabel(itemProposal.field || '');
-    const previous = (itemProposal.previous || '').trim();
-    const next = ((live && (live.revised_text || live.text)) || itemProposal.text || '').trim();
-    const before = previous
-      ? `<p class="creative-suggest-now" dir="auto">${_creativeEsc(previous)}</p>`
-      : '';
-    return `<article class="creative-suggest" data-proposal="${_creativeEsc(itemProposal.id)}">
-      <p class="creative-suggest-kicker">${_creativeEsc(label)}</p>
-      ${before}
-      <p class="creative-suggest-next" dir="auto">${_creativeEsc(next)}</p>
-      <div class="creative-actions">
-        <button type="button" class="creative-suggest-apply" onclick="creativeProposalAction('${itemProposal.id}','accept')">Replace</button>
-        <button type="button" class="creative-suggest-dismiss" onclick="creativeProposalAction('${itemProposal.id}','dismiss')">Dismiss</button>
-      </div>
-    </article>`;
-  }).join('');
-  return cards;
-}
-
-function _creativeProposalThread(proposal){
-  if(proposal && proposal.thread_id) return proposal.thread_id;
-  const threads = (_creativeProject && _creativeProject.threads) || [];
-  const id = proposal && proposal.id;
-  for(const thread of threads){
-    const messages = thread.messages || [];
-    if(messages.some(message => (message.proposals || []).some(item => item.id === id))) return thread.id;
-  }
-  return '';
-}
-
-function _creativeOpenProposals(){
-  const stage = _creativeProject.stages[_creativeStage];
-  if(!stage) return '';
-  const cards = [];
-  const active = _creativeProject.active_thread || '';
-  Object.entries(stage.fields || {}).forEach(([field, slot]) => {
-    if(_creativeFocusField && field !== _creativeFocusField) return;
-    (slot.proposals || []).forEach(proposal => {
-      if(proposal.status === 'dismissed' || proposal.status === 'accepted' || proposal.status === 'edited_accepted') return;
-      const owner = _creativeProposalThread(proposal);
-      if(owner && owner !== active) return;
-      const label = _creativeLabel(field);
-      const shownInThread = (_creativeProject.chat || []).some(message =>
-        (message.proposals || []).some(item => item.id === proposal.id)
-      );
-      if(shownInThread) return;
-      cards.push(`<article class="creative-suggest" data-proposal="${_creativeEsc(proposal.id)}">
-        <p class="creative-suggest-kicker">${_creativeEsc(label)}</p>
-        <p class="creative-suggest-next" dir="auto">${_creativeEsc(proposal.revised_text || proposal.text)}</p>
-        <div class="creative-actions">
-          <button type="button" class="creative-suggest-apply" onclick="creativeProposalAction('${proposal.id}','accept')">Replace</button>
-          <button type="button" class="creative-suggest-dismiss" onclick="creativeProposalAction('${proposal.id}','dismiss')">Dismiss</button>
-        </div>
-      </article>`);
-    });
-  });
-  return cards.join('');
 }
 
 function _creativeFieldInputs(stage){
@@ -818,6 +580,16 @@ function _creativeFieldInputs(stage){
     const claim = (slot.claim === 'needs_verification' || slot.regulated) ? '<span class="creative-claim needs">Needs source</span>' : '';
     const copyTools = _creativeStage === 'copy' ? `<div class="creative-inline-tools"><label><input type="checkbox" ${slot.include ? 'checked' : ''} onchange="creativeToggleInclude('${name}', this.checked)"> Include</label> <button type="button" class="creative-inline-btn" onclick="creativeNudgeOrder('${name}', -1)">Up</button> <button type="button" class="creative-inline-btn" onclick="creativeNudgeOrder('${name}', 1)">Down</button></div>` : '';
     const control = `<textarea data-creative-field="${name}" dir="auto" rows="4" oninput="creativeScheduleSave('${name}')">${_creativeEsc(slot.text || '')}</textarea>`;
+    const proposals = (slot.proposals || []).filter(item => item.status === 'proposed' || item.status === 'in_discussion').map(proposal => {
+      const next = ((proposal.revised_text || proposal.text) || '').trim();
+      return `<article class="creative-suggest" data-proposal="${_creativeEsc(proposal.id)}">
+        <p class="creative-suggest-next" dir="auto">${_creativeEsc(next)}</p>
+        <div class="creative-actions">
+          <button type="button" class="creative-suggest-apply" onclick="creativeProposalAction('${proposal.id}','accept')">Replace</button>
+          <button type="button" class="creative-suggest-dismiss" onclick="creativeProposalAction('${proposal.id}','dismiss')">Dismiss</button>
+        </div>
+      </article>`;
+    }).join('');
     const isolated = _creativeFocusField === name;
     return `<div class="creative-field${isolated ? ' isolated' : ''}" data-field="${name}">
       <div class="creative-field-label">
@@ -827,516 +599,9 @@ function _creativeFieldInputs(stage){
       ${help ? `<details class="creative-help-more"><summary>What does this mean?</summary>${help}</details>` : ''}
       ${copyTools}
       ${control}
+      ${proposals}
     </div>`;
   }).join('');
-}
-
-const CREATIVE_AGENT_PROFILE = 'copywriting';
-const CREATIVE_PROFILE_DEFAULT_MODEL = 'google/gemini-3.8-flash';
-let _creativeModel = '';
-let _creativeModelProvider = '';
-let _creativeModelChosen = false;
-let _creativeProfileModel = CREATIVE_PROFILE_DEFAULT_MODEL;
-let _creativeProfileProvider = '';
-let _creativeProfileModelRequested = false;
-let _creativeModelDropdownHome = null;
-
-function _creativeSyncModelChip(){
-  const sel = document.getElementById('creativeModelSelect');
-  const label = document.getElementById('creativeModelLabel');
-  if(!sel || !label) return;
-  const opt = sel.selectedOptions && sel.selectedOptions[0];
-  const text = (opt && opt.textContent) || (typeof getModelLabel === 'function' ? getModelLabel(sel.value || '') : '') || 'Model';
-  label.textContent = text.trim() || 'Model';
-  _creativeSyncSessionChip();
-}
-
-function _creativeSyncSessionChip(){
-  const label = document.getElementById('creativeModelLabel');
-  const modelText = (label && label.textContent) || 'Model';
-  const mainThinking = document.getElementById('composerSessionThinkingRow');
-  const effortShown = !(mainThinking && mainThinking.hidden);
-  const effortLabel = document.getElementById('composerReasoningLabel');
-  const effortText = effortShown ? ((effortLabel && effortLabel.textContent) || '') : '';
-  const modelEl = document.getElementById('creativeSessionModel');
-  const effortEl = document.getElementById('creativeSessionEffort');
-  const modelValue = document.getElementById('creativeSessionModelValue');
-  const thinkingValue = document.getElementById('creativeSessionThinkingValue');
-  const workspaceValue = document.getElementById('creativeSessionWorkspaceValue');
-  const thinkingRow = document.getElementById('creativeSessionThinkingRow');
-  const chip = document.getElementById('creativeSessionChip');
-  if(modelEl) modelEl.textContent = modelText;
-  if(effortEl) effortEl.textContent = effortText;
-  if(modelValue) modelValue.textContent = modelText;
-  if(thinkingValue) thinkingValue.textContent = effortText;
-  if(thinkingRow) thinkingRow.hidden = !effortShown;
-  const workspace = document.getElementById('composerWorkspaceLabel');
-  if(workspaceValue) workspaceValue.textContent = (workspace && workspace.textContent) || '';
-  if(chip) chip.title = modelText;
-}
-
-function _creativeRememberModel(){
-  const sel = document.getElementById('creativeModelSelect');
-  if(!sel || !sel.value) return;
-  const state = typeof _modelStateForSelect === 'function'
-    ? _modelStateForSelect(sel, sel.value)
-    : {model: sel.value, model_provider: ''};
-  _creativeModel = state.model || sel.value;
-  _creativeModelProvider = state.model_provider || '';
-}
-
-function _creativeCopyModelOptions(){
-  const source = document.getElementById('modelSelect');
-  const sel = document.getElementById('creativeModelSelect');
-  if(!sel) return;
-  if(source && source.options.length){
-    sel.innerHTML = source.innerHTML;
-  }else if(typeof populateModelDropdown === 'function'){
-    populateModelDropdown().then(() => {
-      const fresh = document.getElementById('modelSelect');
-      const target = document.getElementById('creativeModelSelect');
-      if(fresh && target && fresh.options.length){
-        target.innerHTML = fresh.innerHTML;
-        _creativeApplyRememberedModel();
-      }
-    }).catch(() => {});
-  }
-  _creativeApplyRememberedModel();
-}
-
-function _creativeStudioModel(){
-  if(_creativeModelChosen && _creativeModel){
-    return {model: _creativeModel, provider: _creativeModelProvider || ''};
-  }
-  return {model: _creativeProfileModel || '', provider: _creativeProfileModel ? (_creativeProfileProvider || '') : ''};
-}
-
-function _creativeApplyRememberedModel(){
-  const sel = document.getElementById('creativeModelSelect');
-  if(!sel) return;
-  const choice = _creativeStudioModel();
-  if(choice.model && typeof _ensureModelOptionInDropdown === 'function'){
-    _ensureModelOptionInDropdown(choice.model, sel, choice.provider || null);
-  }else if(choice.model && typeof _applyModelToDropdown === 'function'){
-    _applyModelToDropdown(choice.model, sel, choice.provider || null);
-  }else if(!choice.model){
-    sel.selectedIndex = -1;
-  }
-  _creativeSyncModelChip();
-}
-
-function _creativeLoadProfileModel(){
-  if(_creativeProfileModelRequested || typeof api !== 'function') return;
-  _creativeProfileModelRequested = true;
-  api('/api/profiles', {timeoutToast:false}).then(data => {
-    const rows = data && Array.isArray(data.profiles) ? data.profiles : [];
-    const profile = rows.find(row => row && row.name === CREATIVE_AGENT_PROFILE);
-    if(profile && profile.model){
-      _creativeProfileModel = profile.model;
-      _creativeProfileProvider = profile.provider || '';
-    }
-    if(!_creativeModelChosen) _creativeApplyRememberedModel();
-  }).catch(() => {});
-}
-
-function _creativeMountModelPicker(){
-  _creativeCopyModelOptions();
-  _creativeLoadProfileModel();
-}
-
-function _creativeRestoreModelDropdown(){
-  const dd = document.getElementById('creativeModelDropdown');
-  if(!dd) return;
-  dd.classList.remove('open', 'model-dropdown--floating');
-  dd.removeAttribute('style');
-  const home = _creativeModelDropdownHome;
-  if(home && home.parent && home.parent.isConnected && dd.parentNode !== home.parent){
-    home.parent.insertBefore(dd, home.next);
-  }
-  _creativeModelDropdownHome = null;
-}
-
-function closeCreativeModelDropdown(){
-  _creativeRestoreModelDropdown();
-  const row = document.getElementById('creativeSessionModelRow');
-  if(row) row.setAttribute('aria-expanded', 'false');
-}
-
-function _creativeCloseThinking(){
-  const dd = document.getElementById('creativeThinkingDropdown');
-  if(!dd) return;
-  dd.classList.remove('open', 'composer-session-flyout');
-  dd.removeAttribute('style');
-  const row = document.getElementById('creativeSessionThinkingRow');
-  if(row) row.setAttribute('aria-expanded', 'false');
-}
-
-function _creativeCloseWorkspace(){
-  const dd = document.getElementById('creativeWsDropdown');
-  if(!dd) return;
-  dd.classList.remove('open', 'composer-session-flyout');
-  dd.hidden = true;
-  dd.setAttribute('aria-hidden', 'true');
-  dd.removeAttribute('style');
-  const row = document.getElementById('creativeSessionWorkspaceRow');
-  if(row) row.setAttribute('aria-expanded', 'false');
-}
-
-function _creativeCloseSessionFlyouts(){
-  closeCreativeModelDropdown();
-  _creativeCloseThinking();
-  _creativeCloseWorkspace();
-  document.querySelectorAll('#creativeSessionMenu .composer-session-row.active').forEach(row => row.classList.remove('active'));
-}
-
-function _creativePositionFlyout(dd, row){
-  if(!dd || !row) return;
-  const menu = document.getElementById('creativeSessionMenu');
-  const menuRect = menu ? menu.getBoundingClientRect() : row.getBoundingClientRect();
-  const rowRect = row.getBoundingClientRect();
-  const margin = 8;
-  const gap = 8;
-  dd.style.position = 'fixed';
-  dd.style.right = 'auto';
-  dd.style.bottom = 'auto';
-  dd.style.zIndex = '220';
-  const width = Math.min(dd.offsetWidth || 280, window.innerWidth - margin * 2);
-  const spaceRight = window.innerWidth - menuRect.right - margin;
-  const placeLeft = spaceRight < width + gap;
-  let left = placeLeft ? menuRect.left - gap - width : menuRect.right + gap;
-  left = Math.max(margin, Math.min(left, window.innerWidth - margin - width));
-  const height = dd.offsetHeight || 240;
-  let top = rowRect.top;
-  top = Math.max(margin, Math.min(top, window.innerHeight - margin - height));
-  dd.style.left = left + 'px';
-  dd.style.top = top + 'px';
-  dd.style.width = width + 'px';
-  dd.classList.add('composer-session-flyout');
-  dd.classList.toggle('composer-session-flyout-left', placeLeft);
-}
-
-function _creativePositionSessionMenu(){
-  const menu = document.getElementById('creativeSessionMenu');
-  const chip = document.getElementById('creativeSessionChip');
-  if(!menu || !chip) return;
-  const rect = chip.getBoundingClientRect();
-  const margin = 8;
-  menu.style.position = 'fixed';
-  menu.style.bottom = 'auto';
-  const width = menu.offsetWidth || 280;
-  let left = rect.left;
-  if(left + width > window.innerWidth - margin) left = Math.max(margin, window.innerWidth - width - margin);
-  menu.style.left = left + 'px';
-  menu.style.top = Math.max(margin, rect.top - (menu.offsetHeight || 160) - 8) + 'px';
-}
-
-function _creativeMarkSessionRow(action){
-  document.querySelectorAll('#creativeSessionMenu .composer-session-row').forEach(row => {
-    const on = row.getAttribute('data-session-action') === action;
-    row.classList.toggle('active', on);
-    row.setAttribute('aria-expanded', on ? 'true' : 'false');
-  });
-}
-
-function _creativePositionModelDropdown(){
-  const dd = document.getElementById('creativeModelDropdown');
-  const row = document.getElementById('creativeSessionModelRow');
-  if(!dd || !row) return;
-  if(!_creativeModelDropdownHome){
-    _creativeModelDropdownHome = {parent: dd.parentNode, next: dd.nextSibling};
-  }
-  if(dd.parentNode !== document.body) document.body.appendChild(dd);
-  dd.classList.add('model-dropdown--floating');
-  const margin = 8;
-  const width = Math.min(420, Math.max(240, window.innerWidth - margin * 2));
-  dd.style.width = width + 'px';
-  dd.style.maxHeight = Math.round(window.innerHeight * 0.7) + 'px';
-  _creativePositionFlyout(dd, row);
-}
-
-function selectCreativeModelFromDropdown(value, preferredProviderId){
-  const sel = document.getElementById('creativeModelSelect');
-  if(!sel){ closeCreativeModelDropdown(); return; }
-  const provider = String(preferredProviderId || '').trim() || null;
-  if(typeof _ensureModelOptionInDropdown === 'function'){
-    _ensureModelOptionInDropdown(value, sel, provider);
-  }else{
-    sel.value = value;
-  }
-  _creativeModelChosen = true;
-  _creativeRememberModel();
-  if(provider) _creativeModelProvider = provider;
-  _creativeSyncModelChip();
-  closeCreativeModelDropdown();
-}
-
-function toggleCreativeModelDropdown(event){
-  if(event){ event.preventDefault(); event.stopPropagation(); }
-  const dd = document.getElementById('creativeModelDropdown');
-  const sel = document.getElementById('creativeModelSelect');
-  if(!dd || !sel) return;
-  if(dd.classList.contains('open')){ closeCreativeModelDropdown(); return; }
-  _creativeCloseThinking();
-  _creativeCloseWorkspace();
-  if(typeof closeModelDropdown === 'function') closeModelDropdown();
-  if(typeof closeSettingsModelDropdown === 'function') closeSettingsModelDropdown();
-  _creativeCopyModelOptions();
-  if(typeof renderModelDropdown !== 'function') return;
-  renderModelDropdown({
-    dropdownId: 'creativeModelDropdown',
-    selectId: 'creativeModelSelect',
-    forceOpenKey: 'creative',
-    closeDropdown: closeCreativeModelDropdown,
-    selectModel: selectCreativeModelFromDropdown,
-    scopeNoteText: 'Used for Creative Studio chat replies.',
-  });
-  dd.classList.add('open');
-  _creativeMarkSessionRow('model');
-  _creativePositionModelDropdown();
-  const activeRow = dd.querySelector('.model-opt.active');
-  if(activeRow && typeof activeRow.scrollIntoView === 'function') activeRow.scrollIntoView({block: 'nearest'});
-}
-
-function _creativeOpenThinking(){
-  const source = document.getElementById('composerReasoningDropdown');
-  const dd = document.getElementById('creativeThinkingDropdown');
-  const row = document.getElementById('creativeSessionThinkingRow');
-  if(!source || !dd || !row || row.hidden) return;
-  if(dd.classList.contains('open')){ _creativeCloseThinking(); return; }
-  closeCreativeModelDropdown();
-  _creativeCloseWorkspace();
-  dd.innerHTML = source.innerHTML;
-  dd.classList.add('open');
-  _creativeMarkSessionRow('thinking');
-  _creativePositionFlyout(dd, row);
-}
-
-function _creativeOpenWorkspace(){
-  const dd = document.getElementById('creativeWsDropdown');
-  const row = document.getElementById('creativeSessionWorkspaceRow');
-  if(!dd || !row || typeof loadWorkspaceList !== 'function' || typeof renderWorkspaceDropdownInto !== 'function') return;
-  if(dd.classList.contains('open')){ _creativeCloseWorkspace(); return; }
-  closeCreativeModelDropdown();
-  _creativeCloseThinking();
-  const current = (typeof S !== 'undefined' && S.session && S.session.workspace) || '';
-  loadWorkspaceList().then(data => {
-    if(!document.getElementById('creativeSessionMenu') || document.getElementById('creativeSessionMenu').hidden) return;
-    renderWorkspaceDropdownInto(dd, data.workspaces || [], current || data.last || '');
-    dd.hidden = false;
-    dd.setAttribute('aria-hidden', 'false');
-    dd.classList.add('open');
-    _creativeMarkSessionRow('workspace');
-    _creativePositionFlyout(dd, row);
-  }).catch(() => {});
-}
-
-function closeCreativeSessionMenu(){
-  const menu = document.getElementById('creativeSessionMenu');
-  const chip = document.getElementById('creativeSessionChip');
-  if(menu) menu.hidden = true;
-  if(chip){
-    chip.classList.remove('active');
-    chip.setAttribute('aria-expanded', 'false');
-  }
-  _creativeCloseSessionFlyouts();
-}
-
-function toggleCreativeSessionMenu(event){
-  if(event){ event.preventDefault(); event.stopPropagation(); }
-  const menu = document.getElementById('creativeSessionMenu');
-  const chip = document.getElementById('creativeSessionChip');
-  if(!menu || !chip) return;
-  if(!menu.hidden){ closeCreativeSessionMenu(); return; }
-  if(typeof closeComposerSessionMenu === 'function') closeComposerSessionMenu();
-  if(typeof closeModelDropdown === 'function') closeModelDropdown();
-  if(typeof closeReasoningDropdown === 'function') closeReasoningDropdown();
-  if(typeof closeWsDropdown === 'function') closeWsDropdown();
-  _creativeSyncSessionChip();
-  menu.hidden = false;
-  chip.classList.add('active');
-  chip.setAttribute('aria-expanded', 'true');
-  _creativePositionSessionMenu();
-}
-
-function openCreativeSessionAction(event, action){
-  if(event){ event.preventDefault(); event.stopPropagation(); }
-  if(action === 'model') toggleCreativeModelDropdown(event);
-  else if(action === 'thinking') _creativeOpenThinking();
-  else if(action === 'workspace') _creativeOpenWorkspace();
-}
-
-document.addEventListener('click', event => {
-  if(event.target.closest('#creativeSessionChip') || event.target.closest('#creativeSessionMenu') || event.target.closest('#creativeModelDropdown') || event.target.closest('#creativeThinkingDropdown') || event.target.closest('#creativeWsDropdown')){
-    if(event.target.closest('#creativeThinkingDropdown .reasoning-option')){
-      const option = event.target.closest('.reasoning-option');
-      const thinkingValue = document.getElementById('creativeSessionThinkingValue');
-      const effortEl = document.getElementById('creativeSessionEffort');
-      const text = option ? option.textContent.trim() : '';
-      if(thinkingValue) thinkingValue.textContent = text;
-      if(effortEl) effortEl.textContent = text;
-      _creativeCloseThinking();
-    }
-    if(event.target.closest('#creativeWsDropdown .ws-opt')) closeCreativeSessionMenu();
-    return;
-  }
-  closeCreativeSessionMenu();
-});
-
-function _creativeStopAgentStream(){
-  if(_creativeAgentStream){
-    _creativeAgentStream.close();
-    _creativeAgentStream = null;
-  }
-}
-
-async function creativeSendChat(){
-  if(!_creativeProject || _creativeChatBusy) return;
-  const input = document.getElementById('creativeChatInput');
-  const text = input ? input.value.trim() : '';
-  if(!text) return;
-  const scopeBox = document.getElementById('creativeChatScope');
-  const choice = _creativeStudioModel();
-  const model = choice.model;
-  const modelProvider = choice.provider;
-  const scope = _creativeFocusField ? 'field' : (scopeBox && scopeBox.getAttribute('aria-pressed') === 'true' ? 'project' : 'stage');
-  const field = _creativeFocusField || '';
-  _creativeChatBusy = true;
-  _creativeChatError = '';
-  if(input) input.value = '';
-  _creativeAgentLog.push({role:'user', text, pending:true});
-  _creativeSyncLive();
-  let sessionId = '';
-  try{
-    let thread = _creativeActiveThread();
-    if(!thread || !thread.id) throw new Error('Open a chat first.');
-    sessionId = thread.session_id || '';
-    if(!sessionId){
-      const created = await api('/api/session/new', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        timeoutMs:60000,
-        body:JSON.stringify({
-          worktree:false,
-          profile:(typeof S !== 'undefined' && S.activeProfile) || 'default',
-          model: model || undefined,
-          model_provider: modelProvider || undefined,
-          enabled_toolsets: ['file', 'skills', 'memory'],
-        }),
-      });
-      sessionId = created && created.session && created.session.session_id;
-      if(!sessionId) throw new Error('Could not start an agent session.');
-      const view = await api('/api/creative-studio/projects/' + _creativeProject.id + '/threads/session', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({thread_id:thread.id, session_id:sessionId}),
-      });
-      _creativeApplyThreads(view);
-      if(typeof renderSessionList === 'function') void renderSessionList();
-    }
-    await api('/api/session/toolsets', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      timeoutMs:15000,
-      timeoutToast:false,
-      body:JSON.stringify({session_id:sessionId, toolsets:['file', 'skills', 'memory']}),
-    });
-    const saved = _creativeSavedContext();
-    let pack = {};
-    try{
-      pack = await api('/api/creative-studio/projects/' + _creativeProject.id + '/prompt?stage=' + encodeURIComponent(_creativeStage), {timeoutToast:false});
-    }catch(_){ pack = {}; }
-    const marker = `[studio project=${_creativeProject.id} stage=${_creativeStage} scope=${scope}${field ? ' field=' + field : ''}]`;
-    const roots = (pack.search_roots || []).join('\n');
-    const message = text + '\n\n' + marker
-      + '\nProduct notes already loaded:\n' + (pack.product_note || '(none loaded)')
-      + '\n\nLuke Iha purposes for this stage:\n' + (pack.framework || '(none)')
-      + '\n\nSaved fields:\n' + (saved || '(none yet)')
-      + '\n\nHermes files you may search:\n' + (roots || '(skills, memory, and product notes)')
-      + '\n\nIf the loaded notes are not enough, search those Hermes files for the product or the framework. Read only what the question needs, then answer. Do not run commands and do not search the workspace.';
-    const start = await api('/api/chat/start', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      timeoutMs:60000,
-      body:JSON.stringify({
-        session_id:sessionId,
-        message,
-        model: model || undefined,
-        model_provider: modelProvider || undefined,
-        profile:(typeof S !== 'undefined' && S.activeProfile) || 'default',
-      }),
-    });
-    const streamId = start && start.stream_id;
-    if(!streamId) throw new Error('The agent did not start.');
-    _creativeAgentLog.push({role:'assistant', text:''});
-    await new Promise(resolve => {
-      _creativeStopAgentStream();
-      const src = new EventSource(
-        new URL('api/chat/stream?stream_id=' + encodeURIComponent(streamId), document.baseURI || location.href).href,
-        {withCredentials:true},
-      );
-      _creativeAgentStream = src;
-      let settled = false;
-      let seenActive = false;
-      let quietPolls = 0;
-      const started = Date.now();
-      let timer = null;
-      const finish = () => {
-        if(settled) return;
-        settled = true;
-        if(timer) clearInterval(timer);
-        src.close();
-        if(_creativeAgentStream === src) _creativeAgentStream = null;
-        resolve();
-      };
-      src.addEventListener('token', event => {
-        try{
-          const data = JSON.parse(event.data);
-          const last = _creativeAgentLog[_creativeAgentLog.length - 1];
-          if(last && last.role === 'assistant') last.text += data.text || '';
-          _creativeSyncLive();
-        }catch(_){ }
-      });
-      src.addEventListener('done', finish);
-      src.addEventListener('stream_end', finish);
-      src.addEventListener('apperror', finish);
-      // A proxy often drops the live stream and the browser reports that as
-      // an error. The run is still going, so wait until the server says it
-      // has finished, then load the session transcript.
-      const watch = async () => {
-        if(settled) return;
-        if(Date.now() - started > 180000){ finish(); return; }
-        let active = null;
-        try{
-          const status = await api('/api/chat/stream/status?stream_id=' + encodeURIComponent(streamId), {timeoutToast:false, retries:0});
-          active = !!(status && status.active);
-        }catch(_){
-          return;
-        }
-        if(active){
-          seenActive = true;
-          quietPolls = 0;
-          return;
-        }
-        if(!seenActive && Date.now() - started < 15000) return;
-        quietPolls += 1;
-        if(quietPolls >= 2) finish();
-      };
-      src.onerror = () => { void watch(); };
-      timer = setInterval(() => { void watch(); }, 2000);
-    });
-    await _creativeLoadAgentTranscript();
-    await creativeReloadQuiet();
-  }catch(err){
-    _creativeChatError = err && err.message ? err.message : 'Could not send the message.';
-    if(input) input.value = text;
-    _creativeAgentLog = _creativeAgentLog.filter(item => !(item && item.pending && item.text === text));
-    if(sessionId){
-      try{ await _creativeLoadAgentTranscript(); }catch(_){ }
-    }
-  }finally{
-    _creativeChatBusy = false;
-    _creativeSyncLive();
-  }
 }
 
 function creativeScheduleSave(field){

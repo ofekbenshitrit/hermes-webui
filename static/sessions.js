@@ -2725,8 +2725,12 @@ async function loadSession(sid){
     Number(data.session.message_count || 0),
     Number(data.session.last_message_at || data.session.updated_at || 0)
   );
-  try{localStorage.setItem('hermes-webui-session',S.session.session_id);}catch(_){}
-  _setActiveSessionUrl(S.session.session_id);
+  // preserveHome: a hosted pane (Creative Studio) must not become the chat
+  // the user returns to, or rewrite the address bar.
+  if(!opts.preserveHome){
+    try{localStorage.setItem('hermes-webui-session',S.session.session_id);}catch(_){}
+    _setActiveSessionUrl(S.session.session_id);
+  }
   if(typeof startSessionStream==='function') startSessionStream(S.session.session_id);
 
 

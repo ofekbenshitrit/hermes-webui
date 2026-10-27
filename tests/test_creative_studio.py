@@ -241,76 +241,24 @@ def test_static_panel_wires_stage_switch_proposals_and_export():
     assert "window.prompt('Project name')" not in script
     assert "function creativeSetStage" in script
     assert "function creativeProposalAction" in script
-    assert "function creativeSendChat" in script
-    send = script.split("async function creativeSendChat()", 1)[1].split("function creativeScheduleSave", 1)[0]
-    assert send.find("pending:true") < send.find("api('/api/creative-studio/chat'")
-    assert "function creativeNewChatTab" in script
-    assert "function creativeCloseChatTab" in script
-    assert "creative-chat-menu-x" in script
-    assert "CREATIVE_AGENT_PROFILE = 'copywriting'" in script
-    assert "CREATIVE_PROFILE_DEFAULT_MODEL = 'google/gemini-3.8-flash'" in script
-    assert "api('/api/profiles'" in script
-    assert 'aria-label="Chats"' in script
-    assert 'id="creativeSessionChip"' in script
-    assert 'id="creativeSessionMenu"' in script
-    assert 'id="creativeSessionProfileValue">copywriting' in script
-    assert 'data-session-action="workspace"' in script
-    assert 'data-session-action="thinking"' in script
-    assert 'data-session-action="model"' in script
-    assert 'data-session-action="profile"' not in script
-    assert 'id="creativeModelChip"' not in script
-    assert "toggleCreativeSessionMenu" in script
-    assert "renderModelDropdown" in script
-    assert "role=\"tablist\"" in script
+    assert "function creativeReleaseChat" in script
+    assert "function creativeIsolateField" in script
+    assert 'id="creativeChatMount"' in script
+    assert "preserveHome:true" in script
+    assert "/chat-session" in script
+    assert "function creativeSendChat" not in script
+    assert "EventSource" not in script
+    assert "/api/creative-studio/chat" not in script
     assert "Suggest directions" not in script
     assert "function creativeExport" in script
     assert "function creativeCopyExport" in script
     assert "Nothing is selected for you until you replace a field." in script
-    assert "Message Hermes" not in script
-    assert "Replace field" in script
-
-
-def test_studio_chat_persists_without_changing_the_field(studio, monkeypatch):
-    project = studio.create_project("Thread", "Mug")
-    studio.update_field(project["id"], "who", "segment", "Night bakers", author="user")
-    posted = studio.post_studio_chat(project["id"], "who", "What should the hook lean on?")
-    assert posted["proposals"] == []
-    empty = studio.post_studio_chat(studio.create_project("Blank", "Tea")["id"], "who", "fill this in")
-    reply = empty["messages"][1]["text"]
-    assert "can't fill the fields" in reply
-    assert "brief.product_facts" not in reply
-    assert "proposal outcome:" in reply
-    assert studio.get_project(project["id"], field="segment")["data"]["text"] == "Night bakers"
-    saved = studio.post_studio_chat(project["id"], "who", "proposal outcome: Wake up before the alarm")
-    assert saved["proposals"][0]["field"] == "outcome"
-    assert studio.get_project(project["id"], field="outcome")["data"]["text"] == ""
-    reopened = studio.get_project(project["id"])
-    assert len(reopened["chat"]) == 4
-    assert "Night bakers" in reopened["chat"][1]["text"]
-    studio.update_field(project["id"], "brief", "product_facts", "Ceramic, 12oz", author="user")
-    studio.update_field(project["id"], "what", "concept", "Quiet mornings beat louder alarms", author="user")
-    seen = {}
-
-    def fake(system, user, model="", provider=""):
-        seen["system"] = system
-        seen["user"] = user
-        return ""
-
-    monkeypatch.setattr(studio, "complete_studio_prompt", fake)
-    isolated = studio.post_studio_chat(
-        project["id"], "who", "Tighten this line", scope="field", field="segment"
-    )
-    assert isolated["messages"][0]["field"] == "segment"
-    assert isolated["messages"][0]["scope"] == "field"
-    assert "feedback on who.segment" in isolated["messages"][1]["text"]
-    assert "who.segment: Night bakers" in isolated["messages"][1]["text"]
-    assert "Field under review" in seen["user"]
-    assert "who.segment: Night bakers" in seen["user"]
-    assert "brief.product_facts: Ceramic, 12oz" in seen["user"]
-    assert "what.concept: Quiet mornings beat louder alarms" in seen["user"]
-    assert "one field" in seen["system"]
-    assert seen["user"].index("Field under review") < seen["user"].index("Rest of the project")
-    assert "who.segment:" not in seen["user"].split("Rest of the project", 1)[1]
+    assert ">Replace</button>" in script
+    sessions = (root / "static" / "sessions.js").read_text(encoding="utf-8")
+    assert "opts.preserveHome" in sessions
+    streaming = (root / "api" / "streaming.py").read_text(encoding="utf-8")
+    call = streaming.index("agent.ephemeral_system_prompt = _webui_ephemeral_system_prompt(")
+    assert streaming.index("append_studio_ephemeral(", call) > call
 
 
 def test_studio_prompt_pack_includes_the_product_note_and_framework(studio, tmp_path, monkeypatch):
@@ -343,113 +291,6 @@ def test_studio_chat_tab_binds_one_agent_session(studio):
     assert all(not row.get("session_id") for row in copy["threads"])
 
 
-def test_studio_chat_tabs_keep_separate_threads(studio):
-    project = studio.create_project("Tabs", "Mug")
-    first = studio.post_studio_chat(project["id"], "who", "First thread line")
-    opened = studio.create_chat_thread(project["id"])
-    assert opened["active_thread"] != first["active_thread"]
-    assert opened["chat"] == []
-    second = studio.post_studio_chat(project["id"], "who", "Second thread line", thread_id=opened["active_thread"])
-    studio.post_studio_chat(project["id"], "who", "proposal outcome: Keep this on the second tab", thread_id=opened["active_thread"])
-    saved = studio.get_project(project["id"])
-    proposal = saved["stages"]["who"]["fields"]["outcome"]["proposals"][-1]
-    assert proposal["thread_id"] == opened["active_thread"]
-    by_id = {row["id"]: row for row in saved["threads"]}
-    first_blob = json.dumps(by_id[first["active_thread"]]["messages"])
-    assert proposal["id"] not in first_blob
-    assert proposal["id"] in json.dumps(by_id[opened["active_thread"]]["messages"])
-    assert "First thread line" in by_id[first["active_thread"]]["messages"][0]["text"]
-    assert "Second thread line" in by_id[second["active_thread"]]["messages"][0]["text"]
-    assert saved["chat"][0]["text"] == "Second thread line"
-    back = studio.activate_chat_thread(project["id"], first["active_thread"])
-    assert back["chat"][0]["text"] == "First thread line"
-    closed = studio.close_chat_thread(project["id"], first["active_thread"])
-    assert first["active_thread"] not in {row["id"] for row in closed["threads"]}
-    assert closed["chat"][0]["text"] == "Second thread line"
-
-
-def test_studio_chat_puts_the_typed_product_in_the_system_prompt(studio, monkeypatch):
-    seen = {}
-
-    def fake(system, user, model="", provider=""):
-        seen["system"] = system
-        seen["user"] = user
-        return "The concept is one idea: the market's false belief colliding with the real mechanism."
-
-    monkeypatch.setattr(studio, "complete_studio_prompt", fake)
-    project = studio.create_project("Launch", "Trail Shoes")
-    posted = studio.post_studio_chat(project["id"], "what", "What is concept for?")
-    assert posted["proposals"] == []
-    assert seen["system"].startswith("The product for this creative is Trail Shoes.")
-    assert "concept:" in seen["user"]
-    assert "false belief" in seen["user"]
-    assert "false belief colliding" in posted["messages"][1]["text"]
-    assert "Hermes didn't return a suggestion" not in posted["messages"][1]["text"]
-    assert "product file" not in seen["user"].lower()
-
-
-def test_studio_prompt_uses_the_copywriting_profile(studio, monkeypatch):
-    captured = {}
-
-    def fake_summary(system, user, active_profile=None, model_override=None, provider_override=None):
-        captured["profile"] = active_profile
-        return "A first line."
-
-    import api.routes as routes
-
-    monkeypatch.setattr(routes, "_llm_update_summary", fake_summary)
-    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
-    assert studio.complete_studio_prompt("system", "user") == "A first line."
-    assert captured["profile"] == "copywriting"
-
-
-def test_studio_chat_sends_the_picked_model(studio, monkeypatch):
-    seen = {}
-
-    def fake(system, user, model="", provider=""):
-        seen["model"] = model
-        seen["provider"] = provider
-        return ""
-
-    monkeypatch.setattr(studio, "complete_studio_prompt", fake)
-    project = studio.create_project("Pick", "Mug")
-    studio.post_studio_chat(
-        project["id"], "who", "Sharpen the audience",
-        model="@openai:gpt-5.4", model_provider="openai",
-    )
-    assert seen["model"] == "@openai:gpt-5.4"
-    assert seen["provider"] == "openai"
-    with pytest.raises(studio.StudioError):
-        studio.post_studio_chat(project["id"], "who", "Again", model="bad\nmodel")
-
-
-def test_studio_chat_drafts_replacements_without_writing_fields(studio, monkeypatch):
-    seen = {}
-
-    def fake(system, user):
-        seen["user"] = user
-        return json.dumps({
-            "suggestions": [
-                {"field": "outcome", "text": "Wake before the alarm"},
-                {"field": "segment", "text": "Night bakers who want a quieter morning"},
-            ]
-        })
-
-    monkeypatch.setattr(studio, "complete_studio_prompt", fake)
-    project = studio.create_project("Thread", "Mug")
-    studio.update_field(project["id"], "who", "segment", "Night bakers", author="user")
-    posted = studio.post_studio_chat(project["id"], "who", "Sharpen the audience")
-    by_field = {item["field"]: item for item in posted["proposals"]}
-    assert "(empty)" in seen["user"]
-    assert "Night bakers" in seen["user"]
-    assert by_field["outcome"]["previous"] == ""
-    assert by_field["outcome"]["text"] == "Wake before the alarm"
-    assert by_field["segment"]["previous"] == "Night bakers"
-    assert studio.get_project(project["id"], field="outcome")["data"]["text"] == ""
-    assert studio.get_project(project["id"], field="segment")["data"]["text"] == "Night bakers"
-    assert "Replace" in posted["messages"][1]["text"] or "replace" in posted["messages"][1]["text"]
-
-
 def test_legacy_project_without_chat_still_opens(studio, tmp_path):
     project = studio.create_project("Legacy")
     path = studio._project_path(project["id"])
@@ -460,3 +301,74 @@ def test_legacy_project_without_chat_still_opens(studio, tmp_path):
     assert loaded["chat"] == []
     assert "brief" in loaded["stages"]
     assert loaded["stages"]["who"]["fields"]["outcome"]["text"] == ""
+
+
+def test_scope_sessions_stay_separate_and_duplicate_clears_them(studio):
+    project = studio.create_project("Bound", "Mug")
+    project_chat = studio.bind_scope_session(project["id"], "sess_project_1")
+    assert project_chat["chat_session_id"] == "sess_project_1"
+    again = studio.bind_scope_session(project["id"], "sess_project_1")
+    assert again["session_id"] == "sess_project_1"
+    with pytest.raises(studio.StudioError):
+        studio.bind_scope_session(project["id"], "sess_project_2")
+    field_chat = studio.bind_scope_session(
+        project["id"], "sess_field_outcome", scope="field", stage="who", field="outcome"
+    )
+    assert field_chat["scope"] == "field"
+    assert field_chat["field"] == "outcome"
+    stored = studio.get_project(project["id"])
+    assert stored["chat_session_id"] == "sess_project_1"
+    assert stored["stages"]["who"]["fields"]["outcome"]["chat_session_id"] == "sess_field_outcome"
+    assert studio.lookup_studio_session("sess_field_outcome")["scope"] == "field"
+    assert studio.lookup_studio_session("missing_session_id") is None
+    copy = studio.duplicate_project(project["id"])
+    assert copy["chat_session_id"] == ""
+    assert "chat_session_id" not in copy["stages"]["who"]["fields"]["outcome"]
+    assert all(not row.get("session_id") for row in copy["threads"])
+
+
+def test_field_context_puts_the_field_first_and_leaves_other_chats_alone(studio, tmp_path, monkeypatch):
+    vault = tmp_path / "Products"
+    vault.mkdir()
+    (vault / "Trail Shoes.md").write_text("Cushioned daily trainer.", encoding="utf-8")
+    monkeypatch.setattr(studio, "product_catalog_roots", lambda: [("obsidian", vault)])
+    project = studio.create_project("Run", "Trail Shoes", product_source=str(vault / "Trail Shoes.md"))
+    studio.update_field(project["id"], "who", "segment", "Night bakers", author="user")
+    studio.update_field(project["id"], "what", "concept", "Quiet mornings", author="user")
+    studio.bind_scope_session(project["id"], "sess_project_ctx")
+    studio.bind_scope_session(project["id"], "sess_field_ctx", scope="field", stage="who", field="segment")
+    field_prompt = studio.studio_ephemeral_context("sess_field_ctx")
+    assert "Cushioned daily trainer" in field_prompt
+    assert "who.segment: Night bakers" in field_prompt
+    assert "This conversation is only this field." in field_prompt
+    assert field_prompt.index("who.segment: Night bakers") < field_prompt.index("Other fields, for reference only")
+    rest = field_prompt.split("Other fields, for reference only", 1)[1]
+    assert "what.concept: Quiet mornings" in rest
+    assert "who.segment:" not in rest
+    assert "Do not rewrite other fields" in field_prompt
+    project_prompt = studio.studio_ephemeral_context("sess_project_ctx")
+    assert "This conversation is the whole project." in project_prompt
+    assert "who.segment: Night bakers" in project_prompt
+    assert studio.studio_ephemeral_context("not_a_studio_session") == ""
+    shared = "WebUI session context:\n- shared"
+    assert studio.append_studio_ephemeral(shared, "not_a_studio_session") == shared
+    appended = studio.append_studio_ephemeral(shared, "sess_field_ctx")
+    assert appended.startswith(shared + "\n\n")
+    assert "who.segment: Night bakers" in appended
+
+
+def test_legacy_thread_session_becomes_the_project_chat(studio):
+    project = studio.create_project("Legacy tab")
+    opened = studio.create_chat_thread(project["id"])
+    studio.bind_chat_session(project["id"], opened["active_thread"], "sess_legacy_tab")
+    loaded = studio.get_project(project["id"])
+    assert loaded["chat_session_id"] == "sess_legacy_tab"
+    assert studio.lookup_studio_session("sess_legacy_tab")["scope"] == "project"
+
+
+def test_deleting_a_project_drops_its_session_index(studio):
+    project = studio.create_project("Gone")
+    studio.bind_scope_session(project["id"], "sess_gone_1")
+    assert studio.lookup_studio_session("sess_gone_1")["project_id"] == project["id"]
+    studio.delete_project(project["id"])
+    assert studio.lookup_studio_session("sess_gone_1") is None

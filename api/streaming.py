@@ -13391,6 +13391,16 @@ def _run_agent_streaming(
                 },
                 config_data=_cfg,
             )
+            # Creative Studio context is per bound session and changes with the
+            # document, so it stays after the shared prefix (#8148). Unbound
+            # chats get nothing appended. This does not touch stream registration.
+            try:
+                from api.creative_studio import append_studio_ephemeral
+                agent.ephemeral_system_prompt = append_studio_ephemeral(
+                    agent.ephemeral_system_prompt, session_id
+                )
+            except Exception:
+                logger.debug("creative studio context skipped", exc_info=True)
             _pending_started_at = getattr(s, 'pending_started_at', None)
             meter().set_pending_started_at(stream_id, _pending_started_at)
             # Normal chat-start sets pending_started_at before spawning this thread;

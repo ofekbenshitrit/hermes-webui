@@ -5242,7 +5242,11 @@ main.main > #mainPlugin{display:none;}
 .creative-body{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 6px var(--creative-chat-width, 340px);}
 .creative-body.chat-closed{grid-template-columns:minmax(0,1fr);}
 .creative-body.chat-closed .creative-chat,.creative-body.chat-closed .creative-chat-resizer{display:none;}
-#mainCreative button,
+#mainCreative .creative-header button:not(.creative-stage-tab),
+#mainCreative .creative-fields button,
+#mainCreative .creative-wizard button,
+#mainCreative .creative-card button,
+#mainCreative .main-view-empty button,
 .creative-list-empty button{
   font:inherit;
   font-size:13px;
@@ -5256,9 +5260,16 @@ main.main > #mainPlugin{display:none;}
   cursor:pointer;
   transition:background .15s,color .15s,border-color .15s;
 }
-#mainCreative button:hover,
+#mainCreative .creative-header button:not(.creative-stage-tab):hover,
+#mainCreative .creative-fields button:hover,
+#mainCreative .creative-wizard button:hover,
+#mainCreative .creative-card button:hover,
+#mainCreative .main-view-empty button:hover,
 .creative-list-empty button:hover{background:var(--accent-bg);color:var(--text);border-color:var(--accent-bg);}
-#mainCreative button:disabled{opacity:.5;cursor:default;}
+#mainCreative .creative-header button:not(.creative-stage-tab):disabled,
+#mainCreative .creative-fields button:disabled,
+#mainCreative .creative-wizard button:disabled,
+#mainCreative .creative-card button:disabled{opacity:.5;cursor:default;}
 #mainCreative .creative-actions button,
 #mainCreative .creative-footer button,
 #mainCreative .creative-header button:not(.creative-stage-tab){
@@ -5302,6 +5313,8 @@ main.main > #mainPlugin{display:none;}
 .creative-claim.needs{color:#c47b2b;}
 .creative-checks{display:flex;flex-wrap:wrap;gap:10px;font-size:13px;}
 .creative-chat{min-height:0;display:flex;flex-direction:column;border-left:1px solid var(--border);background:var(--bg);}
+#creativeChatMount{flex:1;min-height:0;min-width:0;display:flex;flex-direction:column;}
+#creativeChatMount > #mainChat{display:flex;flex:1;min-height:0;min-width:0;width:100%;}
 .creative-chat.collapsed{display:none;}
 .creative-chat-resizer{cursor:col-resize;background:transparent;}
 .creative-chat-resizer:hover{background:var(--border);}

@@ -431,6 +431,9 @@ async function switchPanel(name, opts = {}) {
   if (prevPanel === 'kanban' && nextPanel !== 'kanban') {
     if (typeof _kanbanStopPolling === 'function') _kanbanStopPolling();
   }
+  if (prevPanel === 'creative' && nextPanel !== 'creative' && typeof creativeReleaseChat === 'function') {
+    await creativeReleaseChat();
+  }
   _currentPanel = nextPanel;
   // Mobile drawer visibility: a rail/tab click on a phone should surface the
   // panel synchronously, NOT after the panel's async data load. If the re-open

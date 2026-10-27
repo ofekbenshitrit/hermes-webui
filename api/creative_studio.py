@@ -273,6 +273,7 @@ def _blank_project(name: str, product: str = "") -> dict:
         "chat": [],
         "threads": [],
         "active_thread": "",
+        "chat_session_id": "",
     }
 
 
@@ -300,8 +301,11 @@ def _load(project_id: str) -> dict:
     project = _read_json(path)
     if not isinstance(project.get("chat"), list):
         project["chat"] = []
-    if _ensure_threads(project):
+    changed = _ensure_threads(project)
+    changed = _migrate_chat_session(project) or changed
+    if changed:
         _write_json(path, project)
+    _sync_session_index(project)
     return project
 
 
@@ -452,8 +456,10 @@ def close_chat_thread(project_id: str, thread_id: str) -> dict:
 
 def _save(project: dict) -> dict:
     _ensure_threads(project)
+    _migrate_chat_session(project)
     project["updated_at"] = _now()
     _write_json(_project_path(project["id"]), project)
+    _sync_session_index(project)
     return project
 
 
@@ -461,7 +467,7 @@ def _iter_projects() -> list[dict]:
     root = _profile_dir()
     projects = []
     for path in sorted(root.glob("*.json")):
-        if path.name == "active.json":
+        if not re.fullmatch(r"[a-f0-9]{12}\.json", path.name):
             continue
         try:
             projects.append(_read_json(path))
@@ -724,6 +730,7 @@ def delete_project(project_id: str) -> dict:
         path.unlink()
         if get_active_project_id() == project_id:
             _write_active("")
+        _forget_project_sessions(project_id)
         return {"ok": True, "id": project_id}
 
 
@@ -740,6 +747,10 @@ def duplicate_project(project_id: str, name: str | None = None) -> dict:
                     proposal["id"] = "p_" + _new_id()
         for thread in project.get("threads") or []:
             thread["session_id"] = ""
+        project["chat_session_id"] = ""
+        for stage in project.get("stages", {}).values():
+            for slot in (stage.get("fields") or {}).values():
+                slot.pop("chat_session_id", None)
         _save(project)
         return project
 
@@ -1246,23 +1257,6 @@ def handle_creative_post(handler, parsed, body: dict):
         ))
     if path == "/api/creative-studio/active":
         return _http_call(handler, lambda: set_active_project(str(body.get("project_id") or "")))
-    if path == "/api/creative-studio/chat":
-        return _http_call(handler, lambda: post_studio_chat(
-            str(body.get("project_id") or ""),
-            str(body.get("stage") or ""),
-            body.get("text") or "",
-            scope=str(body.get("scope") or "stage"),
-            field=str(body.get("field") or ""),
-            model=str(body.get("model") or ""),
-            model_provider=str(body.get("model_provider") or ""),
-            thread_id=str(body.get("thread_id") or ""),
-        ))
-    if path == "/api/creative-studio/assist":
-        return _http_call(handler, lambda: assist_message(
-            str(body.get("project_id") or ""),
-            str(body.get("stage") or ""),
-            str(body.get("action") or ""),
-        ))
     if path == "/api/creative-studio/resolve":
         return _http_call(handler, lambda: get_project(
             body.get("project_id") or None,
@@ -1287,6 +1281,14 @@ def handle_creative_post(handler, parsed, body: dict):
             project_id,
             str(body.get("thread_id") or ""),
             str(body.get("session_id") or ""),
+        ))
+    if tail == "/chat-session":
+        return _http_call(handler, lambda: bind_scope_session(
+            project_id,
+            str(body.get("session_id") or ""),
+            scope=str(body.get("scope") or "project"),
+            stage=str(body.get("stage") or ""),
+            field=str(body.get("field") or ""),
         ))
     if tail == "/rename":
         return _http_call(handler, lambda: rename_project(project_id, body.get("name") or ""))
@@ -1376,11 +1378,6 @@ def handle_creative_delete(handler, parsed):
     return _http_call(handler, lambda: delete_project(project_id))
 
 
-_PROPOSAL_LINE = re.compile(
-    r"(?im)^\s*(?:proposal|save(?:\s+as\s+proposal)?|apply\s+to)\s+([a-z_ ]+?)\s*:\s*(.+?)\s*$"
-)
-
-
 def _note_under_catalog(path: Path) -> bool:
     try:
         resolved = path.resolve()
@@ -1460,52 +1457,7 @@ def _product_name(project: dict) -> str:
         return ""
 
 
-def _studio_system(project: dict, instructions: str) -> str:
-    """Product name lives in the system prompt. Hermes looks the product up itself."""
-    name = _product_name(project)
-    if not name:
-        return instructions
-    return (
-        f"The product for this creative is {name}. "
-        "Use what you already know about this product. "
-        "Look it up the same way you look up any product you already know. "
-        "A product file is not required.\n\n"
-        + instructions
-    )
-
-
-def _field_guide(stage: str, field: str = "") -> str:
-    if field:
-        names = [field]
-    else:
-        names = list(FIELDS.get(stage) or ())
-    lines = []
-    for name in names:
-        purpose = FIELD_HELP.get(name)
-        if purpose:
-            lines.append(f"{name}: {purpose}")
-    return "\n".join(lines)
-
-
-_QUESTION = re.compile(
-    r"(\?|^(?:what|why|how|who|when|explain|tell me|describe|מה|למה|איך|מי|הסבר|תסביר)\b)",
-    re.IGNORECASE,
-)
-
-
-def _recent_turns(project: dict, thread_id: str, limit: int = 8) -> str:
-    thread_id = (thread_id or project.get("active_thread") or "").strip()
-    thread = next((row for row in project.get("threads") or [] if row.get("id") == thread_id), None)
-    messages = (thread or {}).get("messages") or project.get("chat") or []
-    lines = []
-    for item in messages[-limit:]:
-        role = item.get("role") or "user"
-        text = (item.get("text") or "").strip()
-        if text:
-            lines.append(f"{role}: {text[:1200]}")
-    return "\n".join(lines)
-
-
+_SESSION_ID = re.compile(r"[A-Za-z0-9_-]{8,80}")
 _FIELD_TEXT_LIMIT = 480
 _PROJECT_CONTEXT_BUDGET = 6000
 
@@ -1551,416 +1503,206 @@ def _isolated_field_block(project: dict, stage: str, field: str) -> str:
     return block
 
 
-def _chat_context_lines(project: dict, stage: str, scope: str, field: str = "") -> tuple[list[str], list[str]]:
-    if scope == "field" and field:
-        slot = project["stages"][stage]["fields"][field]
-        text = (slot.get("text") or "").strip()
-        lines = [f"{stage}.{field}: {text or '(empty)'}"]
-        _context, missing = _suggestion_bundle(project, field)
-        return lines, missing
-    stages = [stage] if scope != "project" else [name for name in STAGES if name != "review"]
-    lines = []
-    missing = []
-    seen = set()
-    for name in stages:
-        row = project["stages"].get(name) or {}
-        for field, slot in (row.get("fields") or {}).items():
-            text = (slot.get("text") or "").strip()
-            if text:
-                lines.append(f"{name}.{field}: {text}")
-            key = (name, field)
-            if key not in seen and not text and name == stage:
-                seen.add(key)
-    if stage in FIELDS and stage != "review":
-        for field in FIELDS[stage]:
-            _context, field_missing = _suggestion_bundle(project, field)
-            for item in field_missing:
-                if item not in missing:
-                    missing.append(item)
-    return lines, missing
+
+_SESSION_INDEX = "session-index.json"
+_CONTEXT_CAP = 12000
 
 
-def _suggestion_targets(project: dict, stage: str, scope: str, field: str) -> list[dict]:
-    if scope == "field" and field:
-        names = [field]
-    else:
-        names = list(FIELDS.get(stage) or ())
-    targets = []
-    row = (project.get("stages") or {}).get(stage) or {}
-    slots = row.get("fields") or {}
-    for name in names[:6]:
-        slot = slots.get(name) or {}
-        targets.append({
-            "field": name,
-            "text": (slot.get("text") or "").strip(),
-        })
-    return targets
+def _valid_session_id(value: str) -> str:
+    value = str(value or "").strip()
+    if _SESSION_ID.fullmatch(value):
+        return value
+    return ""
 
 
-def _parse_suggestion_payload(raw: str, allowed: set[str]) -> list[dict]:
-    text = (raw or "").strip()
-    if not text:
-        return []
-    if text.startswith("```"):
-        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.I)
-        text = re.sub(r"\s*```$", "", text)
+def _session_index_path() -> Path:
+    return _profile_dir() / _SESSION_INDEX
+
+
+def _read_session_index() -> dict:
+    path = _session_index_path()
+    if not path.is_file():
+        return {}
     try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
-        match = re.search(r"\{.*\}", text, flags=re.S)
-        if not match:
-            return []
-        try:
-            data = json.loads(match.group(0))
-        except json.JSONDecodeError:
-            return []
-    items = data.get("suggestions") if isinstance(data, dict) else None
-    if not isinstance(items, list):
-        return []
-    found = []
-    seen = set()
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-        name = str(item.get("field") or "").strip().lower().replace(" ", "_")
-        body = str(item.get("text") or "").strip()
-        if name not in allowed or name in seen or not body:
-            continue
-        seen.add(name)
-        found.append({"field": name, "text": body[:4000]})
+        payload = _read_json(path)
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _migrate_chat_session(project: dict) -> bool:
+    """Reuse an older tab session as the project chat. Field chats stay unset."""
+    changed = False
+    current = _valid_session_id(project.get("chat_session_id") or "")
+    if project.get("chat_session_id") != current:
+        changed = True
+    if not current:
+        threads = project.get("threads") or []
+        active_id = project.get("active_thread")
+        active = next((row for row in threads if row.get("id") == active_id), None)
+        if active is None and threads:
+            active = threads[-1]
+        borrowed = _valid_session_id((active or {}).get("session_id") or "")
+        if borrowed:
+            current = borrowed
+            changed = True
+    if project.get("chat_session_id") != current:
+        project["chat_session_id"] = current
+        changed = True
+    return changed
+
+
+def _scope_bindings(project: dict) -> dict:
+    found = {}
+    project_id = project.get("id") or ""
+    project_session = _valid_session_id(project.get("chat_session_id") or "")
+    if project_session:
+        found[project_session] = {
+            "project_id": project_id,
+            "scope": "project",
+            "stage": "",
+            "field": "",
+        }
+    for stage, row in (project.get("stages") or {}).items():
+        for field, slot in ((row or {}).get("fields") or {}).items():
+            session_id = _valid_session_id((slot or {}).get("chat_session_id") or "")
+            if session_id:
+                found[session_id] = {
+                    "project_id": project_id,
+                    "scope": "field",
+                    "stage": stage,
+                    "field": field,
+                }
     return found
 
 
-STUDIO_AGENT_PROFILE = "copywriting"
+def _sync_session_index(project: dict) -> None:
+    wanted = _scope_bindings(project)
+    if not wanted:
+        return
+    index = _read_session_index()
+    changed = False
+    for session_id, binding in wanted.items():
+        if index.get(session_id) != binding:
+            index[session_id] = binding
+            changed = True
+    if changed:
+        _write_json(_session_index_path(), index)
 
 
-def complete_studio_prompt(system: str, user: str, model: str = "", provider: str = "") -> str:
-    """Ask the configured Hermes model for field suggestions.
-
-    A model chosen in the studio composer overrides the default. Tests and
-    explicit opt-out skip the model so a studio chat never calls the network
-    unless the running server is actually serving a person.
-    """
-    if os.environ.get("PYTEST_CURRENT_TEST"):
-        return ""
-    if os.environ.get("HERMES_WEBUI_STUDIO_LLM", "1").strip().lower() in {"0", "false", "off"}:
-        return ""
-    try:
-        from api.routes import _llm_update_summary
-        return (_llm_update_summary(
-            system,
-            user,
-            active_profile=STUDIO_AGENT_PROFILE,
-            model_override=(model or "").strip() or None,
-            provider_override=(provider or "").strip() or None,
-        ) or "").strip()
-    except Exception:
-        return ""
+def _forget_project_sessions(project_id: str) -> None:
+    index = _read_session_index()
+    kept = {
+        session_id: row
+        for session_id, row in index.items()
+        if not (isinstance(row, dict) and row.get("project_id") == project_id)
+    }
+    if len(kept) != len(index):
+        _write_json(_session_index_path(), kept)
 
 
-def _draft_field_suggestions(project: dict, stage: str, scope: str, field: str, user_text: str, lines: list[str], model: str = "", provider: str = "") -> list[dict]:
-    targets = _suggestion_targets(project, stage, scope, field)
-    if not targets:
-        return []
-    blocks = []
-    for item in targets:
-        state = item["text"] or "(empty)"
-        blocks.append(f"{item['field']}: {state}")
-    guide = _field_guide(stage, field if scope == "field" else "")
-    history = _recent_turns(project, "")
-    isolated = scope == "field" and bool(field)
-    if isolated:
-        context = "\n".join(_project_context_lines(project, omit=(stage, field))) or "(nothing else saved)"
-        subject = _isolated_field_block(project, stage, field)
-    else:
-        context = "\n".join(lines[:24]) or "(no other saved field text)"
-        subject = ""
-    system = _studio_system(project, (
-        "You draft Creative Studio field text using the Luke Iha method. "
-        "Reply with JSON only, no markdown: "
-        '{"suggestions":[{"field":"name","text":"replacement"}]}. '
-        + (
-            "The user wants feedback on one field. "
-            "Read the rest of the project as context and return one suggestion for that field only. "
-            if isolated else
-            "Return one suggestion for every requested field. "
-        )
-        + "Write each field for its stated purpose. Concept is one idea, not features. "
-        "UMP is why the problem happens. UMS is how this product fixes it. "
-        "If the field is empty, write a first answer. "
-        "If the field already has text, rewrite the whole value using the user's note. "
-        "Write about the named product."
-    ))
-    if isolated:
-        user = (
-            f"Project: {project.get('name')}\n"
-            f"Stage: {stage}\n\n"
-            "Field under review:\n"
-            f"{subject}\n\n"
-            f"User note:\n{user_text}\n\n"
-            f"Earlier in this chat:\n{history or '(none)'}\n\n"
-            "Rest of the project, for context only:\n"
-            f"{context}\n\n"
-            "Revise only the field under review:\n" + "\n".join(blocks)
-        )
-    else:
-        user = (
-            f"Project: {project.get('name')}\n"
-            f"Stage: {stage}\n\n"
-            f"What each field is for:\n{guide}\n\n"
-            f"User note:\n{user_text}\n\n"
-            f"Earlier in this chat:\n{history or '(none)'}\n\n"
-            f"Saved context:\n{context}\n\n"
-            "Fields to revise:\n" + "\n".join(blocks)
-        )
-    if model or provider:
-        raw = complete_studio_prompt(system, user, model, provider)
-    else:
-        raw = complete_studio_prompt(system, user)
-    allowed = {item["field"] for item in targets}
-    current = {item["field"]: item["text"] for item in targets}
-    drafts = []
-    for item in _parse_suggestion_payload(raw, allowed):
-        if item["text"] == current.get(item["field"], ""):
-            continue
-        drafts.append({
-            "field": item["field"],
-            "text": item["text"],
-            "previous": current.get(item["field"], ""),
-        })
-    return drafts
-
-
-def _studio_model_choice(model: str, provider: str) -> tuple[str, str]:
-    model = (model or "").strip()
-    provider = (provider or "").strip()
-    if len(model) > 300 or len(provider) > 80:
-        raise StudioError("unknown model")
-    if any(char in model or char in provider for char in "\n\r\x00"):
-        raise StudioError("unknown model")
-    return model, provider
-
-
-def post_studio_chat(project_id: str, stage: str, text: str, scope: str = "stage", field: str = "", model: str = "", model_provider: str = "", thread_id: str = "") -> dict:
-    """Append a studio thread turn. A suggestion replaces a field only when applied."""
-    cleaned = (text or "").strip()
-    if not cleaned:
-        raise StudioError("message is required")
-    if len(cleaned) > 8000:
-        raise StudioError("message is too long")
-    if stage not in FIELDS or stage in {"brief", "review"}:
-        raise StudioError("unknown stage")
+def bind_scope_session(project_id: str, session_id: str, scope: str = "project", stage: str = "", field: str = "") -> dict:
+    """Attach one Hermes session to the project chat or to one field."""
+    session_id = _valid_session_id(session_id)
+    if not session_id:
+        raise StudioError("invalid session id")
+    scope = "field" if scope == "field" else "project"
+    stage = (stage or "").strip()
     field = (field or "").strip()
     if scope == "field":
-        if field not in FIELDS[stage]:
-            raise StudioError("unknown field")
-    elif scope == "project":
-        scope = "project"
-        field = ""
-    else:
-        scope = "stage"
-        field = ""
-    model, model_provider = _studio_model_choice(model, model_provider)
-    with _lock_for(_profile_dir()):
-        bound = _load(project_id)
-        thread_id = (thread_id or bound.get("active_thread") or "").strip()
-        if thread_id not in {row["id"] for row in bound.get("threads") or []}:
-            raise StudioError("unknown chat")
-    saved = []
-    for match in _PROPOSAL_LINE.finditer(cleaned):
-        raw_field = match.group(1).strip().lower().replace(" ", "_")
-        body = match.group(2).strip()
-        if not body:
-            continue
-        owner = stage
-        if raw_field not in FIELDS.get(stage, ()):
-            try:
-                owner = _stage_for_field(raw_field)
-            except StudioError:
-                continue
-            if raw_field not in FIELDS[owner]:
-                continue
-        result = save_proposal(
-            project_id, owner, raw_field, body, discussion=cleaned[:500], thread_id=thread_id,
-        )
-        slot_text = ""
-        try:
-            slot_text = ((get_project(project_id, field=raw_field).get("data") or {}).get("text") or "")
-        except StudioError:
-            slot_text = ""
-        saved.append({
-            "id": result["proposal"]["id"],
-            "stage": owner,
-            "field": raw_field,
-            "text": body,
-            "previous": slot_text,
-        })
-    answer = ""
-    asking = bool(_QUESTION.search(cleaned)) and not saved
-    if asking:
-        with _lock_for(_profile_dir()):
-            preview = _load(project_id)
-            preview_lines, _preview_missing = _chat_context_lines(preview, stage, scope, field)
-            guide = _field_guide(stage, field if scope == "field" else "")
-            history = _recent_turns(preview, thread_id)
-            isolated = scope == "field" and bool(field)
-        if isolated:
-            question_user = (
-                f"Project: {preview.get('name')}\n\n"
-                "Answer about the field under review. The other fields are context.\n\n"
-                "Field under review:\n"
-                f"{_isolated_field_block(preview, stage, field)}\n\n"
-                "Rest of the project:\n"
-                + ("\n".join(_project_context_lines(preview, omit=(stage, field))) or "(nothing else saved)")
-                + f"\n\nEarlier in this chat:\n{history or '(none)'}\n\n"
-                f"Question:\n{cleaned}"
-            )
-            question_system = (
-                "You are Hermes inside Creative Studio, using the Luke Iha method. "
-                "The user isolated one field for feedback. "
-                "Read every other saved field as context and answer about that field. "
-                "Plain sentences."
-            )
-        else:
-            question_user = (
-                f"Project: {preview.get('name')}\n\n"
-                f"Field purposes:\n{guide}\n\n"
-                f"Saved fields:\n" + ("\n".join(preview_lines[:24]) or "(none)") + "\n\n"
-                f"Earlier in this chat:\n{history or '(none)'}\n\n"
-                f"Question:\n{cleaned}"
-            )
-            question_system = (
-                "You are Hermes inside Creative Studio, using the Luke Iha method. "
-                "Answer the user's question about this product or these fields. "
-                "Use the field purposes and what you already know about the product. "
-                "Plain sentences."
-            )
-        answer = complete_studio_prompt(
-            _studio_system(preview, question_system),
-            question_user,
-            model,
-            model_provider,
-        )
-    if not saved and not asking:
-        with _lock_for(_profile_dir()):
-            preview = _load(project_id)
-            preview_lines, _preview_missing = _chat_context_lines(preview, stage, scope, field)
-        for draft in _draft_field_suggestions(
-            preview, stage, scope, field, cleaned, preview_lines, model=model, provider=model_provider,
-        ):
-            try:
-                result = save_proposal(
-                    project_id, stage, draft["field"], draft["text"], discussion=cleaned[:500],
-                    thread_id=thread_id,
-                )
-            except StudioError:
-                continue
-            saved.append({
-                "id": result["proposal"]["id"],
-                "stage": stage,
-                "field": draft["field"],
-                "text": draft["text"],
-                "previous": draft["previous"],
-            })
+        _require_field(stage, field)
     with _lock_for(_profile_dir()):
         project = _load(project_id)
-        lines, missing = _chat_context_lines(project, stage, scope, field)
-        now = _now()
-        user_msg = {
-            "id": _new_id(),
-            "role": "user",
-            "text": cleaned,
-            "stage": stage,
-            "field": field,
-            "scope": scope,
-            "created_at": now,
-        }
         if scope == "field":
-            where = f"feedback on {stage}.{field}, using the rest of the project"
-        elif scope == "stage":
-            where = f"the {stage} stage"
+            slot = _field(project, stage, field)
+            existing = _valid_session_id(slot.get("chat_session_id") or "")
+            if existing and existing != session_id:
+                raise StudioError("field already has a session")
+            slot["chat_session_id"] = session_id
         else:
-            where = "the whole project"
-        parts = [f"{project['name']}, {where}."]
-        if answer:
-            parts.append(answer)
-        if lines:
-            parts.append("Already on the project:\n" + "\n".join(lines[:24]))
-        elif not answer:
-            parts.append("Nothing is saved here yet, so this chat can't fill the fields in.")
-        stage_missing = [
-            item.split(".", 1)[-1].replace("_", " ")
-            for item in missing
-            if item.startswith(stage + ".")
-        ]
-        if stage_missing and not lines:
-            parts.append("Still open: " + ", ".join(dict.fromkeys(stage_missing)) + ".")
-        elif missing and not lines:
-            parts.append("This stage is waiting on product notes that aren't in the project yet.")
-        if saved:
-            parts = [
-                f"Suggested replacements for {project['name']}, {where}. "
-                "The fields stay as they are until you replace them."
-            ]
-        elif not answer:
-            example = field if scope == "field" and field else (FIELDS.get(stage) or ("outcome",))[0]
-            parts.append(
-                "Hermes didn't return a suggestion. To hold a line yourself, send "
-                f"proposal {example}: your line, then replace the field."
-            )
-        assistant = {
-            "id": _new_id(),
-            "role": "assistant",
-            "text": "\n\n".join(parts),
-            "stage": stage,
-            "field": field,
-            "scope": scope,
-            "created_at": now,
-            "proposals": saved,
-        }
-        thread = next((row for row in project["threads"] if row["id"] == thread_id), None)
-        if thread is None:
-            raise StudioError("unknown chat")
-        thread.setdefault("messages", []).extend([user_msg, assistant])
-        thread["messages"] = thread["messages"][-200:]
-        if thread.get("title") in {"", "New chat"}:
-            thread["title"] = _thread_title(thread["messages"])
-        project["active_thread"] = thread["id"]
-        _sync_active_chat(project)
+            existing = _valid_session_id(project.get("chat_session_id") or "")
+            if existing and existing != session_id:
+                raise StudioError("project already has a session")
+            project["chat_session_id"] = session_id
         _save(project)
-    view = _thread_view(project)
-    return {"messages": [user_msg, assistant], "chat": view["chat"], "proposals": saved, "threads": view["threads"], "active_thread": view["active_thread"]}
+        binding = _scope_bindings(project).get(session_id) or {}
+        return {
+            "session_id": session_id,
+            "chat_session_id": project.get("chat_session_id") or "",
+            "scope": binding.get("scope") or scope,
+            "stage": binding.get("stage") or "",
+            "field": binding.get("field") or "",
+        }
 
 
-def assist_message(project_id: str, stage: str, action: str) -> dict:
-    """Build the chat turn for Studio assistance. Does not write proposals."""
-    if stage not in FIELDS or stage == "review":
-        raise StudioError("unknown stage")
-    if action not in {"suggest", "clarify", "critique"}:
-        raise StudioError("unknown assistance action")
+def lookup_studio_session(session_id: str) -> dict | None:
+    session_id = _valid_session_id(session_id)
+    if not session_id:
+        return None
     with _lock_for(_profile_dir()):
-        project = _load(project_id)
-    verbs = {
-        "suggest": (
-            "Suggest at most three directions for the fields in this stage. "
-            "Call get_creative_project with for_suggestion=true for each target field before writing. "
-            "Save each direction with save_creative_proposal. Do not update the selected field."
-        ),
-        "clarify": (
-            "Identify ambiguity and ask focused questions. Do not rewrite the selected fields "
-            "and do not save a proposal unless I explicitly ask for one."
-        ),
-        "critique": (
-            "Critique this stage: gaps, contradictions, generic phrasing, and unsupported claims. "
-            "Do not invent proof, numbers, testimonials, product capabilities, or usage conditions. "
-            "Suggest revisions only if I ask. Do not change the selected field."
-        ),
-    }
-    message = (
-        f"Creative Studio project {project['id']} ({project['name']}), stage {stage}. "
-        f"{verbs[action]} "
-        "Framework examples are copywriting examples, not evidence. "
-        "If a required dependency is missing, ask or mark the proposal exploratory and name the missing context. "
-        "Read the project with the Creative Studio MCP tools before you answer."
-    )
-    return {"project_id": project_id, "stage": stage, "action": action, "message": message}
+        row = _read_session_index().get(session_id)
+    if not isinstance(row, dict):
+        return None
+    if not row.get("project_id"):
+        return None
+    return row
+
+
+def _render_studio_context(project: dict, binding: dict, note: str) -> str:
+    scope = binding.get("scope") or "project"
+    stage = binding.get("stage") or ""
+    field = binding.get("field") or ""
+    parts = [
+        "Creative Studio document:",
+        f"Project: {project.get('name') or ''}",
+    ]
+    product = _product_name(project)
+    if product:
+        parts.append(f"Product: {product}")
+    if note:
+        parts.append("Product note:\n" + note)
+    if scope == "field" and stage and field:
+        parts.append("This conversation is only this field.")
+        parts.append(_isolated_field_block(project, stage, field))
+        rest = _project_context_lines(project, omit=(stage, field))
+        parts.append("Other fields, for reference only:\n" + ("\n".join(rest) or "(none)"))
+        parts.append(
+            "Change this field only with the creative field tool. "
+            "Do not rewrite other fields from this chat."
+        )
+    else:
+        parts.append("This conversation is the whole project.")
+        parts.append("Document:\n" + ("\n".join(_project_context_lines(project)) or "(empty)"))
+        parts.append("Change a field only with the creative field tool.")
+    text = "\n\n".join(parts)
+    if len(text) > _CONTEXT_CAP:
+        return text[: _CONTEXT_CAP - 1].rstrip() + "…"
+    return text
+
+
+def studio_ephemeral_context(session_id: str) -> str:
+    """Bounded document context for a session bound to a creative. Empty otherwise."""
+    binding = lookup_studio_session(session_id)
+    if not binding:
+        return ""
+    try:
+        with _lock_for(_profile_dir()):
+            project = _load(binding["project_id"])
+            note = _product_note(project)
+    except StudioError:
+        return ""
+    return _render_studio_context(project, binding, note)
+
+
+def append_studio_ephemeral(prompt: str, session_id: str) -> str:
+    """Append studio context after the shared ephemeral prompt. Other chats stay unchanged."""
+    try:
+        extra = studio_ephemeral_context(session_id)
+    except Exception:
+        return prompt or ""
+    base = prompt or ""
+    if not extra:
+        return base
+    if not base:
+        return extra
+    return base + "\n\n" + extra
