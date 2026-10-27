@@ -2165,12 +2165,9 @@
     .rail .rail-overflow{display:none !important;}
   }
   .rail-brand{margin-bottom:4px;}
-  .sidebar-mark{width:16px;height:16px;border-radius:4px;display:block;background:
-    radial-gradient(circle at 50% 40%, #1a4d86 0%, #041428 72%);
-    box-shadow:inset 0 0 0 1px rgba(255,255,255,.12);
-    position:relative;}
-  .sidebar-mark::after{content:"";position:absolute;left:4px;right:4px;top:2px;bottom:2px;background:linear-gradient(90deg,#08EBF1,#3889FD);
-    clip-path:polygon(46% 0,62% 0,54% 38%,78% 38%,38% 100%,46% 58%,24% 58%);}
+  .sidebar-mark{width:16px;height:16px;display:block;background:currentColor;
+    -webkit-mask:url("raava-symbol.svg") center/contain no-repeat;
+    mask:url("raava-symbol.svg") center/contain no-repeat;}
   .sidebar-chrome{flex-shrink:0;border-bottom:0.7px solid var(--border);background:var(--sidebar);}
   .sidebar-brand{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px;border-bottom:0.7px solid var(--border);}
   .sidebar-mark-btn{display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:8px;background:transparent;padding:0;color:inherit;cursor:pointer;}
@@ -2619,10 +2616,8 @@
   .empty-state{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:40px;color:var(--muted);}
   .empty-state.no-suggestions .suggestion-grid{display:none}
   .empty-state.no-welcome{display:none}
-  /* Empty-state brand mark: a free-breathing winged caduceus with a soft
-     "spirit" bloom behind it — no app-icon tile. Glow + mark gradient are
-     tuned separately for dark vs light themes (see --logo-glow / .hm-g* below). */
-  .empty-logo{position:relative;display:flex;align-items:center;justify-content:center;margin-bottom:10px;background:none;border:none;border-radius:0;box-shadow:none;}
+  /* Empty-state brand mark: the Raava symbol, tinted with the theme text color. */
+  .empty-logo{position:relative;display:flex;align-items:center;justify-content:center;margin-bottom:10px;background:none;border:none;border-radius:0;box-shadow:none;color:var(--text);}
   .empty-logo::before{content:"";position:absolute;left:50%;top:50%;width:190px;height:190px;transform:translate(-50%,-50%);border-radius:50%;background:var(--logo-glow);z-index:0;pointer-events:none;}
   .empty-logo svg{position:relative;z-index:1;width:88px;height:88px;display:block;}
   /* Light themes (default :root): deeper, richer gradient holds contrast on

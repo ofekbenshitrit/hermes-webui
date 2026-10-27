@@ -11972,9 +11972,10 @@ body{background:#1a1a2e;color:#e8e8f0;font-family:"Google Sans",system-ui,sans-s
   height:100vh;display:flex;align-items:center;justify-content:center}
 .card{background:#16213e;border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:36px 32px;
   width:320px;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,.3)}
-.logo{width:48px;height:48px;border-radius:12px;background:linear-gradient(145deg,#e8a030,#e94560);
-  display:flex;align-items:center;justify-content:center;font-weight:800;font-size:20px;color:#fff;
-  margin:0 auto 12px;box-shadow:0 2px 12px rgba(233,69,96,.3)}
+.logo{width:48px;height:48px;border-radius:12px;background:radial-gradient(circle at 50% 42%,#0D3460,#021128);
+  display:flex;align-items:center;justify-content:center;color:#fff;
+  margin:0 auto 12px;box-shadow:0 2px 12px rgba(2,17,40,.45)}
+.logo svg{width:28px;height:28px;display:block}
 h1{font-size:18px;font-weight:600;margin-bottom:4px}
 .sub{font-size:12px;color:#8888aa;margin-bottom:24px}
 input,button{font-family:inherit}
@@ -11994,7 +11995,7 @@ button:hover{background:rgba(124,185,255,.25)}
 .err{color:#e94560;font-size:12px;margin-top:10px;display:none}
 </style></head><body>
 <div class="card">
-  <div class="logo">{{BOT_NAME_INITIAL}}</div>
+  <div class="logo" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 15 15"><path fill="currentColor" fill-rule="evenodd" d="M7.0903 0.00474049C8.73196 -0.113579 9.81187 2.01312 10.8135 3.01142C11.0754 3.27235 11.3883 3.56739 11.6695 3.79899C12.904 4.81159 14.6467 5.73421 14.979 7.45826C15.1314 8.24874 14.4254 9.10124 13.8183 9.50529C13.1831 9.9282 12.0308 10.5049 11.2335 10.6201C12.005 10.1898 14.2862 9.03611 13.6046 7.77003C13.3028 7.2096 12.4145 6.88779 11.8475 7.21659C11.2272 7.57615 11.0124 8.72665 10.8429 9.37743C10.3499 11.2702 9.91378 13.7177 8.09235 14.7529C6.67409 15.5595 5.37458 14.2329 4.72934 13.0542C4.01487 11.7488 3.49859 9.50532 3.72291 7.67966C4.08607 9.15444 4.27164 10.6039 5.11773 11.9177C5.46178 12.4106 6.31419 13.7467 7.03794 13.5317C8.12375 13.2093 8.51288 11.055 8.53593 10.0674C8.56417 8.85441 8.1804 7.2909 7.12858 6.57878C6.02235 5.83524 4.39486 6.0378 3.16611 6.26895C2.44216 6.40818 1.45028 6.94657 1.02098 7.5797C0.143656 8.99001 2.0973 9.97991 3.008 10.5979C2.52162 10.4986 1.55284 10.0667 1.12965 9.80384C0.648513 9.48367 0.202463 9.027 0.078527 8.4381C-0.0326579 7.90979 -0.0415933 7.59273 0.155689 7.08991C0.505844 6.19749 1.30492 5.63857 2.0969 5.17817C3.10023 4.5949 4.21791 4.27072 5.30543 3.89839C6.17745 3.59984 7.94535 3.15209 7.6415 1.86581C7.52832 1.31473 7.07601 0.897172 6.49957 1.06132C5.45164 1.3598 4.73159 2.41242 4.20113 3.31253C4.20114 2.75838 4.67768 1.83935 5.04961 1.33165C5.5448 0.655728 6.24093 0.10791 7.0903 0.00474049ZM9.11055 2.93798C8.81448 3.92744 8.26571 4.57464 7.24958 4.77397C8.63603 5.25315 9.41947 6.22463 9.72083 7.24449C10.0141 6.17211 10.6391 5.69098 11.6158 5.52461C10.5464 4.76962 9.62631 3.86126 9.11055 2.93798Z"/></svg></div>
   <h1>{{BOT_NAME}}</h1>
   <p class="sub">{{LOGIN_SUBTITLE}}</p>
   <form id="login-form" data-invalid-pw="{{LOGIN_INVALID_PW}}" data-conn-failed="{{LOGIN_CONN_FAILED}}">
