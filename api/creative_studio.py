@@ -9,12 +9,16 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 import os
 import re
+import sys
 import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 STAGES = ("brief", "who", "what", "hook", "casts", "copy", "review")
 STAGE_STATUSES = frozenset({
@@ -1840,6 +1844,137 @@ def lookup_studio_session(session_id: str, profile: str | None = None) -> dict |
     return found[1]
 
 
+STUDIO_MCP_SERVER = "hermes-webui"
+
+
+def _studio_job(project: dict) -> str:
+    project_id = project.get("id") or ""
+    return (
+        f"You are the Creative Studio assistant for project {project_id}. "
+        "When the user requests a draft, concept, or update, propose or save "
+        "the structured fields (Brief, Who, What, Hook, CASTS, Copy) into the "
+        "project state with save_creative_proposal or update_creative_field. "
+        "Save a draft as proposals. Use update_creative_field when the user "
+        "tells you to change the selected text. Do not edit the project store "
+        "any other way."
+    )
+
+
+def _profile_config_path(profile: str | None) -> Path:
+    from api.profiles import get_hermes_home_for_profile
+
+    return get_hermes_home_for_profile(_profile_slug_for(profile)) / "config.yaml"
+
+
+def _read_profile_config(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    from api import yaml_compat as yaml
+
+    loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if loaded is None:
+        return {}
+    if not isinstance(loaded, dict):
+        raise ValueError("profile config must be a mapping")
+    return loaded
+
+
+def _studio_mcp_entry(profile: str) -> dict:
+    script = Path(__file__).resolve().parents[1] / "mcp_server.py"
+    entry = {
+        "command": sys.executable,
+        "args": [str(script), "--profile", profile],
+        "enabled": True,
+    }
+    env = {}
+    for key in ("HERMES_WEBUI_STATE_DIR", "HERMES_WEBUI_PORT", "HERMES_WEBUI_HOST"):
+        value = os.environ.get(key, "").strip()
+        if value:
+            env[key] = value
+    if env:
+        entry["env"] = env
+    return entry
+
+
+def _with_bound_profile(args, profile: str) -> list:
+    rows = [str(item) for item in args] if isinstance(args, list) else []
+    for index, item in enumerate(rows):
+        if item == "--profile" and index + 1 < len(rows):
+            rows[index + 1] = profile
+            return rows
+    return rows + ["--profile", profile]
+
+
+def _is_studio_mcp_entry(entry: dict) -> bool:
+    args = entry.get("args")
+    if not isinstance(args, list):
+        return False
+    return any(str(item).endswith("mcp_server.py") for item in args)
+
+
+def ensure_studio_mcp(profile: str | None) -> bool:
+    """Register hermes-webui on this profile so a studio chat can call it.
+
+    An existing entry is left alone, except our own server gets this profile
+    on --profile. A disabled entry stays disabled. Returns True when the file changes.
+    """
+    name = _profile_slug_for(profile)
+    path = _profile_config_path(name)
+    from api.config import _cfg_lock, _save_yaml_config_file
+
+    with _cfg_lock:
+        try:
+            cfg = _read_profile_config(path)
+        except Exception:
+            logger.warning("creative studio left profile config unchanged", exc_info=True)
+            return False
+        raw_servers = cfg.get("mcp_servers")
+        if raw_servers is not None and not isinstance(raw_servers, dict):
+            logger.warning("creative studio left profile config unchanged: mcp_servers is not a mapping")
+            return False
+        servers = dict(raw_servers or {})
+        current = servers.get(STUDIO_MCP_SERVER)
+        if not isinstance(current, dict):
+            servers[STUDIO_MCP_SERVER] = _studio_mcp_entry(name)
+        elif _is_studio_mcp_entry(current):
+            updated = dict(current)
+            updated["args"] = _with_bound_profile(current.get("args"), name)
+            fresh_env = _studio_mcp_entry(name).get("env") or {}
+            env = dict(updated.get("env")) if isinstance(updated.get("env"), dict) else {}
+            for key, value in fresh_env.items():
+                env.setdefault(key, value)
+            if env:
+                updated["env"] = env
+            elif "env" in updated and not updated.get("env"):
+                updated.pop("env", None)
+            if updated == current:
+                return False
+            servers[STUDIO_MCP_SERVER] = updated
+        else:
+            return False
+        cfg["mcp_servers"] = servers
+        _save_yaml_config_file(path, cfg)
+    return True
+
+
+def prepare_studio_mcp(session_id: str, profile: str | None = None) -> bool:
+    """Register studio tools when this session is bound to a creative. False otherwise."""
+    if not lookup_studio_session(session_id, profile=profile):
+        return False
+    try:
+        ensure_studio_mcp(profile)
+    except Exception:
+        logger.warning("creative studio mcp registration failed", exc_info=True)
+    return True
+
+
+def with_studio_toolset(toolsets) -> list:
+    rows = list(toolsets or [])
+    if STUDIO_MCP_SERVER not in rows:
+        rows.append(STUDIO_MCP_SERVER)
+    return rows
+
+
 def _render_studio_context(project: dict, binding: dict, note: str) -> str:
     scope = binding.get("scope") or "project"
     stage = str(binding.get("stage") or "")
@@ -1851,6 +1986,7 @@ def _render_studio_context(project: dict, binding: dict, note: str) -> str:
     ]
     if note:
         parts.append("Product note:\n" + note)
+    parts.append(_studio_job(project))
     if stage:
         status = ((project.get("stages") or {}).get(stage) or {}).get("status") or "not_started"
         parts.append(f"Selected stage: {stage} ({status})")
@@ -1865,19 +2001,14 @@ def _render_studio_context(project: dict, binding: dict, note: str) -> str:
         rest = _project_context_lines(project, omit=(stage, field))
         parts.append("Other fields, for reference only:\n" + ("\n".join(rest) or "(none)"))
         parts.append(
-            "Change this field only with the creative field tool. "
+            "Change this field only with update_creative_field or save_creative_proposal. "
             "Do not rewrite other fields from this chat."
         )
     else:
         if stage:
             parts.append(f"The user is editing the {stage} stage.")
         parts.append("This conversation is the whole project.")
-        parts.append(
-            "Your job is to write and iterate on this creative, "
-            "from this document and the product note."
-        )
         parts.append("Document:\n" + ("\n".join(_project_context_lines(project)) or "(empty)"))
-        parts.append("Change a field only with the creative field tool.")
     text = "\n\n".join(parts)
     if len(text) > _CONTEXT_CAP:
         return text[: _CONTEXT_CAP - 1].rstrip() + "…"

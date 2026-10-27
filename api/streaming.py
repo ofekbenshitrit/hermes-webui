@@ -12087,6 +12087,12 @@ def _run_agent_streaming(
                 # If either module is static/missing/raises, the legacy path
                 # above has already snapshotted and patched under this lock.
         # Lock released — agent runs without holding it
+        _studio_bound = False
+        try:
+            from api.creative_studio import prepare_studio_mcp
+            _studio_bound = prepare_studio_mcp(session_id, _resolved_profile_name)
+        except Exception:
+            logger.debug("creative studio mcp registration skipped", exc_info=True)
         # ── MCP Server Discovery (lazy import, idempotent) ──
         # MUST run AFTER the HERMES_HOME mutation above — `discover_mcp_tools()`
         # reads `~/.hermes/config.yaml` via `get_hermes_home()`, which uses
@@ -12990,6 +12996,9 @@ def _run_agent_streaming(
                         _toolsets = _override
             except Exception as _ts_err:
                 print(f"[webui] WARNING: failed to read per-session toolsets for {session_id}: {_ts_err}", flush=True)
+            if _studio_bound:
+                from api.creative_studio import with_studio_toolset
+                _toolsets = with_studio_toolset(_toolsets)
 
             # Fallback model chain from profile config (e.g. for rate-limit or
             # provider recovery). Match Hermes CLI/gateway semantics:

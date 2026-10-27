@@ -166,12 +166,48 @@ def _api_auth() -> str | None:
     return None
 
 
+def _request_cookie_header() -> tuple[str | None, str | None]:
+    """Return (Cookie header, error). Creative writes refuse a missing profile.
+
+    The header carries the MCP process profile. With auth enabled the profile
+    cookie is signed for the login session. A failure here must not fall through
+    to an unsigned request, which would write the WebUI's default profile.
+    """
+    auth = _api_auth()
+    profile = _active_profile()
+    if not profile:
+        return (auth, "profile unbound")
+    try:
+        from api.auth import is_auth_enabled
+        if is_auth_enabled() and not auth:
+            return (None, "profile unbound")
+    except Exception as exc:
+        return (None, f"profile unbound: {exc}")
+    try:
+        from api.helpers import get_profile_cookie_name
+        cookie_name = get_profile_cookie_name()
+        value = profile
+        if auth:
+            from api.auth import is_auth_enabled, sign_profile_cookie_value
+            if is_auth_enabled():
+                session_value = auth.split("=", 1)[1]
+                value = sign_profile_cookie_value(profile, session_value)
+        profile_cookie = f"{cookie_name}={value}"
+    except Exception as exc:
+        return (None, f"profile unbound: {exc}")
+    if auth:
+        return (f"{auth}; {profile_cookie}", None)
+    return (profile_cookie, None)
+
+
 def _api_post(endpoint: str, body: dict) -> dict:
     """POST to webui API with auth cookie. Returns parsed JSON response."""
     import urllib.request
     import urllib.error
 
-    cookie = _api_auth()
+    cookie, unbound = _request_cookie_header()
+    if unbound and str(endpoint).startswith("/api/creative-studio/"):
+        return {"error": unbound}
     headers = {"Content-Type": "application/json"}
     if cookie:
         headers["Cookie"] = cookie
@@ -497,7 +533,11 @@ def _creative_store_call(fn):
 def _creative_write(endpoint: str, body: dict, fallback):
     remote = _api_post(endpoint, body)
     err = str(remote.get("error") or "")
-    if err.startswith("API unreachable") or err.startswith("API 404"):
+    if (
+        err.startswith("API unreachable")
+        or err.startswith("API 404")
+        or err.startswith("profile unbound")
+    ):
         return _creative_store_call(fallback)
     return remote
 

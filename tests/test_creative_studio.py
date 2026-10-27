@@ -2,6 +2,7 @@
 
 import io
 import json
+import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -267,8 +268,12 @@ def test_static_panel_wires_stage_switch_proposals_and_export():
     call = streaming.index("agent.ephemeral_system_prompt = _webui_ephemeral_system_prompt(")
     assert streaming.index("append_studio_ephemeral(", call) > call
     assert "profile=_resolved_profile_name" in streaming[call:]
+    discover = streaming.index("discover_mcp_tools()")
+    assert streaming.rindex("prepare_studio_mcp(", 0, discover) < discover
+    assert "with_studio_toolset" in streaming
     gateway = (root / "api" / "gateway_chat.py").read_text(encoding="utf-8")
     assert 'profile=getattr(s, "profile", None)' in gateway
+    assert "prepare_studio_mcp(" in gateway
 
 
 def test_studio_prompt_pack_includes_the_product_note_and_framework(studio, tmp_path, monkeypatch):
@@ -403,8 +408,11 @@ def test_field_context_puts_the_field_first_and_leaves_other_chats_alone(studio,
     assert "Do not rewrite other fields" in field_prompt
     project_prompt = studio.studio_ephemeral_context("sess_project_ctx")
     assert "This conversation is the whole project." in project_prompt
-    assert "Your job is to write and iterate on this creative" in project_prompt
-    assert "from this document and the product note" in project_prompt
+    assert f"You are the Creative Studio assistant for project {project['id']}" in project_prompt
+    assert "save_creative_proposal or update_creative_field" in project_prompt
+    assert "Save a draft as proposals" in project_prompt
+    assert "Do not edit the project store any other way" in project_prompt
+    assert "save_creative_proposal" in field_prompt
     assert "who.segment: Night bakers" in project_prompt
     assert studio.studio_ephemeral_context("not_a_studio_session") == ""
     shared = "WebUI session context:\n- shared"
@@ -457,3 +465,94 @@ def test_deleting_a_project_drops_its_session_index(studio):
     assert studio.lookup_studio_session("sess_gone_1")["project_id"] == project["id"]
     studio.delete_project(project["id"])
     assert studio.lookup_studio_session("sess_gone_1") is None
+
+
+def test_studio_mcp_registers_on_the_session_profile(tmp_path, monkeypatch):
+    import yaml
+
+    import api.creative_studio as studio
+    import api.profiles as profiles
+
+    home = tmp_path / "copywriting"
+    monkeypatch.setattr(profiles, "get_hermes_home_for_profile", lambda name: home)
+    monkeypatch.setenv("HERMES_WEBUI_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.delenv("HERMES_WEBUI_PASSWORD", raising=False)
+    assert studio.ensure_studio_mcp("copywriting") is True
+    saved = yaml.safe_load((home / "config.yaml").read_text(encoding="utf-8"))
+    entry = saved["mcp_servers"]["hermes-webui"]
+    assert entry["args"][-2:] == ["--profile", "copywriting"]
+    assert entry["args"][0].endswith("mcp_server.py")
+    assert entry["enabled"] is True
+    assert entry["env"]["HERMES_WEBUI_STATE_DIR"] == str(tmp_path / "state")
+    assert "HERMES_WEBUI_PASSWORD" not in entry.get("env", {})
+    assert studio.ensure_studio_mcp("copywriting") is False
+
+    (home / "config.yaml").write_text(
+        yaml.safe_dump({
+            "mcp_servers": {
+                "notes": {"command": "notes"},
+                "hermes-webui": {
+                    "command": sys.executable,
+                    "args": [entry["args"][0], "--profile", "default"],
+                    "enabled": False,
+                    "env": {"HERMES_WEBUI_STATE_DIR": str(tmp_path / "state")},
+                },
+            }
+        }),
+        encoding="utf-8",
+    )
+    assert studio.ensure_studio_mcp("copywriting") is True
+    repaired = yaml.safe_load((home / "config.yaml").read_text(encoding="utf-8"))
+    assert repaired["mcp_servers"]["notes"]["command"] == "notes"
+    own = repaired["mcp_servers"]["hermes-webui"]
+    assert own["args"][-2:] == ["--profile", "copywriting"]
+    assert own["enabled"] is False
+
+    (home / "config.yaml").write_text(
+        yaml.safe_dump({"mcp_servers": {"hermes-webui": {"url": "http://studio.example/mcp"}}}),
+        encoding="utf-8",
+    )
+    assert studio.ensure_studio_mcp("copywriting") is False
+    kept = yaml.safe_load((home / "config.yaml").read_text(encoding="utf-8"))
+    assert kept["mcp_servers"]["hermes-webui"]["url"] == "http://studio.example/mcp"
+
+    (home / "config.yaml").write_text("mcp_servers:\n- not-a-mapping\n", encoding="utf-8")
+    assert studio.ensure_studio_mcp("copywriting") is False
+    assert "not-a-mapping" in (home / "config.yaml").read_text(encoding="utf-8")
+
+
+def test_prepare_studio_mcp_ignores_other_chats(studio, tmp_path, monkeypatch):
+    import api.profiles as profiles
+
+    home = tmp_path / "profile-home"
+    monkeypatch.setattr(profiles, "get_hermes_home_for_profile", lambda name: home)
+    assert studio.prepare_studio_mcp("not_a_studio_session", "creative-test") is False
+    assert not (home / "config.yaml").exists()
+
+
+def test_creative_write_falls_back_on_the_bound_profile_when_unauthenticated(monkeypatch):
+    pytest.importorskip("mcp", reason="mcp package not installed")
+    from mcp.server import Server as mcp_server_type
+    if not hasattr(mcp_server_type, "list_tools"):
+        pytest.skip("mcp SDK does not provide the decorator API")
+    import mcp_server
+    import api.auth as auth
+
+    monkeypatch.setattr(mcp_server, "_active_profile", lambda: "copywriting")
+    monkeypatch.setattr(mcp_server, "_api_auth", lambda: None)
+    monkeypatch.setattr(auth, "is_auth_enabled", lambda: False)
+    header, err = mcp_server._request_cookie_header()
+    assert err is None
+    assert header == "hermes_profile=copywriting"
+
+    monkeypatch.setattr(auth, "is_auth_enabled", lambda: True)
+    called = {}
+
+    def fallback():
+        called["fell_back"] = True
+        return {"saved": "copywriting"}
+
+    monkeypatch.setattr(mcp_server, "_creative_store_call", lambda fn: fn())
+    result = mcp_server._creative_write("/api/creative-studio/projects/p/fields", {}, fallback)
+    assert called["fell_back"] is True
+    assert result == {"saved": "copywriting"}

@@ -2114,7 +2114,11 @@ def _run_gateway_chat_streaming(
                 config_data=cfg,
             )
             try:
-                from api.creative_studio import append_studio_ephemeral
+                from api.creative_studio import append_studio_ephemeral, prepare_studio_mcp
+                try:
+                    prepare_studio_mcp(session_id, getattr(s, "profile", None))
+                except Exception:
+                    logger.debug("creative studio mcp registration skipped", exc_info=True)
                 _gateway_system_prompt = append_studio_ephemeral(
                     _gateway_system_prompt,
                     session_id,
