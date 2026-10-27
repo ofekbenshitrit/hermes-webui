@@ -811,11 +811,18 @@ function _creativeFieldInputs(stage){
     const control = `<textarea data-creative-field="${name}" dir="auto" rows="4" oninput="creativeScheduleSave('${name}')">${_creativeEsc(slot.text || '')}</textarea>`;
     const proposals = (slot.proposals || []).filter(item => item.status === 'proposed' || item.status === 'in_discussion').map(proposal => {
       const next = ((proposal.revised_text || proposal.text) || '').trim();
+      const note = (proposal.discussion || '').trim();
+      const kicker = proposal.exploratory ? 'Exploratory suggestion' : 'Suggestion';
+      const reason = note ? `<p class="creative-suggest-note" dir="auto">${_creativeEsc(note)}</p>` : '';
       return `<article class="creative-suggest" data-proposal="${_creativeEsc(proposal.id)}">
+        <div class="creative-suggest-head">
+          <span class="creative-suggest-kicker">${kicker}</span>
+        </div>
+        ${reason}
         <p class="creative-suggest-next" dir="auto">${_creativeEsc(next)}</p>
         <div class="creative-actions">
-          <button type="button" class="creative-suggest-apply" onclick="creativeProposalAction('${proposal.id}','accept')">Replace</button>
           <button type="button" class="creative-suggest-dismiss" onclick="creativeProposalAction('${proposal.id}','dismiss')">Dismiss</button>
+          <button type="button" class="creative-suggest-apply" onclick="creativeProposalAction('${proposal.id}','accept')">Replace</button>
         </div>
       </article>`;
     }).join('');
