@@ -1872,6 +1872,10 @@ def _render_studio_context(project: dict, binding: dict, note: str) -> str:
         if stage:
             parts.append(f"The user is editing the {stage} stage.")
         parts.append("This conversation is the whole project.")
+        parts.append(
+            "Your job is to write and iterate on this creative, "
+            "from this document and the product note."
+        )
         parts.append("Document:\n" + ("\n".join(_project_context_lines(project)) or "(empty)"))
         parts.append("Change a field only with the creative field tool.")
     text = "\n\n".join(parts)

@@ -403,6 +403,8 @@ def test_field_context_puts_the_field_first_and_leaves_other_chats_alone(studio,
     assert "Do not rewrite other fields" in field_prompt
     project_prompt = studio.studio_ephemeral_context("sess_project_ctx")
     assert "This conversation is the whole project." in project_prompt
+    assert "Your job is to write and iterate on this creative" in project_prompt
+    assert "from this document and the product note" in project_prompt
     assert "who.segment: Night bakers" in project_prompt
     assert studio.studio_ephemeral_context("not_a_studio_session") == ""
     shared = "WebUI session context:\n- shared"
