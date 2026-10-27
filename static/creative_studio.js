@@ -258,8 +258,13 @@ function creativeRenderWorkspace(){
   }
   const project = _creativeProject;
   const stage = project.stages[_creativeStage] || {fields:{}, status:'not_started'};
-  const chatClass = _creativeChatOpen ? 'creative-chat' : 'creative-chat collapsed';
+  const chatPane = _creativeChatOpen ? `${_creativeChatTabsMarkup()}
+      <div class="creative-chat-resizer" role="separator" aria-orientation="vertical" aria-label="Resize chat" onpointerdown="creativeChatResizeStart(event)"></div>
+      <aside class="creative-chat" id="creativeAssistant" aria-label="Project chat">
+        <div id="creativeChatMount"></div>
+      </aside>` : '';
   root.innerHTML = `
+    <div class="creative-frame${_creativeChatOpen ? '' : ' chat-closed'}" style="--creative-chat-width:${_creativeChatWidth}px">
     <div class="creative-header">
       <div class="creative-project-chip">
         <svg class="creative-chip-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-8 8H7l-4 3V12a8 8 0 1 1 18 0z"/><path d="M12 8v8M8 12h8"/></svg>
@@ -287,13 +292,8 @@ function creativeRenderWorkspace(){
         </button>
       </div>
     </div>
-    <div class="creative-body${_creativeChatOpen ? '' : ' chat-closed'}" style="--creative-chat-width:${_creativeChatWidth}px">
       <div class="creative-fields" id="creativeFields" role="tabpanel" aria-labelledby="creativeTab-${_creativeStage}">${_creativeStageMarkup(stage)}</div>
-      <div class="creative-chat-resizer" role="separator" aria-orientation="vertical" aria-label="Resize chat" onpointerdown="creativeChatResizeStart(event)"></div>
-      <aside class="${chatClass}" id="creativeAssistant" aria-label="Project chat">
-        ${_creativeChatTabsMarkup()}
-        <div id="creativeChatMount"></div>
-      </aside>
+      ${chatPane}
     </div>`;
   const paintedFields = document.getElementById('creativeFields');
   if(paintedFields && _creativeProject && _creativeProject.stages){
@@ -341,7 +341,7 @@ function creativeChatResizeStart(event){
   const startW = _creativeChatWidth;
   function move(ev){
     _creativeChatWidth = Math.max(260, Math.min(560, startW + (startX - ev.clientX)));
-    const body = document.querySelector('#creativeWorkspace .creative-body');
+    const body = document.querySelector('#creativeWorkspace .creative-frame');
     if(body) body.style.setProperty('--creative-chat-width', _creativeChatWidth + 'px');
   }
   function up(){
@@ -478,14 +478,14 @@ function _creativeChatTabsMarkup(){
 }
 
 function _creativePaintChatTabs(){
-  const aside = document.getElementById('creativeAssistant');
-  if(!aside) return;
-  const existing = aside.querySelector('.creative-chat-tabs');
+  const frame = document.querySelector('#creativeWorkspace .creative-frame');
+  if(!frame) return;
+  const existing = frame.querySelector('.creative-chat-tabs');
   const html = _creativeChatTabsMarkup();
   if(existing) existing.outerHTML = html;
   else {
-    const mount = document.getElementById('creativeChatMount');
-    if(mount) mount.insertAdjacentHTML('beforebegin', html);
+    const header = frame.querySelector('.creative-header');
+    if(header) header.insertAdjacentHTML('afterend', html);
   }
 }
 
