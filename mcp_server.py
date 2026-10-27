@@ -483,22 +483,84 @@ async def handle_move_session(arguments: dict) -> list[TextContent]:
     }, ensure_ascii=False, indent=2))]
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-#  MCP SDK version guard
-# ═════════════════════════════════════════════════════════════════════════==
-#
-# mcp>=2.0.0 removed the Server.list_tools / Server.call_tool decorator API
-# used by this server. Fail fast instead of producing secondary errors.
+# mcp>=2 removed Server.list_tools / Server.call_tool. The same TOOLS list is
+# served through MCPServer below when that decorator API is absent.
 
-if not hasattr(Server, "list_tools"):  # pragma: no cover
-    import sys
-    print(
-        "ERROR: mcp SDK incompatible. This server requires mcp>=1.28,<2 "
-        "(the 1.x Python SDK with the decorator API). "
-        "Run: pip install 'mcp>=1.28,<2'",
-        file=sys.stderr,
+_MCP_DECORATORS = hasattr(Server, "list_tools")
+
+
+def _tool_text(payload) -> str:
+    if isinstance(payload, str):
+        return payload
+    parts = []
+    for item in payload or []:
+        text = getattr(item, "text", None)
+        if text is None and isinstance(item, dict):
+            text = item.get("text")
+        parts.append("" if text is None else str(text))
+    return "\n".join(parts)
+
+
+def _tool_callable(name: str, schema: dict, handler):
+    """Build a typed coroutine so MCP 2 can publish the tool's fields."""
+    props = (schema or {}).get("properties") or {}
+    required = set((schema or {}).get("required") or [])
+    types = {
+        "string": "str",
+        "boolean": "bool",
+        "integer": "int",
+        "number": "float",
+        "array": "list",
+        "object": "dict",
+    }
+    names = [key for key in props if str(key).isidentifier()]
+    names.sort(key=lambda key: key not in required)
+    fields = []
+    for key in names:
+        declared = (props.get(key) or {}).get("type") or "string"
+        if isinstance(declared, list):
+            declared = next((item for item in declared if item != "null"), "string")
+        kind = types.get(declared, "str")
+        if key in required and "null" not in ((props.get(key) or {}).get("type") or []):
+            fields.append(f"{key}: {kind}")
+        else:
+            fields.append(f"{key}: {kind} | None = None")
+    signature = ", ".join(fields)
+    source = (
+        f"async def {name}({signature}):\n"
+        f"    supplied = {{key: value for key, value in locals().items() if value is not None}}\n"
+        f"    result = await _handler(supplied)\n"
+        f"    return _tool_text(result)\n"
     )
-    sys.exit(1)
+    scope = {"_handler": handler, "_tool_text": _tool_text}
+    exec(source, scope, scope)
+    return scope[name]
+
+
+def _tool_input_schema(tool) -> dict:
+    """MCP 1 calls this inputSchema; MCP 2 calls it input_schema."""
+    schema = getattr(tool, "input_schema", None)
+    if schema is None:
+        schema = getattr(tool, "inputSchema", None)
+    return schema or {}
+
+
+def _run_mcp_v2() -> None:
+    from mcp.server import MCPServer
+
+    app = MCPServer("hermes-webui")
+    for tool in TOOLS:
+        handler = HANDLERS.get(tool.name)
+        if handler is None:
+            continue
+        fn = _tool_callable(tool.name, _tool_input_schema(tool), handler)
+        app.add_tool(
+            fn,
+            name=tool.name,
+            description=tool.description or tool.name,
+            structured_output=False,
+        )
+    app.run(transport="stdio")
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  MCP Server wiring
@@ -1038,25 +1100,27 @@ HANDLERS = {
 }
 
 
-@server.list_tools()
-async def list_tools() -> list[Tool]:
-    return TOOLS
+if _MCP_DECORATORS:
+    @server.list_tools()
+    async def list_tools() -> list[Tool]:
+        return TOOLS
 
+    @server.call_tool()
+    async def call_tool(name: str, arguments: dict) -> list[TextContent]:
+        handler = HANDLERS.get(name)
+        if not handler:
+            return [TextContent(type="text", text=json.dumps(
+                {"error": f"Unknown tool: {name}"}, ensure_ascii=False))]
+        return await handler(arguments)
 
-@server.call_tool()
-async def call_tool(name: str, arguments: dict) -> list[TextContent]:
-    handler = HANDLERS.get(name)
-    if not handler:
-        return [TextContent(type="text", text=json.dumps(
-            {"error": f"Unknown tool: {name}"}, ensure_ascii=False))]
-    return await handler(arguments)
-
-
-async def main():
-    async with stdio_server() as (read, write):
-        await server.run(read, write, server.create_initialization_options())
+    async def main():
+        async with stdio_server() as (read, write):
+            await server.run(read, write, server.create_initialization_options())
 
 
 if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
+    if _MCP_DECORATORS:
+        import asyncio
+        asyncio.run(main())
+    else:
+        _run_mcp_v2()

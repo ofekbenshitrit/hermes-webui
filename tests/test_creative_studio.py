@@ -14,11 +14,19 @@ def studio(tmp_path, monkeypatch):
     import api.config as config
     import api.profiles as profiles
 
+    real_get_profile = profiles.get_active_profile_name
     monkeypatch.setattr(config, "STATE_DIR", tmp_path)
     monkeypatch.setattr(profiles, "get_active_profile_name", lambda: "creative-test")
     import api.creative_studio as studio
 
-    return studio
+    yield studio
+
+    # mcp_server binds get_active_profile_name at first import. A studio test
+    # that imports it while this fixture's patch is active must not leave
+    # later tests stuck on creative-test.
+    imported = sys.modules.get("mcp_server")
+    if imported is not None and imported.get_active_profile_name is not real_get_profile:
+        imported.get_active_profile_name = real_get_profile
 
 
 def test_product_catalog_reads_names_from_notes(studio, tmp_path, monkeypatch):
@@ -409,7 +417,8 @@ def test_field_context_puts_the_field_first_and_leaves_other_chats_alone(studio,
     project_prompt = studio.studio_ephemeral_context("sess_project_ctx")
     assert "This conversation is the whole project." in project_prompt
     assert f"You are the Creative Studio assistant for project {project['id']}" in project_prompt
-    assert "save_creative_proposal or update_creative_field" in project_prompt
+    assert "save_creative_proposal and" in project_prompt
+    assert "update_creative_field" in project_prompt
     assert "Save a draft as proposals" in project_prompt
     assert "Do not edit the project store any other way" in project_prompt
     assert "save_creative_proposal" in field_prompt
@@ -484,6 +493,7 @@ def test_studio_mcp_registers_on_the_session_profile(tmp_path, monkeypatch):
     assert entry["args"][0].endswith("mcp_server.py")
     assert entry["enabled"] is True
     assert entry["env"]["HERMES_WEBUI_STATE_DIR"] == str(tmp_path / "state")
+    assert entry["env"]["HERMES_HOME"] == str(home)
     assert "HERMES_WEBUI_PASSWORD" not in entry.get("env", {})
     assert studio.ensure_studio_mcp("copywriting") is False
 
@@ -528,6 +538,53 @@ def test_prepare_studio_mcp_ignores_other_chats(studio, tmp_path, monkeypatch):
     monkeypatch.setattr(profiles, "get_hermes_home_for_profile", lambda name: home)
     assert studio.prepare_studio_mcp("not_a_studio_session", "creative-test") is False
     assert not (home / "config.yaml").exists()
+
+
+def test_mcp_v2_tool_callable_passes_named_fields():
+    pytest.importorskip("mcp", reason="mcp package not installed")
+    import mcp_server
+
+    seen = {}
+
+    async def handler(arguments):
+        seen.update(arguments)
+        return [{"text": "saved"}]
+
+    fn = mcp_server._tool_callable(
+        "save_creative_proposal",
+        {
+            "type": "object",
+            "properties": {
+                "project_id": {"type": "string"},
+                "exploratory": {"type": "boolean"},
+            },
+            "required": ["project_id"],
+        },
+        handler,
+    )
+
+    async def _run():
+        return await fn(project_id="abc", exploratory=True)
+
+    import asyncio
+    assert asyncio.run(_run()) == "saved"
+    assert seen == {"project_id": "abc", "exploratory": True}
+
+    class _Schema:
+        input_schema = {"type": "object", "properties": {"project_id": {"type": "string"}}}
+
+    assert mcp_server._tool_input_schema(_Schema())["properties"]["project_id"]["type"] == "string"
+
+    nullable = mcp_server._tool_callable(
+        "move_session",
+        {
+            "type": "object",
+            "properties": {"project_id": {"type": ["string", "null"]}},
+            "required": ["project_id"],
+        },
+        handler,
+    )
+    assert "project_id" in nullable.__annotations__
 
 
 def test_creative_write_falls_back_on_the_bound_profile_when_unauthenticated(monkeypatch):

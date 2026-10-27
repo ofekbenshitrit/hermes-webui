@@ -1853,10 +1853,11 @@ def _studio_job(project: dict) -> str:
         f"You are the Creative Studio assistant for project {project_id}. "
         "When the user requests a draft, concept, or update, propose or save "
         "the structured fields (Brief, Who, What, Hook, CASTS, Copy) into the "
-        "project state with save_creative_proposal or update_creative_field. "
-        "Save a draft as proposals. Use update_creative_field when the user "
-        "tells you to change the selected text. Do not edit the project store "
-        "any other way."
+        "project state with the hermes-webui tools save_creative_proposal and "
+        "update_creative_field. Call the registered tool whose name ends with "
+        "one of those. Save a draft as proposals. Use update_creative_field "
+        "when the user tells you to change the selected text. Do not edit the "
+        "project store any other way."
     )
 
 
@@ -1886,7 +1887,7 @@ def _studio_mcp_entry(profile: str) -> dict:
         "args": [str(script), "--profile", profile],
         "enabled": True,
     }
-    env = {}
+    env = {"HERMES_HOME": str(_profile_config_path(profile).parent)}
     for key in ("HERMES_WEBUI_STATE_DIR", "HERMES_WEBUI_PORT", "HERMES_WEBUI_HOST"):
         value = os.environ.get(key, "").strip()
         if value:
