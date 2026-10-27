@@ -629,6 +629,8 @@ def _creative_write(endpoint: str, body: dict, fallback):
     if (
         err.startswith("API unreachable")
         or err.startswith("API 404")
+        or err.startswith("API 401")
+        or err.startswith("API 403")
         or err.startswith("profile unbound")
     ):
         return _creative_store_call(fallback)
@@ -716,27 +718,60 @@ async def handle_update_creative_field(arguments: dict) -> list[TextContent]:
     return _creative_text(payload)
 
 
+def _proposal_rows(arguments: dict) -> list[dict]:
+    raw = arguments.get("proposals")
+    if isinstance(raw, str) and raw.strip():
+        try:
+            raw = json.loads(raw)
+        except json.JSONDecodeError:
+            raw = None
+    rows = [item for item in raw if isinstance(item, dict)] if isinstance(raw, list) else []
+    if rows:
+        return rows
+    if str(arguments.get("text") or "").strip() or arguments.get("field"):
+        return [arguments]
+    return []
+
+
 async def handle_save_creative_proposal(arguments: dict) -> list[TextContent]:
     from api.creative_studio import save_proposal
 
     project_id = str(arguments.get("project_id") or "")
-    stage = str(arguments.get("stage") or "")
-    field = str(arguments.get("field") or "")
-    text = arguments.get("text") or ""
-    body = {
-        "stage": stage,
-        "field": field,
-        "text": text,
-        "exploratory": bool(arguments.get("exploratory")),
-        "missing": arguments.get("missing") or [],
-        "discussion": arguments.get("discussion") or "",
-    }
-    payload = _creative_write(
-        f"/api/creative-studio/projects/{project_id}/proposals",
-        body,
-        lambda: save_proposal(project_id, stage, field, text, exploratory=body["exploratory"], missing=body["missing"], discussion=body["discussion"]),
-    )
-    return _creative_text(payload)
+    rows = _proposal_rows(arguments)
+    if not rows:
+        return _creative_text({"error": "proposal text is required"})
+    saved = []
+    errors = []
+    for item in rows:
+        stage = str(item.get("stage") or "")
+        field = str(item.get("field") or "")
+        text = item.get("text") or ""
+        discussion = item.get("discussion") or ""
+        exploratory = bool(item.get("exploratory"))
+        missing = item.get("missing") or []
+        body = {
+            "stage": stage,
+            "field": field,
+            "text": text,
+            "exploratory": exploratory,
+            "missing": missing,
+            "discussion": discussion,
+        }
+        payload = _creative_write(
+            f"/api/creative-studio/projects/{project_id}/proposals",
+            body,
+            lambda stage=stage, field=field, text=text, exploratory=exploratory, missing=missing, discussion=discussion: save_proposal(
+                project_id, stage, field, text,
+                exploratory=exploratory, missing=missing, discussion=discussion,
+            ),
+        )
+        if payload.get("error"):
+            errors.append({"stage": stage, "field": field, "error": payload["error"]})
+        else:
+            saved.append(payload)
+    if len(rows) == 1 and not errors:
+        return _creative_text(saved[0])
+    return _creative_text({"project_id": project_id, "saved": saved, "errors": errors})
 
 
 async def handle_update_creative_proposal(arguments: dict) -> list[TextContent]:
@@ -997,8 +1032,9 @@ TOOLS = [
     Tool(
         name="save_creative_proposal",
         description=(
-            "Deliver a draft by saving each part on the stage and field you think it belongs in. "
-            "If no field is selected, you choose. The chat message is not the draft. "
+            "Save the whole draft in this one call, before any file search or terminal command. "
+            "Pass proposals as a list of {stage, field, text}. "
+            "If no field is selected, choose the fields yourself. The chat message is not the draft. "
             "The selected text stays unchanged until the user accepts the proposal. "
             "At most three pending proposals per field. Do not invent proof, numbers, "
             "testimonials, or product facts. "
@@ -1011,6 +1047,19 @@ TOOLS = [
                 "stage": {"type": "string", "enum": list(_CREATIVE_STAGES)},
                 "field": {"type": "string", "enum": list(_CREATIVE_FIELD_NAMES)},
                 "text": {"type": "string"},
+                "proposals": {
+                    "type": "array",
+                    "description": "The whole draft: each item is {stage, field, text}.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "stage": {"type": "string"},
+                            "field": {"type": "string"},
+                            "text": {"type": "string"},
+                        },
+                        "required": ["stage", "field", "text"],
+                    },
+                },
                 "exploratory": {"type": "boolean"},
                 "missing": {"type": "array", "items": {"type": "string"}},
                 "discussion": {"type": "string"},

@@ -233,6 +233,33 @@ def test_mcp_read_and_accept_use_the_same_store(studio, monkeypatch):
     assert studio.get_project(project["id"], field="pain")["data"]["text"] == "Cold mornings"
 
 
+def test_save_proposal_falls_back_when_the_api_rejects_auth(studio, monkeypatch):
+    import asyncio
+
+    import mcp_server
+
+    monkeypatch.setattr(
+        mcp_server, "_api_post",
+        lambda endpoint, body: {"error": "API 401: Authentication required"},
+    )
+    project = studio.create_project("MCP")
+
+    async def _run():
+        return await mcp_server.handle_save_creative_proposal({
+            "project_id": project["id"],
+            "proposals": [
+                {"stage": "what", "field": "concept", "text": "Heat slides off the shoulder"},
+                {"stage": "what", "field": "angle", "text": "The pad is the false fix"},
+            ],
+        })
+
+    payload = json.loads(asyncio.run(_run())[0].text)
+    assert [row["field"] for row in payload["saved"]] == ["concept", "angle"]
+    assert payload["errors"] == []
+    concept = studio.get_project(project["id"], field="concept")
+    assert concept["data"]["proposals"][0]["text"] == "Heat slides off the shoulder"
+
+
 def test_static_panel_wires_stage_switch_proposals_and_export():
     root = Path(__file__).resolve().parents[1]
     html = (root / "static" / "index.html").read_text(encoding="utf-8")
@@ -417,7 +444,8 @@ def test_field_context_puts_the_field_first_and_leaves_other_chats_alone(studio,
     project_prompt = studio.studio_ephemeral_context("sess_project_ctx")
     assert "This conversation is the whole project." in project_prompt
     assert f"You are the Creative Studio assistant for project {project['id']}" in project_prompt
-    assert "whose name ends with save_creative_proposal" in project_prompt
+    assert "one call to the tool whose name ends with save_creative_proposal" in project_prompt
+    assert "before any file search or terminal command" in project_prompt
     assert "No field is selected." in project_prompt
     assert "Choose the stage and field you think each part belongs in, and save it there." in project_prompt
     assert "The draft belongs in those proposals, not in the chat." in project_prompt

@@ -992,6 +992,9 @@ def save_proposal(project_id: str, stage: str, field: str, text: str, *,
         if thread_id:
             proposal["thread_id"] = thread_id
         slot.setdefault("proposals", []).append(proposal)
+        stage_row = project["stages"][stage]
+        if stage_row.get("status") in {None, "", "not_started"}:
+            stage_row["status"] = "draft"
         selected = slot.get("text") or ""
         saved = _save(project)
         return {
@@ -1853,11 +1856,11 @@ def _studio_job(project: dict) -> str:
     project_id = project.get("id") or ""
     return (
         f"You are the Creative Studio assistant for project {project_id}. "
-        "A request for a draft, concept, or update is saved with the tool "
-        "whose name ends with save_creative_proposal. "
-        f"Pass project_id {project_id}. "
+        "A request for a draft is one call to the tool whose name ends with "
+        "save_creative_proposal, before any file search or terminal command. "
+        f"Pass project_id {project_id} and every part in proposals. "
         "The draft belongs in those proposals, not in the chat. "
-        "After the proposals are saved, reply with one short sentence. "
+        "After that call, reply with one short sentence. "
         "Use the tool whose name ends with update_creative_field only when "
         "the user tells you to change the selected text. "
         "Do not edit the project store any other way."

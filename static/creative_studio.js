@@ -46,6 +46,7 @@ let _creativeExportOpen = false;
 let _creativeSaveState = 'Saved';
 let _creativeTimers = {};
 let _creativePoll = null;
+let _creativeSeenProposals = new Set();
 let _creativeDirty = false;
 let _creativeCreating = false;
 let _creativeOpenDetails = [];
@@ -138,6 +139,7 @@ async function creativeSubmitCreate(){
 async function creativeOpenProject(id, opts){
   const project = await api('/api/creative-studio/projects/' + id);
   _creativeProject = project;
+  _creativeSeenProposals = new Set(_creativeProposalIds(project));
   if(!(opts && opts.keepStage) || !CREATIVE_STAGES.some(stage => stage.id === _creativeStage)) _creativeStage = 'who';
   await api('/api/creative-studio/active', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({project_id:id})});
   await creativeRefreshList();
@@ -872,11 +874,45 @@ async function creativeRetrySave(){
   if(dirty) await creativeSaveField(dirty.getAttribute('data-creative-field'));
 }
 
+function _creativeProposalIds(project){
+  const ids = [];
+  if(!project || !project.stages) return ids;
+  CREATIVE_STAGES.forEach(item => {
+    const fields = (project.stages[item.id] && project.stages[item.id].fields) || {};
+    Object.keys(fields).forEach(name => {
+      ((fields[name] && fields[name].proposals) || []).forEach(proposal => {
+        if(proposal && (proposal.status === 'proposed' || proposal.status === 'in_discussion') && proposal.id) ids.push(proposal.id);
+      });
+    });
+  });
+  return ids;
+}
+
+function _creativeStageForProposal(project, id){
+  for(const item of CREATIVE_STAGES){
+    const fields = (project.stages[item.id] && project.stages[item.id].fields) || {};
+    for(const slot of Object.values(fields)){
+      if((slot.proposals || []).some(proposal => proposal && proposal.id === id)) return item.id;
+    }
+  }
+  return '';
+}
+
 async function creativeReloadQuiet(){
   if(!_creativeProject || _creativeDirty) return;
   const fresh = await api('/api/creative-studio/projects/' + _creativeProject.id);
   if(_creativeDirty) return;
+  const unseen = _creativeProposalIds(fresh).find(id => !_creativeSeenProposals.has(id));
+  _creativeSeenProposals = new Set(_creativeProposalIds(fresh));
   _creativeApplyProject(fresh);
+  if(unseen && !_creativeDirty){
+    const stage = _creativeStageForProposal(fresh, unseen);
+    if(stage && stage !== _creativeStage){
+      _creativeStage = stage;
+      creativeRenderWorkspace();
+      return;
+    }
+  }
   _creativeSyncLive();
 }
 
@@ -1013,5 +1049,5 @@ function _creativeStartPoll(){
     if(typeof _currentPanel !== 'undefined' && _currentPanel === 'creative' && _creativeProject && !_creativeDirty){
       creativeReloadQuiet().catch(() => {});
     }
-  }, 4000);
+  }, 1000);
 }
