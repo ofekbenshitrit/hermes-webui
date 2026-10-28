@@ -1,6 +1,6 @@
 /* Creative Studio — guided wizard over /api/creative-studio. */
 const CREATIVE_STEPS = [
-  {id:'brief', label:'Product', title:'Product & objective', purpose:'Establish the product facts and what this ad should do.'},
+  {id:'brief', label:'Product', title:'Product & objective', purpose:'Choose the objective and the audience. Hermes already has the product knowledge.'},
   {id:'who', label:'Audience', title:'Audience', purpose:'Define who the ad is for and the situation or belief that makes the message land.'},
   {id:'what', label:'Idea', title:'Core idea', purpose:'Choose the single idea, then keep the problem mechanism separate from the solution mechanism.'},
   {id:'hook', label:'Hook', title:'Hook', purpose:'Develop one opening from that idea, ground it in the facts, and polish the line you will ship.'},
@@ -50,7 +50,7 @@ const CREATIVE_HELP = {
 };
 const CREATIVE_LABELS = {
   product_facts:'Product facts',
-  audience_notes:'Audience notes',
+  audience_notes:'Audience',
   objective:'Objective',
   outcome:'Outcome',
   demographic:'Demographic',
@@ -85,8 +85,14 @@ const CREATIVE_LABELS = {
   visual_hook:'Visual hook',
   verbal_hook:'Verbal hook',
 };
+const CREATIVE_OBJECTIVES = [
+  {id:'cold_acquisition', label:'Cold Acquisition (Direct Sale)', text:'Cold Acquisition (Direct Sale). Broad appeal, mechanism introduction, and skepticism breaking.'},
+  {id:'symptom_aware', label:'Symptom Aware (Educate & Bridge)', text:'Symptom Aware (Educate & Bridge). Focus on the pain point or trigger, then bridge into the product solution.'},
+  {id:'retargeting', label:'Retargeting & Objections', text:'Retargeting & Objections. Overcome skepticism, price or efficacy objections, and comparison to alternatives.'},
+  {id:'offer_urgency', label:'Offer & Urgency', text:'Offer & Urgency. Direct promo, bundle push, or limited-time framing.'},
+];
 const CREATIVE_STEP_FIELDS = {
-  brief:[['brief','product_facts'],['brief','objective'],['brief','audience_notes']],
+  brief:[['brief','objective'],['brief','audience_notes']],
   who:[['who','outcome'],['who','demographic'],['who','facet'],['who','segment']],
   what:[['what','concept'],['what','angle'],['what','ump'],['what','ums'],['what','mechanism']],
   hook:[
@@ -100,7 +106,7 @@ const CREATIVE_STEP_FIELDS = {
 };
 const CREATIVE_STORED_BRIEF = ['summary_provided','summary_assumptions','summary_missing','assets','sources'];
 const CREATIVE_PREREQ_FIELDS = {
-  brief:['product_facts','objective'],
+  brief:['objective'],
   who:['segment'],
   what:['concept','ump','ums','mechanism'],
   hook:['format','final_hook'],
@@ -129,6 +135,15 @@ let _creativeShowToken = 0;
 let _creativeShowing = '';
 let _creativeSessionProjectIdCache = '';
 let _creativeFocusJob = Promise.resolve();
+let _creativeObjectiveCustom = false;
+let _creativeAvatarComposer = false;
+let _creativeSegmentBusy = false;
+const CREATIVE_SEGMENT_HINT = 'Add an outcome, demographic, and facet first.';
+const CREATIVE_BLOCK_FIELDS = [
+  {field:'outcome', label:'Reuse a saved outcome'},
+  {field:'demographic', label:'Reuse a saved demographic'},
+  {field:'facet', label:'Reuse a saved facet'},
+];
 function _creativeEsc(value){
   return String(value == null ? '' : value)
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -217,6 +232,8 @@ async function creativeOpenProject(id, opts){
   const storedMode = project.export_options && project.export_options.mode;
   if(storedMode === 'full' || storedMode === 'handoff') _creativeExportMode = storedMode;
   if(!(opts && opts.keepStage) || !CREATIVE_STEPS.some(stage => stage.id === _creativeStage)) _creativeStage = 'brief';
+  _creativeObjectiveCustom = false;
+  _creativeAvatarComposer = false;
   await api('/api/creative-studio/active', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({project_id:id})});
   await creativeRefreshList();
   creativeRenderWorkspace();
@@ -454,6 +471,7 @@ function _creativeStageMarkup(stage){
 function _creativeStepBody(stage){
   if(_creativeStage === 'brief') return _creativeBriefBody(stage);
   if(_creativeStage === 'hook') return _creativeHookBody();
+  if(_creativeStage === 'who') return _creativeWhoBody();
   let extra = '';
   if(_creativeStage === 'what'){
     const checks = _creativeProject.concept_checks || {};
@@ -474,19 +492,320 @@ function _creativeBriefBody(){
   const offer = ((_creativeProject.stages.brief.fields.product_offer || {}).text) || '';
   const name = note.name || offer || 'this product';
   const noteCard = note.available
-    ? `<div class="creative-card"><strong>Product note</strong><p class="creative-help">Read from the Hermes product note for ${_creativeEsc(name)}. Editing this project does not change that note.</p><pre class="creative-note">${_creativeEsc(note.excerpt || '')}</pre></div>`
-    : `<div class="creative-card"><strong>Product note</strong><p class="creative-help">No product note is on file for ${_creativeEsc(name || 'this product')}. Nothing here is being treated as a known fact.</p></div>`;
-  const explore = _creativeProject.exploratory_product
-    ? `<div class="creative-review-notice" role="status"><strong>Exploratory.</strong> <span>Product facts are not on file. Later suggestions should stay labelled exploratory until you add facts or a product note.</span></div>`
+    ? `<div class="creative-card"><strong>Product knowledge</strong><p class="creative-help">Read from the Hermes product note and brand guidelines for ${_creativeEsc(name)}. Editing this project does not change that note.</p><pre class="creative-note">${_creativeEsc(note.excerpt || '')}</pre></div>`
     : '';
-  const stored = CREATIVE_STORED_BRIEF.filter(name => {
-    const slot = _creativeProject.stages.brief.fields[name] || {};
+  const stored = CREATIVE_STORED_BRIEF.filter(fieldName => {
+    const slot = _creativeProject.stages.brief.fields[fieldName] || {};
     return String(slot.text || '').trim();
   });
   const storedCard = stored.length
-    ? `<details class="creative-card"><summary>Stored brief</summary>${stored.map(name => _creativeFieldCard('brief', name)).join('')}</details>`
+    ? `<details class="creative-card"><summary>Stored brief</summary>${stored.map(fieldName => _creativeFieldCard('brief', fieldName)).join('')}</details>`
     : '';
-  return `${noteCard}${explore}${_creativeFieldCard('brief','product_facts')}${_creativeFieldCard('brief','objective')}${_creativeFieldCard('brief','audience_notes', {optional:true})}${storedCard}`;
+  return `${noteCard}${_creativeObjectiveControl()}${_creativeAudienceControl()}${storedCard}`;
+}
+
+function _creativeWhoText(name){
+  return String(((((_creativeProject.stages || {}).who || {}).fields || {})[name] || {}).text || '');
+}
+
+function _creativeWhoParentsReady(useLive){
+  return CREATIVE_BLOCK_FIELDS.every(item => {
+    if(!useLive) return _creativeWhoText(item.field).trim();
+    const node = document.querySelector('#creativeFields [data-creative-field="' + item.field + '"]');
+    const value = node ? node.value : _creativeWhoText(item.field);
+    return String(value || '').trim();
+  });
+}
+
+function _creativeBlockPicker(field, label){
+  const rows = (((_creativeProject || {}).audience_blocks || {})[field]) || [];
+  const current = _creativeWhoText(field).trim();
+  const selected = rows.find(row => String(row.text || '').trim() === current);
+  const groups = [['product', 'This product'], ['global', 'Other projects']];
+  const options = groups.map(([scope, groupLabel]) => {
+    const items = rows.filter(row => row.scope === scope);
+    if(!items.length) return '';
+    const choices = items.map(row => {
+      const on = selected && selected.id === row.id;
+      return `<option value="${_creativeEsc(row.id)}"${on ? ' selected' : ''}>${_creativeEsc(row.label || row.text)}</option>`;
+    }).join('');
+    return `<optgroup label="${_creativeEsc(groupLabel)}">${choices}</optgroup>`;
+  }).join('');
+  return `<select class="creative-block-picker" data-creative-block="${field}" aria-label="${_creativeEsc(label)}" onchange="creativePickBlock('${field}', this.value)">
+    <option value=""${selected ? '' : ' selected'}>${_creativeEsc(label)}</option>
+    ${options}
+  </select>`;
+}
+
+function _creativeGenerateLead(){
+  const ready = _creativeWhoParentsReady(false);
+  const title = ready ? '' : CREATIVE_SEGMENT_HINT;
+  return `<div class="creative-actions"><span id="creativeGenerateSegmentWrap" class="creative-generate-wrap" title="${_creativeEsc(title)}"><button type="button" class="creative-primary" id="creativeGenerateSegment" onclick="creativeGenerateSegment()" ${ready ? '' : 'disabled'}>Generate segment</button></span></div><p class="creative-segment-error" id="creativeSegmentError"></p>`;
+}
+
+function _creativeWhoBody(){
+  const blocks = CREATIVE_BLOCK_FIELDS.map(item =>
+    _creativeFieldCard('who', item.field, {picker: _creativeBlockPicker(item.field, item.label)})
+  ).join('');
+  return blocks + _creativeFieldCard('who', 'segment', {lead: _creativeGenerateLead()});
+}
+
+function _creativeSyncSegmentButton(){
+  const button = document.getElementById('creativeGenerateSegment');
+  const wrap = document.getElementById('creativeGenerateSegmentWrap');
+  if(!button || !wrap) return;
+  const ready = _creativeWhoParentsReady(true);
+  button.disabled = !ready || _creativeSegmentBusy;
+  wrap.title = ready ? '' : CREATIVE_SEGMENT_HINT;
+}
+
+async function creativePickBlock(field, id){
+  if(!id){
+    const select = document.querySelector('[data-creative-block="' + field + '"]');
+    const rows = (((_creativeProject || {}).audience_blocks || {})[field]) || [];
+    const current = _creativeWhoText(field).trim();
+    const match = rows.find(row => String(row.text || '').trim() === current);
+    if(select) select.value = match ? match.id : '';
+    return;
+  }
+  const row = ((((_creativeProject || {}).audience_blocks || {})[field]) || []).find(item => item.id === id);
+  if(!row) return;
+  await creativePutField('who', field, row.text);
+}
+
+async function _creativeFlushFields(names){
+  for(const name of names){
+    if(!_creativeTimers[name]) continue;
+    clearTimeout(_creativeTimers[name]);
+    delete _creativeTimers[name];
+    await creativeSaveField(name);
+    if(_creativeSaveState === 'Save failed') throw new Error('Could not save the audience fields.');
+  }
+}
+
+async function creativeGenerateSegment(){
+  if(!_creativeProject || _creativeSegmentBusy) return;
+  _creativeSyncSegmentButton();
+  const button = document.getElementById('creativeGenerateSegment');
+  if(!button || button.disabled) return;
+  _creativeSegmentBusy = true;
+  if(button) button.textContent = 'Generating…';
+  _creativeSyncSegmentButton();
+  const existing = document.getElementById('creativeSegmentError');
+  if(existing) existing.textContent = '';
+  let failed = '';
+  try{
+    await _creativeFlushFields(CREATIVE_BLOCK_FIELDS.map(item => item.field));
+    const fresh = await api('/api/creative-studio/projects/' + _creativeProject.id + '/segment', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({}),
+      retries:0,
+      timeoutMs:60000,
+    });
+    _creativeApplyProject(fresh);
+    _creativeDirty = Object.keys(_creativeTimers).length > 0;
+    _creativeSaveState = _creativeDirty ? 'Saving…' : 'Saved';
+  }catch(err){
+    failed = (err && err.message) || 'Could not generate a segment.';
+  }finally{
+    _creativeSegmentBusy = false;
+    const node = document.getElementById('creativeGenerateSegment');
+    if(node) node.textContent = 'Generate segment';
+    _creativeSyncLive();
+    const error = document.getElementById('creativeSegmentError');
+    if(error && failed) error.textContent = failed;
+    _creativeSyncSegmentButton();
+  }
+}
+
+function _creativeObjectiveSlot(){
+  return (((_creativeProject.stages.brief || {}).fields || {}).objective) || {text:'', proposals:[]};
+}
+
+function _creativeObjectiveControl(){
+  const slot = _creativeObjectiveSlot();
+  const text = String(slot.text || '');
+  const matched = CREATIVE_OBJECTIVES.find(item => item.text === text.trim());
+  const custom = _creativeObjectiveCustom || (!!text.trim() && !matched);
+  const pills = CREATIVE_OBJECTIVES.map(item => {
+    const pressed = !_creativeObjectiveCustom && !!(matched && matched.id === item.id);
+    return `<button type="button" class="creative-pill" aria-pressed="${pressed ? 'true' : 'false'}" onclick="creativePickObjective('${item.id}')">${_creativeEsc(item.label)}</button>`;
+  }).join('') + `<button type="button" class="creative-pill" aria-pressed="${custom ? 'true' : 'false'}" onclick="creativePickObjective('custom')">Custom</button>`;
+  const isolated = _creativeFocusField === 'objective';
+  const input = custom
+    ? `<textarea data-creative-stage="brief" data-creative-field="objective" dir="auto" rows="3" placeholder="Describe the job of this ad" oninput="creativeScheduleSave('objective')">${_creativeEsc(text)}</textarea>`
+    : '';
+  return `<div class="creative-field${isolated ? ' isolated' : ''}" data-field="objective">
+    <div class="creative-field-label">
+      <label>Objective</label>
+      <button type="button" class="creative-isolate${isolated ? ' on' : ''}" aria-pressed="${isolated ? 'true' : 'false'}" onclick="creativeIsolateField('objective')">${isolated ? 'Isolated' : 'Isolate'}</button>
+    </div>
+    <p class="creative-help">The job of this ad.</p>
+    <div class="creative-pills" role="group" aria-label="Objective">${pills}</div>
+    ${input}
+    ${_creativeProposalMarkup(slot)}
+  </div>`;
+}
+
+function _creativeAudienceRows(){
+  const rows = ((_creativeProject && _creativeProject.audience_avatars) || []).slice();
+  const current = String(((((_creativeProject.stages || {}).brief || {}).fields || {}).audience_notes || {}).text || '').trim();
+  if(current && !rows.some(row => String(row.text || '').trim() === current)){
+    rows.unshift({id:'current', label:'Current avatar', text:current, source:'current'});
+  }
+  return rows;
+}
+
+function _creativeAudienceControl(){
+  const slot = (((_creativeProject.stages.brief || {}).fields || {}).audience_notes) || {text:'', proposals:[]};
+  const current = String(slot.text || '').trim();
+  const rows = _creativeAudienceRows();
+  const selected = rows.find(row => String(row.text || '').trim() === current);
+  const groups = [
+    ['preset', 'Product avatars'],
+    ['saved', 'Saved for this product'],
+    ['history', 'Used on recent ads'],
+    ['current', 'This ad'],
+  ];
+  const options = groups.map(([source, label]) => {
+    const items = rows.filter(row => row.source === source);
+    if(!items.length) return '';
+    const choices = items.map(row => {
+      const on = selected && selected.id === row.id;
+      return `<option value="${_creativeEsc(row.id)}"${on ? ' selected' : ''}>${_creativeEsc(row.label || row.text)}</option>`;
+    }).join('');
+    return `<optgroup label="${_creativeEsc(label)}">${choices}</optgroup>`;
+  }).join('');
+  const isolated = _creativeFocusField === 'audience_notes';
+  const composer = _creativeAvatarComposer
+    ? `<div class="creative-avatar-create">
+        <label for="creativeAvatarLabel">Avatar name</label>
+        <input id="creativeAvatarLabel" dir="auto" maxlength="80" autocomplete="off" placeholder="Night bakers">
+        <label for="creativeAvatarText">Who they are</label>
+        <textarea id="creativeAvatarText" dir="auto" rows="3" maxlength="2000" placeholder="People who bake after a night shift"></textarea>
+        <p class="creative-help" id="creativeAvatarError"></p>
+        <button type="button" class="creative-primary" onclick="creativeSaveAvatar()">Save avatar</button>
+      </div>`
+    : '';
+  return `<div class="creative-field${isolated ? ' isolated' : ''}" data-field="audience_notes">
+    <div class="creative-field-label">
+      <label for="creativeAvatarSelect">Audience</label>
+      <button type="button" class="creative-isolate${isolated ? ' on' : ''}" aria-pressed="${isolated ? 'true' : 'false'}" onclick="creativeIsolateField('audience_notes')">${isolated ? 'Isolated' : 'Isolate'}</button>
+    </div>
+    <p class="creative-help">Avatars saved for this product, including audiences used on recent ads.</p>
+    <select id="creativeAvatarSelect" aria-label="Audience avatar" onchange="creativePickAvatar(this.value)">
+      <option value=""${!selected && !_creativeAvatarComposer ? ' selected' : ''}>Choose an avatar</option>
+      ${options}
+      <option value="__new__"${_creativeAvatarComposer ? ' selected' : ''}>+ New Avatar</option>
+    </select>
+    ${composer}
+    ${_creativeProposalMarkup(slot)}
+  </div>`;
+}
+
+async function creativePickObjective(id){
+  if(id === 'custom'){
+    _creativeObjectiveCustom = true;
+    _creativeRepaintFields();
+    const node = document.querySelector('[data-creative-field="objective"]');
+    if(node) node.focus();
+    return;
+  }
+  const preset = CREATIVE_OBJECTIVES.find(item => item.id === id);
+  if(!preset) return;
+  _creativeObjectiveCustom = false;
+  await creativePutField('brief', 'objective', preset.text);
+}
+
+async function creativePickAvatar(id){
+  if(id === '__new__'){
+    _creativeAvatarComposer = true;
+    _creativeRepaintFields();
+    const node = document.getElementById('creativeAvatarLabel');
+    if(node) node.focus();
+    return;
+  }
+  _creativeAvatarComposer = false;
+  if(!id){
+    await creativePutField('brief', 'audience_notes', '');
+    return;
+  }
+  const avatar = _creativeAudienceRows().find(item => item.id === id);
+  if(!avatar) return;
+  await creativePutField('brief', 'audience_notes', avatar.text);
+}
+
+async function creativeSaveAvatar(){
+  if(!_creativeProject) return;
+  const labelNode = document.getElementById('creativeAvatarLabel');
+  const textNode = document.getElementById('creativeAvatarText');
+  const error = document.getElementById('creativeAvatarError');
+  const label = labelNode ? labelNode.value.trim() : '';
+  const text = textNode ? textNode.value.trim() : '';
+  if(!text){
+    if(error) error.textContent = 'Describe the avatar.';
+    return;
+  }
+  try{
+    _creativeSaveState = 'Saving…';
+    const fresh = await api('/api/creative-studio/projects/' + _creativeProject.id + '/avatars', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({label, text}),
+    });
+    _creativeAvatarComposer = false;
+    _creativeSaveState = 'Saved';
+    _creativeDirty = false;
+    _creativeApplyProject(fresh);
+    _creativeSyncLive();
+  }catch(err){
+    _creativeSaveState = 'Save failed';
+    if(error) error.textContent = (err && err.message) || 'Could not save the avatar.';
+    const state = document.getElementById('creativeSaveState');
+    if(state){ state.textContent = 'Save failed'; state.classList.add('failed'); }
+  }
+}
+
+async function creativePutField(stage, field, text){
+  if(!_creativeProject) return;
+  _creativeSaveState = 'Saving…';
+  const state = document.getElementById('creativeSaveState');
+  if(state){ state.textContent = 'Saving…'; state.classList.remove('failed'); }
+  try{
+    const result = await api('/api/creative-studio/projects/' + _creativeProject.id + '/fields', {
+      method:'PUT',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({stage, field, text, author:'user'}),
+    });
+    _creativeDirty = Object.keys(_creativeTimers).length > 0;
+    _creativeSaveState = _creativeDirty ? 'Saving…' : 'Saved';
+    if(result.review_fields && result.review_fields.length && typeof showToast === 'function'){
+      const names = result.review_fields.map(item => CREATIVE_LABELS[item.field] || _creativeLabel(item.field || '')).join(', ');
+      showToast('Needs review: ' + names, 2800);
+    }
+    const fresh = await api('/api/creative-studio/projects/' + _creativeProject.id);
+    _creativeApplyProject(fresh);
+    if(!_creativeDirty) _creativeSyncLive();
+  }catch(err){
+    _creativeDirty = false;
+    _creativeSaveState = 'Save failed';
+    if(state){ state.textContent = 'Save failed'; state.classList.add('failed'); }
+    _creativeRepaintFields();
+  }
+}
+
+function _creativeRepaintFields(){
+  const fieldsRoot = document.getElementById('creativeFields');
+  const stage = _creativeProject && _creativeProject.stages && _creativeProject.stages[_creativeStage];
+  if(!fieldsRoot || !stage){
+    creativeRenderWorkspace();
+    return;
+  }
+  _creativeRememberOpenDetails();
+  fieldsRoot.innerHTML = _creativeStageMarkup(stage);
+  fieldsRoot.dataset.signature = _creativeFieldSignature(stage);
+  _creativeRestoreOpenDetails();
 }
 
 function _creativeHookBody(){
@@ -514,7 +833,7 @@ function _creativeContextChips(){
     ['who','segment','Audience'],
     ['what','concept','Core idea'],
     ['brief','objective','Objective'],
-    ['brief','product_facts','Product facts'],
+    ['brief','product_offer','Product'],
   ];
   return `<ul class="creative-context-list">${bits.map(([stage, field, label]) => {
     const text = String((((_creativeProject.stages[stage] || {}).fields || {})[field] || {}).text || '').trim();
@@ -1015,14 +1334,22 @@ function _creativeFieldSignature(stage){
     mode: _creativeExportMode,
     focus: _creativeFocusField,
     prompt: _creativeHookPrompt,
-    anchor: ['what.concept','who.segment','brief.objective','brief.product_facts'].map(_creativeFilled),
+    anchor: ['what.concept','who.segment','brief.objective','brief.product_offer'].map(_creativeFilled),
+    objectiveCustom: _creativeObjectiveCustom,
+    avatarComposer: _creativeAvatarComposer,
+    objective: String((((_creativeProject.stages.brief || {}).fields || {}).objective || {}).text || ''),
+    audience: String((((_creativeProject.stages.brief || {}).fields || {}).audience_notes || {}).text || ''),
+    avatars: ((_creativeProject.audience_avatars || []).map(row => row.id + ':' + row.source + ':' + row.text)).join('|'),
+    blocks: CREATIVE_BLOCK_FIELDS.map(item => {
+      const rows = ((_creativeProject.audience_blocks || {})[item.field]) || [];
+      return rows.map(row => row.scope + ':' + row.id + ':' + row.text).join('|');
+    }),
     review: CREATIVE_STEPS.map(step => {
       const row = (_creativeProject.stages || {})[step.id] || {};
       const fields = row.fields || {};
       return [step.id, row.status || '', Object.keys(fields).filter(name => fields[name] && fields[name].needs_review).join(',')];
     }),
     note: !!(_creativeProject.product_note && _creativeProject.product_note.available),
-    explore: !!_creativeProject.exploratory_product,
     fields: pairs.map(([owner, name]) => {
       const slot = (((_creativeProject.stages || {})[owner] || {}).fields || {})[name] || {};
       const pending = (slot.proposals || []).filter(item => item.status === 'proposed' || item.status === 'in_discussion').length;
@@ -1032,6 +1359,7 @@ function _creativeFieldSignature(stage){
 }
 
 function _creativeSyncLive(){
+  if(_creativeSegmentBusy) return;
   if(!_creativeWorkspaceLive()){
     creativeRenderWorkspace();
     return;
@@ -1073,18 +1401,8 @@ function _creativeSyncLive(){
   }
 }
 
-function _creativeFieldCard(stageId, name, options){
-  options = options || {};
-  const stage = (_creativeProject.stages && _creativeProject.stages[stageId]) || {fields:{}};
-  const slot = (stage.fields && stage.fields[name]) || {text:'', proposals:[], include:true, order:0};
-  const help = CREATIVE_HELP[name] ? `<p class="creative-help">${_creativeEsc(CREATIVE_HELP[name])}</p>` : '';
-  const claim = (slot.claim === 'needs_verification' || slot.regulated) ? '<span class="creative-claim needs">Needs source</span>' : '';
-  const review = slot.needs_review ? '<span class="creative-claim needs">Needs review</span>' : '';
-  const optional = options.optional ? '<span class="creative-claim">Optional</span>' : '';
-  const copyTools = stageId === 'copy' ? `<div class="creative-inline-tools"><label><input type="checkbox" ${slot.include !== false ? 'checked' : ''} onchange="creativeToggleInclude('${name}', this.checked)"> Include</label> <button type="button" class="creative-inline-btn" onclick="creativeNudgeOrder('${name}', -1)">Up</button> <button type="button" class="creative-inline-btn" onclick="creativeNudgeOrder('${name}', 1)">Down</button></div>` : '';
-  const accept = options.accept ? `<button type="button" class="creative-inline-btn" onclick="creativeAcceptFinal('${name}')">Accept as final</button>` : '';
-  const control = `<textarea data-creative-stage="${stageId}" data-creative-field="${name}" dir="auto" rows="4" oninput="creativeScheduleSave('${name}')">${_creativeEsc(slot.text || '')}</textarea>`;
-  const proposals = (slot.proposals || []).filter(item => item.status === 'proposed' || item.status === 'in_discussion').map(proposal => {
+function _creativeProposalMarkup(slot){
+  return ((slot && slot.proposals) || []).filter(item => item.status === 'proposed' || item.status === 'in_discussion').map(proposal => {
     const next = ((proposal.revised_text || proposal.text) || '').trim();
     const note = (proposal.discussion || '').trim();
     const kicker = proposal.exploratory ? 'Exploratory suggestion' : 'Suggestion';
@@ -1101,6 +1419,22 @@ function _creativeFieldCard(stageId, name, options){
       </div>
     </article>`;
   }).join('');
+}
+
+function _creativeFieldCard(stageId, name, options){
+  options = options || {};
+  const stage = (_creativeProject.stages && _creativeProject.stages[stageId]) || {fields:{}};
+  const slot = (stage.fields && stage.fields[name]) || {text:'', proposals:[], include:true, order:0};
+  const help = CREATIVE_HELP[name] ? `<p class="creative-help">${_creativeEsc(CREATIVE_HELP[name])}</p>` : '';
+  const claim = (slot.claim === 'needs_verification' || slot.regulated) ? '<span class="creative-claim needs">Needs source</span>' : '';
+  const review = slot.needs_review ? '<span class="creative-claim needs">Needs review</span>' : '';
+  const optional = options.optional ? '<span class="creative-claim">Optional</span>' : '';
+  const copyTools = stageId === 'copy' ? `<div class="creative-inline-tools"><label><input type="checkbox" ${slot.include !== false ? 'checked' : ''} onchange="creativeToggleInclude('${name}', this.checked)"> Include</label> <button type="button" class="creative-inline-btn" onclick="creativeNudgeOrder('${name}', -1)">Up</button> <button type="button" class="creative-inline-btn" onclick="creativeNudgeOrder('${name}', 1)">Down</button></div>` : '';
+  const accept = options.accept ? `<button type="button" class="creative-inline-btn" onclick="creativeAcceptFinal('${name}')">Accept as final</button>` : '';
+  const picker = options.picker || '';
+  const lead = options.lead || '';
+  const control = `<textarea data-creative-stage="${stageId}" data-creative-field="${name}" dir="auto" rows="4" oninput="creativeScheduleSave('${name}')">${_creativeEsc(slot.text || '')}</textarea>`;
+  const proposals = _creativeProposalMarkup(slot);
   const isolated = _creativeFocusField === name;
   const label = CREATIVE_LABELS[name] || _creativeLabel(name);
   return `<div class="creative-field${isolated ? ' isolated' : ''}" data-field="${name}">
@@ -1109,6 +1443,8 @@ function _creativeFieldCard(stageId, name, options){
       <button type="button" class="creative-isolate${isolated ? ' on' : ''}" aria-pressed="${isolated ? 'true' : 'false'}" onclick="creativeIsolateField('${name}')">${isolated ? 'Isolated' : 'Isolate'}</button>
     </div>
     ${help}
+    ${picker}
+    ${lead}
     ${copyTools}
     ${accept}
     ${control}
@@ -1123,6 +1459,7 @@ function creativeScheduleSave(field){
   if(label){ label.textContent = 'Saving…'; label.classList.remove('failed'); }
   clearTimeout(_creativeTimers[field]);
   _creativeTimers[field] = setTimeout(() => creativeSaveField(field), 450);
+  _creativeSyncSegmentButton();
 }
 
 async function creativeSaveField(field){

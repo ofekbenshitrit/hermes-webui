@@ -2,12 +2,14 @@
 
 Profile-scoped JSON documents under HERMES_WEBUI_STATE_DIR. HTTP routes and
 the WebUI MCP server both call this module. Selected field text changes only
-on a user edit, an explicit accept, or selecting an alternative.
+on a user edit, an explicit accept, selecting an alternative, or a
+user-requested audience segment.
 """
 
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import logging
 import os
@@ -75,6 +77,17 @@ FIELDS: dict[str, tuple[str, ...]] = {
     "review": (),
 }
 
+AUDIENCE_BLOCK_FIELDS = ("outcome", "demographic", "facet")
+_AUDIENCE_BLOCK_CAP = 40
+_SEGMENT_INPUT_LIMIT = 500
+_SEGMENT_OUTPUT_LIMIT = 400
+_SEGMENT_SYSTEM = (
+    "Write one audience sentence for an ad. Use only the demographic, facet, and outcome "
+    "given by the user. Do not add claims, product features, or a second sentence. "
+    "Shape: [demographic] experiencing [facet], actively seeking [outcome]. "
+    "Return only the sentence."
+)
+
 # Older stage-wide cascade. The write path uses FIELD_REVIEW_INDEX instead,
 # so an edit flags only fields that list the edited field as context.
 DOWNSTREAM: dict[str, tuple[str, ...]] = {
@@ -91,29 +104,28 @@ DOWNSTREAM: dict[str, tuple[str, ...]] = {
 # helpful: used when present, and an edit still flags dependents that have text.
 FIELD_CONTEXT: dict[str, dict[str, tuple[tuple[str, str], ...]]] = {
     "outcome": {
-        "required": (("brief", "product_facts"),),
-        "helpful": (("brief", "audience_notes"),),
+        "required": (),
+        "helpful": (("brief", "audience_notes"), ("brief", "product_facts")),
     },
     "demographic": {
-        "required": (("brief", "product_facts"),),
-        "helpful": (("brief", "audience_notes"),),
+        "required": (),
+        "helpful": (("brief", "audience_notes"), ("brief", "product_facts")),
     },
     "facet": {
-        "required": (("brief", "product_facts"),),
-        "helpful": (("brief", "audience_notes"),),
+        "required": (),
+        "helpful": (("brief", "audience_notes"), ("brief", "product_facts")),
     },
     "segment": {
         "required": (
-            ("brief", "product_facts"),
             ("who", "outcome"),
             ("who", "demographic"),
             ("who", "facet"),
         ),
-        "helpful": (("brief", "audience_notes"), ("brief", "objective")),
+        "helpful": (("brief", "audience_notes"), ("brief", "objective"), ("brief", "product_facts")),
     },
     "concept": {
-        "required": (("who", "segment"), ("brief", "product_facts")),
-        "helpful": (("brief", "objective"),),
+        "required": (("who", "segment"),),
+        "helpful": (("brief", "objective"), ("brief", "product_facts")),
     },
     "angle": {
         "required": (("who", "segment"), ("what", "concept")),
@@ -213,12 +225,12 @@ FIELD_CONTEXT: dict[str, dict[str, tuple[tuple[str, str], ...]]] = {
         "helpful": (("who", "segment"),),
     },
     "constraints": {
-        "required": (("brief", "product_facts"),),
-        "helpful": (("what", "mechanism"),),
+        "required": (),
+        "helpful": (("what", "mechanism"), ("brief", "product_facts")),
     },
     "conditions": {
-        "required": (("brief", "product_facts"),),
-        "helpful": (("what", "mechanism"),),
+        "required": (),
+        "helpful": (("what", "mechanism"), ("brief", "product_facts")),
     },
 }
 
@@ -274,7 +286,7 @@ _LOCKS_GUARD = threading.Lock()
 # is answered from the job of that field, not from a blank prompt.
 FIELD_HELP = {
     "product_offer": "The product this creative is about. Every later field stays about this product.",
-    "product_facts": "Verified facts about the product. Do not invent capabilities beyond these.",
+    "product_facts": "Optional legacy notes. The product file is already in the prompt. Do not ask the user to retype it, and do not treat an empty value as missing grounding.",
     "audience_notes": "What is already known about who buys, before the Who stage is written.",
     "objective": "The job of this creative: what it should make the viewer do or believe.",
     "channel": "Where the creative will run.",
@@ -444,7 +456,12 @@ def _write_json(path: Path, payload: dict) -> None:
 
 
 def _empty_store() -> dict:
-    return {"active_project_id": "", "projects": {}}
+    return {
+        "active_project_id": "",
+        "projects": {},
+        "audience_library": {},
+        "audience_blocks": {name: [] for name in AUDIENCE_BLOCK_FIELDS},
+    }
 
 
 def _normalize_store(payload: dict) -> dict:
@@ -469,7 +486,17 @@ def _normalize_store(payload: dict) -> dict:
         active = str(payload.get("active_project_id") or "")
     if active not in rows:
         active = ""
-    return {"active_project_id": active, "projects": rows}
+    library = {}
+    blocks = {name: [] for name in AUDIENCE_BLOCK_FIELDS}
+    if isinstance(payload, dict):
+        library = _normalize_audience_library(payload.get("audience_library"))
+        blocks = _normalize_audience_blocks(payload.get("audience_blocks"))
+    return {
+        "active_project_id": active,
+        "projects": rows,
+        "audience_library": library,
+        "audience_blocks": blocks,
+    }
 
 
 def _import_legacy(directory: Path, store: dict) -> bool:
@@ -541,6 +568,8 @@ def _write_store(store: dict, path: Path | None = None) -> None:
     _write_json(path or _store_path(), {
         "active_project_id": store.get("active_project_id") or "",
         "projects": store.get("projects") or {},
+        "audience_library": store.get("audience_library") or {},
+        "audience_blocks": store.get("audience_blocks") or {},
     })
 
 
@@ -1033,8 +1062,14 @@ def get_project(project_id: str | None = None, name: str | None = None, stage: s
         if for_suggestion and field:
             owner = stage or _stage_for_field(field)
             context, missing, helpful_missing = _suggestion_bundle(project, field)
-            facts = _field_text(project, "brief", "product_facts")
-            exploratory = bool(missing) or (not _product_note(project) and not facts)
+            profile = _product_note(project)
+            if profile:
+                context["product_profile"] = {
+                    "text": profile,
+                    "role": "grounding",
+                    "product_id": _product_id(project),
+                }
+            exploratory = bool(missing)
             view = {
                 "id": project["id"],
                 "name": project["name"],
@@ -1049,8 +1084,9 @@ def get_project(project_id: str | None = None, name: str | None = None, stage: s
                     "Use this context. missing lists inputs required for a grounded draft. "
                     "helpful_missing lists optional context. If missing is non-empty, ask "
                     "a focused question or label the proposal exploratory. Do not present "
-                    "a guess as grounded. Save at most three proposals. Do not change the "
-                    "selected value."
+                    "a guess as grounded. The product profile is grounding. An empty "
+                    "brief.product_facts field does not make the draft exploratory. "
+                    "Save at most three proposals. Do not change the selected value."
                 ),
             }
         return view
@@ -1068,10 +1104,14 @@ def _field_context_view() -> dict:
 
 def _product_note_view(project: dict) -> dict:
     text = _product_note(project)
+    excerpt = text
+    if len(excerpt) > 1500:
+        excerpt = excerpt[:1499].rstrip() + "…"
     return {
         "name": _product_name(project),
         "available": bool(text),
-        "excerpt": text,
+        "excerpt": excerpt,
+        "product_id": _product_id(project),
     }
 
 
@@ -1079,7 +1119,10 @@ def _public_project(project: dict) -> dict:
     view = copy.deepcopy(project)
     note = _product_note_view(project)
     view["product_note"] = note
-    view["exploratory_product"] = (not note["available"]) and not _field_text(project, "brief", "product_facts")
+    view["product_id"] = note["product_id"]
+    view["exploratory_product"] = False
+    view["audience_avatars"] = _audience_avatars(project)
+    view["audience_blocks"] = _audience_blocks(project)
     view["field_context"] = _field_context_view()
     return view
 
@@ -1103,8 +1146,8 @@ def _context_spec(field: str) -> dict:
     if spec:
         return spec
     return {
-        "required": (("brief", "product_facts"), ("brief", "audience_notes")),
-        "helpful": (),
+        "required": (),
+        "helpful": (("brief", "audience_notes"),),
     }
 
 
@@ -1214,6 +1257,15 @@ def update_field(project_id: str, stage: str, field: str, text: str, *,
             _clear_own_review(project, stage, field)
             marked, review_fields = _mark_dependents(project, stage, field)
         saved = _save(project)
+        if field == "audience_notes" and (slot["text"] or "").strip() and (slot["text"] or "") != previous:
+            _upsert_avatar(project, slot["text"], "")
+        if (
+            stage == "who"
+            and field in AUDIENCE_BLOCK_FIELDS
+            and (slot["text"] or "").strip()
+            and (slot["text"] or "") != previous
+        ):
+            _upsert_audience_block(project, field, slot["text"])
         return {
             "project_id": project_id,
             "name": saved["name"],
@@ -1227,6 +1279,51 @@ def update_field(project_id: str, stage: str, field: str, text: str, *,
             "review_recommended": marked,
             "review_fields": review_fields,
         }
+
+
+def save_audience_avatar(project_id: str, label: str, text: str) -> dict:
+    """Store an audience avatar on the product and select it for this creative."""
+    cleaned_label = (label or "").strip()
+    cleaned_text = (text or "").strip()
+    if not cleaned_text:
+        raise StudioError("avatar text is required")
+    if len(cleaned_text) > 2000:
+        raise StudioError("avatar text is too long")
+    if len(cleaned_label) > 80:
+        raise StudioError("avatar label is too long")
+    if not cleaned_label:
+        cleaned_label = cleaned_text.splitlines()[0].strip()[:80]
+    with _studio_lock():
+        project = _load(project_id)
+        if not _product_key(project):
+            raise StudioError("choose a product before saving an avatar")
+    update_field(project_id, "brief", "audience_notes", cleaned_text, author="user")
+    with _studio_lock():
+        project = _load(project_id)
+        _upsert_avatar(project, cleaned_text, cleaned_label)
+        return _public_project(_load(project_id))
+
+
+def generate_segment(project_id: str) -> dict:
+    """Write one audience sentence from the saved outcome, demographic, and facet."""
+    with _studio_lock():
+        project = _load(project_id)
+        parts = {name: _field_text(project, "who", name) for name in AUDIENCE_BLOCK_FIELDS}
+    if not all(parts.values()):
+        raise StudioError("Add an outcome, demographic, and facet first.")
+    try:
+        sentence = _synthesize_segment(parts["outcome"], parts["demographic"], parts["facet"])
+    except StudioError:
+        raise
+    except Exception as exc:
+        logger.debug("segment synthesis failed: %s", type(exc).__name__)
+        raise StudioError("Could not generate a segment.", status=502) from exc
+    sentence = _clean_segment_sentence(sentence)
+    if not sentence:
+        raise StudioError("Could not generate a segment.", status=502)
+    update_field(project_id, "who", "segment", sentence, author="user")
+    with _studio_lock():
+        return _public_project(_load(project_id))
 
 
 def confirm_brief_summary(project_id: str, provided: str, assumptions: str, missing: str) -> dict:
@@ -1846,6 +1943,14 @@ def handle_creative_post(handler, parsed, body: dict):
         return _http_call(handler, lambda: rename_project(project_id, body.get("name") or ""))
     if tail == "/duplicate":
         return _http_call(handler, lambda: duplicate_project(project_id, body.get("name")))
+    if tail == "/avatars":
+        return _http_call(handler, lambda: save_audience_avatar(
+            project_id,
+            str(body.get("label") or ""),
+            str(body.get("text") or ""),
+        ))
+    if tail == "/segment":
+        return _http_call(handler, lambda: generate_segment(project_id))
     if tail == "/fields":
         return _http_call(handler, lambda: update_field(
             project_id,
@@ -1961,31 +2066,605 @@ def _read_bounded_note(path: Path, limit: int = 3500, roots: list[tuple[str, Pat
     return collapsed[: limit - 1].rstrip() + "…"
 
 
-def _product_note(project: dict, profile: str | None = None) -> str:
-    """The product file Hermes already has, bounded so a reply stays one completion."""
-    roots = None
-    if profile:
-        try:
-            from api.profiles import get_hermes_home_for_profile
+_AVATAR_HEADINGS = frozenset({"avatars", "audience avatars", "default avatars"})
+_GUIDELINE_HEADINGS = frozenset({"guidelines", "brand guidelines"})
+_PROFILE_LIMIT = 6000
+_NOTE_READ_LIMIT = 20000
 
-            roots = _catalog_roots(get_hermes_home_for_profile(profile))
-        except Exception:
-            roots = None
+
+def _bound_text(text: str, limit: int) -> str:
+    collapsed = (text or "").strip()
+    if len(collapsed) <= limit:
+        return collapsed
+    return collapsed[: limit - 1].rstrip() + "…"
+
+
+def _roots_for(profile: str | None):
+    if not profile:
+        return None
+    try:
+        from api.profiles import get_hermes_home_for_profile
+
+        return _catalog_roots(get_hermes_home_for_profile(profile))
+    except Exception:
+        return None
+
+
+def _stable_avatar_id(kind: str, text: str, existing: str = "") -> str:
+    if kind == "saved" and re.fullmatch(r"av_[a-f0-9]{12}", existing or ""):
+        return existing
+    digest = hashlib.sha256(f"{kind}\n{(text or '').casefold()}".encode()).hexdigest()[:12]
+    prefix = {"preset": "ps_", "saved": "av_", "history": "ad_"}.get(kind, "av_")
+    return prefix + digest
+
+
+def _clean_product_key(value: str) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip().casefold())[:160]
+
+
+def _product_key(project: dict) -> str:
+    return _clean_product_key(_product_name(project))
+
+
+def _product_id(project: dict) -> str:
+    source = str(project.get("product_source") or "").strip()
+    return source or _product_key(project)
+
+
+def _normalize_audience_library(raw) -> dict:
+    if not isinstance(raw, dict):
+        return {}
+    cleaned: dict[str, list[dict]] = {}
+    for key, rows in raw.items():
+        product_key = re.sub(r"\s+", " ", str(key or "").strip().casefold())[:160]
+        if not product_key or not isinstance(rows, list):
+            continue
+        kept = []
+        seen: set[str] = set()
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            text = str(row.get("text") or "").strip()[:2000]
+            token = text.casefold()
+            if not text or token in seen:
+                continue
+            seen.add(token)
+            label = str(row.get("label") or "").strip() or text.splitlines()[0]
+            kept.append({
+                "id": _stable_avatar_id("saved", text, str(row.get("id") or "")),
+                "label": label.strip()[:80],
+                "text": text,
+                "updated_at": str(row.get("updated_at") or ""),
+            })
+        if kept:
+            cleaned[product_key] = kept[:40]
+    return cleaned
+
+
+def _split_frontmatter(text: str) -> tuple[dict, str]:
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return {}, text
+    end = None
+    for index, line in enumerate(lines[1:], start=1):
+        if line.strip() == "---":
+            end = index
+            break
+    if end is None:
+        return {}, text
+    raw = "\n".join(lines[1:end])
+    body = "\n".join(lines[end + 1 :]).strip()
+    try:
+        from api import yaml_compat as yaml
+
+        loaded = yaml.safe_load(raw) or {}
+    except Exception:
+        return {}, text
+    if not isinstance(loaded, dict):
+        return {}, text
+    return loaded, body
+
+
+def _avatar_pair(item) -> tuple[str, str] | None:
+    if isinstance(item, str):
+        cleaned = item.strip()
+        if not cleaned:
+            return None
+        if ":" in cleaned:
+            label, text = cleaned.split(":", 1)
+            label, text = label.strip(), text.strip()
+        else:
+            label, text = cleaned[:80], cleaned
+    elif isinstance(item, dict):
+        label = str(item.get("label") or item.get("name") or item.get("title") or "").strip()
+        text = str(item.get("text") or item.get("notes") or item.get("description") or "").strip()
+        if not text and label:
+            text = label
+    else:
+        return None
+    text = (text or "").strip()
+    if not text:
+        return None
+    label = (label or text.splitlines()[0]).strip()[:80]
+    return label, text[:2000]
+
+
+def _markdown_sections(body: str) -> list[tuple[str, str]]:
+    preamble: list[str] = []
+    sections: list[tuple[str, str]] = []
+    current = None
+    buf: list[str] = []
+    for line in body.splitlines():
+        if line.startswith("## ") and not line.startswith("### "):
+            if current is None:
+                preamble = buf
+            else:
+                sections.append((current, "\n".join(buf).strip()))
+            current = line[3:].strip()
+            buf = []
+            continue
+        buf.append(line)
+    if current is None:
+        return [("", body.strip())]
+    sections.append((current, "\n".join(buf).strip()))
+    sections.insert(0, ("", "\n".join(preamble).strip()))
+    return sections
+
+
+def _avatars_from_section(body: str) -> list[tuple[str, str]]:
+    found = []
+    chunks = re.split(r"(?m)^###\s+", body)
+    if len(chunks) > 1:
+        for chunk in chunks[1:]:
+            lines = chunk.splitlines()
+            label = (lines[0] if lines else "").strip()
+            text = "\n".join(lines[1:]).strip()
+            if label and text:
+                found.append((label[:80], text[:2000]))
+        return found
+    for line in body.splitlines():
+        match = re.match(r"^\s*[-*]\s+([^:]{1,80}):\s+(\S.*)$", line)
+        if match:
+            found.append((match.group(1).strip()[:80], match.group(2).strip()[:2000]))
+    return found
+
+
+def _dedupe_avatar_pairs(pairs: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    found = []
+    seen: set[str] = set()
+    for label, text in pairs:
+        token = text.casefold()
+        if not text or token in seen:
+            continue
+        seen.add(token)
+        found.append((label, text))
+    return found
+
+
+def _parse_product_document(text: str) -> dict:
+    meta, body = _split_frontmatter(text or "")
+    avatars: list[tuple[str, str]] = []
+    guidelines = ""
+    raw_guidelines = meta.get("guidelines")
+    if isinstance(raw_guidelines, str):
+        guidelines = raw_guidelines.strip()
+    raw_avatars = meta.get("avatars")
+    if isinstance(raw_avatars, list):
+        for item in raw_avatars:
+            pair = _avatar_pair(item)
+            if pair:
+                avatars.append(pair)
+    kept = []
+    for title, section in _markdown_sections(body):
+        key = re.sub(r"\s+", " ", title).strip().casefold()
+        if key in _AVATAR_HEADINGS:
+            avatars.extend(_avatars_from_section(section))
+            continue
+        if key in _GUIDELINE_HEADINGS:
+            if section and section not in guidelines:
+                guidelines = (guidelines + "\n\n" + section).strip() if guidelines else section
+            continue
+        if title:
+            kept.append(f"## {title}\n{section}".rstrip())
+        elif section:
+            kept.append(section)
+    return {
+        "body": "\n\n".join(part for part in kept if part).strip(),
+        "guidelines": guidelines.strip(),
+        "avatars": _dedupe_avatar_pairs(avatars),
+    }
+
+
+def _read_product_note(project: dict, profile: str | None = None) -> tuple[str, Path | None]:
+    """Product file Hermes already has. The path stays inside the catalog."""
+    roots = _roots_for(profile)
     source = str(project.get("product_source") or "").strip()
     if source:
-        text = _read_bounded_note(Path(source).expanduser(), roots=roots)
+        path = Path(source).expanduser()
+        text = _read_bounded_note(path, limit=_NOTE_READ_LIMIT, roots=roots)
         if text:
-            return text
+            return text, path
     name = _product_name(project).casefold()
     if not name:
-        return ""
+        return "", None
     for item in (list_known_products(roots).get("products") or []):
         if str(item.get("name") or "").casefold() != name:
             continue
-        text = _read_bounded_note(Path(str(item.get("source") or "")).expanduser(), roots=roots)
+        path = Path(str(item.get("source") or "")).expanduser()
+        text = _read_bounded_note(path, limit=_NOTE_READ_LIMIT, roots=roots)
         if text:
-            return text
-    return ""
+            return text, path
+    return "", None
+
+
+def _product_note(project: dict, profile: str | None = None) -> str:
+    """Product profile and brand guidelines, bounded so a reply stays one completion."""
+    raw, path = _read_product_note(project, profile=profile)
+    if not raw:
+        return ""
+    parsed = _parse_product_document(raw)
+    guidelines = parsed["guidelines"]
+    if path is not None:
+        sibling = path.with_name(path.stem + ".guidelines.md")
+        extra = _read_bounded_note(sibling, limit=4000, roots=_roots_for(profile))
+        if extra and extra not in guidelines:
+            guidelines = (guidelines + "\n\n" + extra).strip() if guidelines else extra
+    parts = []
+    body = parsed["body"].strip()
+    if not body and not parsed["guidelines"] and not parsed["avatars"]:
+        body = raw.strip()
+    if body:
+        parts.append(body)
+    if guidelines.strip():
+        parts.append("Brand guidelines:\n" + guidelines.strip())
+    return _bound_text("\n\n".join(parts), _PROFILE_LIMIT)
+
+
+def _preset_avatars(project: dict) -> list[dict]:
+    raw, _path = _read_product_note(project)
+    parsed = _parse_product_document(raw)
+    rows = []
+    for label, text in parsed["avatars"]:
+        rows.append({
+            "id": _stable_avatar_id("preset", label + "\n" + text),
+            "label": label,
+            "text": text,
+            "source": "preset",
+        })
+    return rows
+
+
+def _upsert_avatar(project: dict, text: str, label: str) -> None:
+    """Remember an audience on the product. Caller holds the studio lock."""
+    cleaned = (text or "").strip()[:2000]
+    key = _product_key(project)
+    if not cleaned or not key:
+        return
+    store = _read_store()
+    library = dict(store.get("audience_library") or {})
+    rows = [dict(row) for row in library.get(key) or [] if isinstance(row, dict)]
+    needle = cleaned.casefold()
+    found = next((row for row in rows if str(row.get("text") or "").strip().casefold() == needle), None)
+    cleaned_label = (label or "").strip()[:80]
+    if found:
+        if cleaned_label:
+            found["label"] = cleaned_label
+        elif not str(found.get("label") or "").strip():
+            found["label"] = cleaned.splitlines()[0][:80]
+        found["text"] = cleaned
+        found["id"] = _stable_avatar_id("saved", cleaned, str(found.get("id") or ""))
+        found["updated_at"] = _now()
+    else:
+        rows.append({
+            "id": _stable_avatar_id("saved", cleaned),
+            "label": cleaned_label or cleaned.splitlines()[0][:80],
+            "text": cleaned,
+            "updated_at": _now(),
+        })
+    rows.sort(key=lambda row: str(row.get("updated_at") or ""), reverse=True)
+    library[key] = rows[:40]
+    store["audience_library"] = library
+    _write_store(store)
+
+
+def _audience_avatars(project: dict) -> list[dict]:
+    """Product presets, then avatars saved or used on creatives for this product."""
+    key = _product_key(project)
+    merged: list[dict] = []
+    seen: set[str] = set()
+
+    def add(avatar_id: str, label: str, text: str, source: str) -> None:
+        cleaned = (text or "").strip()
+        token = cleaned.casefold()
+        if not cleaned or token in seen:
+            return
+        seen.add(token)
+        merged.append({
+            "id": avatar_id,
+            "label": ((label or cleaned.splitlines()[0]).strip()[:80]),
+            "text": cleaned[:2000],
+            "source": source,
+        })
+
+    for preset in _preset_avatars(project):
+        add(preset["id"], preset["label"], preset["text"], "preset")
+    store = _read_store()
+    if key:
+        for row in (store.get("audience_library") or {}).get(key) or []:
+            if not isinstance(row, dict):
+                continue
+            add(str(row.get("id") or _stable_avatar_id("saved", str(row.get("text") or ""))), str(row.get("label") or ""), str(row.get("text") or ""), "saved")
+        for other in _iter_projects():
+            if _product_key(other) != key:
+                continue
+            text = _field_text(other, "brief", "audience_notes")
+            if not text:
+                continue
+            add("ad_" + str(other.get("id") or ""), text.splitlines()[0], text, "history")
+    return merged
+
+
+def _normalize_audience_blocks(raw) -> dict:
+    cleaned = {name: [] for name in AUDIENCE_BLOCK_FIELDS}
+    if not isinstance(raw, dict):
+        return cleaned
+    for name in AUDIENCE_BLOCK_FIELDS:
+        rows = raw.get(name)
+        if not isinstance(rows, list):
+            continue
+        grouped: dict[str, list[dict]] = {}
+        seen: set[tuple[str, str]] = set()
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            text = str(row.get("text") or "").strip()[:2000]
+            product_key = _clean_product_key(str(row.get("product_key") or ""))
+            token = (product_key, text.casefold())
+            if not text or not product_key or token in seen:
+                continue
+            seen.add(token)
+            grouped.setdefault(product_key, []).append({
+                "text": text,
+                "product_key": product_key,
+                "updated_at": str(row.get("updated_at") or ""),
+            })
+        kept = []
+        for group in grouped.values():
+            group.sort(key=lambda item: str(item.get("updated_at") or ""), reverse=True)
+            kept.extend(group[:_AUDIENCE_BLOCK_CAP])
+        cleaned[name] = kept
+    return cleaned
+
+
+def _block_stamp() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="microseconds")
+
+
+def _block_id(field: str, text: str) -> str:
+    digest = hashlib.sha256(f"{field}\n{(text or '').casefold()}".encode()).hexdigest()[:12]
+    return "bk_" + digest
+
+
+def _upsert_audience_block(project: dict, field: str, text: str) -> None:
+    """Remember one audience block. Caller holds the studio lock."""
+    cleaned = (text or "").strip()[:2000]
+    key = _product_key(project)
+    if field not in AUDIENCE_BLOCK_FIELDS or not cleaned or not key:
+        return
+    store = _read_store()
+    blocks = {name: [] for name in AUDIENCE_BLOCK_FIELDS}
+    stored = store.get("audience_blocks") or {}
+    if isinstance(stored, dict):
+        for name in AUDIENCE_BLOCK_FIELDS:
+            blocks[name] = [dict(row) for row in stored.get(name) or [] if isinstance(row, dict)]
+    rows = blocks[field]
+    needle = cleaned.casefold()
+    found = next(
+        (
+            row for row in rows
+            if _clean_product_key(str(row.get("product_key") or "")) == key
+            and str(row.get("text") or "").strip().casefold() == needle
+        ),
+        None,
+    )
+    if found:
+        found["text"] = cleaned
+        found["product_key"] = key
+        found["updated_at"] = _block_stamp()
+    else:
+        rows.append({"text": cleaned, "product_key": key, "updated_at": _block_stamp()})
+    store["audience_blocks"] = _normalize_audience_blocks(blocks)
+    _write_store(store)
+
+
+def _audience_blocks(project: dict) -> dict:
+    """Saved blocks for this product, then the same fields from other products."""
+    current_key = _product_key(project)
+    library = _read_store().get("audience_blocks") or {}
+    projects = _iter_projects()
+    view = {}
+    for field in AUDIENCE_BLOCK_FIELDS:
+        merged: dict[tuple[str, str], dict] = {}
+
+        def add(text: str, product_key: str, updated_at: str) -> None:
+            cleaned = (text or "").strip()[:2000]
+            key = _clean_product_key(product_key)
+            if not cleaned or not key:
+                return
+            token = (key, cleaned.casefold())
+            stamp = str(updated_at or "")
+            row = merged.get(token)
+            if row is None or stamp > str(row["updated_at"]):
+                merged[token] = {"text": cleaned, "product_key": key, "updated_at": stamp}
+
+        for row in library.get(field) or []:
+            if isinstance(row, dict):
+                add(str(row.get("text") or ""), str(row.get("product_key") or ""), str(row.get("updated_at") or ""))
+        for other in projects:
+            add(_field_text(other, "who", field), _product_key(other), str(other.get("updated_at") or ""))
+
+        product_rows = [
+            row for row in merged.values()
+            if current_key and row["product_key"] == current_key
+        ]
+        product_rows.sort(key=lambda row: row["updated_at"], reverse=True)
+        product_text = {row["text"].casefold() for row in product_rows}
+        product_rows = product_rows[:_AUDIENCE_BLOCK_CAP]
+        global_rows: dict[str, dict] = {}
+        for row in merged.values():
+            if current_key and row["product_key"] == current_key:
+                continue
+            token = row["text"].casefold()
+            if token in product_text:
+                continue
+            prev = global_rows.get(token)
+            if prev is None or row["updated_at"] > prev["updated_at"]:
+                global_rows[token] = row
+        ordered_global = sorted(global_rows.values(), key=lambda row: row["updated_at"], reverse=True)
+        ordered_global = ordered_global[:_AUDIENCE_BLOCK_CAP]
+
+        def present(row: dict, scope: str) -> dict:
+            text = row["text"]
+            label = (text.splitlines()[0] if text else "").strip()[:80]
+            return {"id": _block_id(field, text), "label": label, "text": text, "scope": scope}
+
+        view[field] = (
+            [present(row, "product") for row in product_rows]
+            + [present(row, "global") for row in ordered_global]
+        )
+    return view
+
+
+def _clip_segment_input(text: str) -> str:
+    collapsed = re.sub(r"\s+", " ", (text or "").strip())
+    if len(collapsed) <= _SEGMENT_INPUT_LIMIT:
+        return collapsed
+    return collapsed[: _SEGMENT_INPUT_LIMIT - 1].rstrip() + "…"
+
+
+def _clean_segment_sentence(text: str) -> str:
+    collapsed = re.sub(r"\s+", " ", (text or "").strip())
+    collapsed = collapsed.strip("\"'`")
+    collapsed = re.sub(r"^(audience segment|segment)\s*:\s*", "", collapsed, flags=re.IGNORECASE)
+    collapsed = collapsed.strip()
+    if len(collapsed) <= _SEGMENT_OUTPUT_LIMIT:
+        return collapsed
+    return collapsed[: _SEGMENT_OUTPUT_LIMIT - 1].rstrip() + "…"
+
+
+def _message_text(content) -> str:
+    if content is None or type(content).__module__.startswith("unittest.mock"):
+        return ""
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                parts.append(str(item.get("text") or item.get("content") or ""))
+            else:
+                piece = getattr(item, "text", None)
+                if piece is not None and not type(piece).__module__.startswith("unittest.mock"):
+                    parts.append(str(piece))
+        return " ".join(part.strip() for part in parts if part and part.strip()).strip()
+    return str(content).strip()
+
+
+def _segment_response_text(resp) -> str:
+    if isinstance(resp, str):
+        return resp.strip()
+    if isinstance(resp, dict):
+        choices = resp.get("choices") or []
+    else:
+        choices = getattr(resp, "choices", None) or []
+    if not choices:
+        return ""
+    choice = choices[0]
+    message = choice.get("message") if isinstance(choice, dict) else getattr(choice, "message", None)
+    if message is None:
+        return ""
+    content = message.get("content") if isinstance(message, dict) else getattr(message, "content", None)
+    return _message_text(content)
+
+
+def _call_segment_llm(messages: list[dict]) -> str:
+    """One auxiliary completion on the title-generation route."""
+    try:
+        from agent.auxiliary_client import _get_auxiliary_task_config, call_llm
+    except Exception as exc:
+        logger.debug("segment model import failed: %s", type(exc).__name__)
+        raise StudioError("Could not generate a segment.", status=502) from exc
+    try:
+        configured = _get_auxiliary_task_config("title_generation")
+    except Exception:
+        configured = {}
+    if not isinstance(configured, dict):
+        configured = {}
+    provider = str(configured.get("provider") or "")
+    model = str(configured.get("model") or "")
+    base_url = str(configured.get("base_url") or "")
+    api_key = str(configured.get("api_key") or "").strip()
+    if provider.strip().lower() == "auto":
+        provider = ""
+    try:
+        from api.profiles import _split_webui_provider_model_value
+
+        normalized_model, normalized_provider = _split_webui_provider_model_value(
+            model or None,
+            provider or None,
+        )
+        model = normalized_model or ""
+        provider = normalized_provider or ""
+    except Exception:
+        pass
+    timeout = 20.0
+    raw_timeout = configured.get("timeout")
+    try:
+        if raw_timeout is not None and float(raw_timeout) > 0:
+            timeout = float(raw_timeout)
+    except (TypeError, ValueError):
+        timeout = 20.0
+    try:
+        resp = call_llm(
+            task="title_generation",
+            provider=provider or None,
+            model=model or None,
+            base_url=base_url or None,
+            api_key=api_key or None,
+            messages=messages,
+            max_tokens=200,
+            temperature=0.2,
+            timeout=timeout,
+        )
+    except Exception as exc:
+        logger.debug("segment model call failed: %s", type(exc).__name__)
+        raise StudioError("Could not generate a segment.", status=502) from exc
+    text = _segment_response_text(resp)
+    if not text:
+        raise StudioError("Could not generate a segment.", status=502)
+    return text
+
+
+def _synthesize_segment(outcome: str, demographic: str, facet: str) -> str:
+    if not all(str(part or "").strip() for part in (outcome, demographic, facet)):
+        raise StudioError("Add an outcome, demographic, and facet first.")
+    raw = _call_segment_llm([
+        {"role": "system", "content": _SEGMENT_SYSTEM},
+        {
+            "role": "user",
+            "content": (
+                f"Outcome: {_clip_segment_input(outcome)}\n"
+                f"Demographic: {_clip_segment_input(demographic)}\n"
+                f"Facet: {_clip_segment_input(facet)}"
+            ),
+        },
+    ])
+    sentence = _clean_segment_sentence(raw)
+    if not sentence:
+        raise StudioError("Could not generate a segment.", status=502)
+    return sentence
 
 
 def studio_prompt_pack(project_id: str, stage: str = "") -> dict:
@@ -2275,6 +2954,9 @@ def _studio_job(project: dict) -> str:
         "Do not edit the project store any other way. "
         "If required context for a field is missing, ask for it or mark the "
         "proposal exploratory. Do not present a guess as grounded. "
+        "The product profile in this prompt is the product source of truth. "
+        "Do not ask the user to paste product facts, and do not mark a proposal "
+        "exploratory only because brief.product_facts is empty. "
         "Name the wizard step and the field on every proposal."
     )
 
@@ -2440,8 +3122,11 @@ def _render_studio_context(project: dict, binding: dict, note: str) -> str:
         f"Project: {project.get('name') or ''}",
         f"Product: {_product_name(project) or '(none)'}",
     ]
+    product_id = _product_id(project)
+    if product_id:
+        parts.append(f"Product id: {product_id}")
     if note:
-        parts.append("Product note:\n" + note)
+        parts.append("Product profile:\n" + note)
     parts.append(_studio_job(project))
     if stage:
         status = ((project.get("stages") or {}).get(stage) or {}).get("status") or "not_started"

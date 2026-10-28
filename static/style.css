@@ -5304,10 +5304,21 @@ main.main > #mainPlugin{display:none;}
 .creative-field.isolated{padding:8px 10px;border-radius:10px;box-shadow:inset 0 0 0 1px var(--text);}
 #mainCreative .creative-isolate{padding:2px 8px;border:none;border-radius:999px;background:transparent;color:var(--muted);font-size:11px;font-weight:600;}
 #mainCreative .creative-isolate:hover,#mainCreative .creative-isolate.on{background:var(--accent-bg);color:var(--text);border:none;}
-.creative-field textarea,.creative-field input{width:100%;box-sizing:border-box;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px 10px;font:inherit;font-size:14px;text-align:start;}
+.creative-field textarea,.creative-field input,.creative-field select{width:100%;box-sizing:border-box;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px 10px;font:inherit;font-size:14px;text-align:start;}
+#mainCreative .creative-pills{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 8px;}
+#mainCreative .creative-fields button.creative-pill{border-radius:999px;background:transparent;color:var(--text);padding:6px 12px;}
+#mainCreative .creative-fields button.creative-pill[aria-pressed="true"]{background:var(--text);color:var(--bg);border-color:var(--text);}
+.creative-block-picker{margin:0 0 8px;}
+.creative-generate-wrap{display:inline-flex;}
+#creativeGenerateSegment:disabled{pointer-events:none;}
+.creative-segment-error{color:#c47b2b;font-size:12px;margin:0 0 8px;}
+.creative-segment-error:empty{display:none;}
+.creative-avatar-create{display:flex;flex-direction:column;gap:6px;margin-top:8px;}
+.creative-avatar-create textarea{min-height:64px;}
+#mainCreative .creative-avatar-create .creative-primary{align-self:flex-start;}
 .creative-suggest-block p{text-align:start;}
 .creative-field textarea{min-height:88px;resize:vertical;}
-.creative-field input:focus,.creative-field textarea:focus,.creative-composer textarea:focus{outline:2px solid var(--text);outline-offset:1px;}
+.creative-field input:focus,.creative-field textarea:focus,.creative-field select:focus,.creative-composer textarea:focus{outline:2px solid var(--text);outline-offset:1px;}
 .creative-help{color:var(--muted);font-size:12px;margin:0 0 8px;line-height:1.45;}
 .creative-help-more{margin:0 0 6px;font-size:12px;color:var(--muted);}
 .creative-claim{font-size:11px;margin-left:6px;color:var(--muted);font-weight:500;}

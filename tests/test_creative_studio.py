@@ -728,3 +728,229 @@ def test_creative_write_falls_back_on_the_bound_profile_when_unauthenticated(mon
     result = mcp_server._creative_write("/api/creative-studio/projects/p/fields", {}, fallback)
     assert called["fell_back"] is True
     assert result == {"saved": "copywriting"}
+
+
+def test_product_profile_grounds_a_draft_without_manual_facts(studio, tmp_path, monkeypatch):
+    vault = tmp_path / "Products"
+    vault.mkdir()
+    (vault / "Trail Shoes.md").write_text(
+        "---\n"
+        "avatars:\n"
+        "  - label: Night bakers\n"
+        "    text: People who bake after a night shift.\n"
+        "guidelines: Say the shoe is a trainer, not a medical device.\n"
+        "---\n"
+        "Cushioned daily trainer.\n\n"
+        "## Avatars\n"
+        "### Weekend runners\n"
+        "People who run on Saturday.\n\n"
+        "## Brand guidelines\n"
+        "No before-and-after medical claims.\n",
+        encoding="utf-8",
+    )
+    (vault / "Trail Shoes.guidelines.md").write_text("Keep the voice specific.", encoding="utf-8")
+    monkeypatch.setattr(studio, "product_catalog_roots", lambda: [("obsidian", vault)])
+    project = studio.create_project("Run", "Trail Shoes", product_source=str(vault / "Trail Shoes.md"))
+    opened = studio.get_project(project["id"])
+    assert opened["exploratory_product"] is False
+    assert "brief.product_facts" not in opened["field_context"]["concept"]["required"]
+    labels = [row["label"] for row in opened["audience_avatars"]]
+    assert labels[:2] == ["Night bakers", "Weekend runners"]
+    assert all(row["source"] == "preset" for row in opened["audience_avatars"][:2])
+    studio.update_field(project["id"], "who", "segment", "Night bakers", author="user")
+    view = studio.get_project(project["id"], field="concept", for_suggestion=True)
+    assert view["exploratory"] is False
+    assert "brief.product_facts" not in view["missing"]
+    profile = view["context"]["product_profile"]["text"]
+    assert "Cushioned daily trainer." in profile
+    assert "Say the shoe is a trainer" in profile
+    assert "No before-and-after medical claims." in profile
+    assert "Keep the voice specific." in profile
+    assert view["context"]["product_profile"]["product_id"].endswith("Trail Shoes.md")
+    bare = studio.create_project("Mug creative", "Mug")
+    studio.update_field(bare["id"], "who", "segment", "Desk workers", author="user")
+    bare_view = studio.get_project(bare["id"], field="concept", for_suggestion=True)
+    assert bare_view["exploratory"] is False
+    assert studio.get_project(bare["id"])["exploratory_product"] is False
+
+
+def test_saved_avatar_is_reusable_for_the_same_product(studio, tmp_path, monkeypatch):
+    vault = tmp_path / "Products"
+    vault.mkdir()
+    note = vault / "Trail Shoes.md"
+    note.write_text("Cushioned daily trainer.", encoding="utf-8")
+    monkeypatch.setattr(studio, "product_catalog_roots", lambda: [("obsidian", vault)])
+    source = str(note)
+    first = studio.create_project("Launch", "Trail Shoes", product_source=source)
+    saved = studio.save_audience_avatar(first["id"], "Night bakers", "People who bake after a night shift.")
+    assert saved["stages"]["brief"]["fields"]["audience_notes"]["text"] == "People who bake after a night shift."
+    studio.update_field(first["id"], "brief", "objective", "Offer & Urgency. Direct promo, bundle push, or limited-time framing.", author="user")
+    studio.update_field(first["id"], "brief", "audience_notes", "", author="user")
+    cleared = studio.get_project(first["id"])
+    assert cleared["stages"]["brief"]["fields"]["audience_notes"]["text"] == ""
+    remembered = next(row for row in cleared["audience_avatars"] if row["label"] == "Night bakers")
+    assert remembered["source"] == "saved"
+    assert remembered["text"] == "People who bake after a night shift."
+    second = studio.create_project("Retarget", "Trail Shoes", product_source=source)
+    again = studio.get_project(second["id"])
+    assert any(row["label"] == "Night bakers" for row in again["audience_avatars"])
+    studio.update_field(second["id"], "who", "segment", "Unrelated", author="user")
+    assert any(row["label"] == "Night bakers" for row in studio.get_project(first["id"])["audience_avatars"])
+    with pytest.raises(studio.StudioError):
+        studio.save_audience_avatar(studio.create_project("Nameless")["id"], "Nope", "Nobody")
+
+
+def test_brief_step_drops_the_facts_box_and_exploratory_warning():
+    script = Path(__file__).resolve().parents[1].joinpath("static", "creative_studio.js").read_text(encoding="utf-8")
+    assert "Product facts are not on file" not in script
+    assert "Nothing here is being treated as a known fact" not in script
+    assert "_creativeFieldCard('brief','product_facts')" not in script
+    assert "Cold Acquisition (Direct Sale)" in script
+    assert "Symptom Aware (Educate & Bridge)" in script
+    assert "Retargeting & Objections" in script
+    assert "Offer & Urgency" in script
+    assert "+ New Avatar" in script
+    assert "function creativeSaveAvatar" in script
+    assert "/avatars" in script
+
+
+def test_audience_blocks_are_reusable_across_products(studio):
+    first = studio.create_project("Launch", "Trail Shoes")
+    studio.update_field(first["id"], "who", "outcome", "Fewer blisters", author="user")
+    studio.update_field(first["id"], "who", "outcome", "fewer blisters", author="user")
+    studio.update_field(first["id"], "who", "outcome", "No hot spots", author="user")
+    studio.update_field(first["id"], "who", "segment", "Not a block", author="user")
+    second = studio.create_project("Mug ad", "Desk Mug")
+    studio.update_field(second["id"], "who", "outcome", "Hot coffee", author="user")
+    studio.update_field(second["id"], "who", "demographic", "Night shift", author="user")
+    studio.update_field(second["id"], "who", "facet", "Shared friction", author="user")
+    nameless = studio.create_project("Nameless")
+    studio.update_field(nameless["id"], "who", "outcome", "Nobody", author="user")
+
+    opened = studio.get_project(first["id"])
+    outcomes = opened["audience_blocks"]["outcome"]
+    product = [row["text"] for row in outcomes if row["scope"] == "product"]
+    assert product == ["No hot spots", "fewer blisters"]
+    assert [row["text"] for row in outcomes if row["scope"] == "global"] == ["Hot coffee"]
+    assert all(row["id"].startswith("bk_") and row["label"] for row in outcomes)
+    assert "Not a block" not in [row["text"] for row in outcomes]
+    assert "Nobody" not in [row["text"] for row in outcomes]
+    demos = opened["audience_blocks"]["demographic"]
+    assert any(row["text"] == "Night shift" and row["scope"] == "global" for row in demos)
+
+    path = studio._store_path()
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["audience_blocks"] = {}
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    wiped = studio.get_project(first["id"])
+    restored = [row["text"] for row in wiped["audience_blocks"]["outcome"] if row["scope"] == "product"]
+    assert restored == ["No hot spots"]
+    assert any(row["text"] == "Hot coffee" and row["scope"] == "global" for row in wiped["audience_blocks"]["outcome"])
+    assert "fewer blisters" not in [row["text"].casefold() for row in wiped["audience_blocks"]["outcome"]]
+
+    studio.update_field(second["id"], "who", "outcome", "No hot spots", author="user")
+    again = studio.get_project(first["id"])
+    global_outcomes = [row["text"].casefold() for row in again["audience_blocks"]["outcome"] if row["scope"] == "global"]
+    assert "no hot spots" not in global_outcomes
+
+    for index in range(41):
+        studio.update_field(first["id"], "who", "facet", f"Facet {index}", author="user")
+    capped = studio.get_project(first["id"])["audience_blocks"]["facet"]
+    product_facets = [row["text"] for row in capped if row["scope"] == "product"]
+    assert product_facets[0] == "Facet 40"
+    assert len(product_facets) == 40
+    assert "Facet 0" not in product_facets
+    assert any(row["text"] == "Shared friction" and row["scope"] == "global" for row in capped)
+
+
+def test_generate_segment_requires_the_three_blocks(studio, monkeypatch):
+    project = studio.create_project("Run", "Trail Shoes")
+    called = []
+    monkeypatch.setattr(studio, "_synthesize_segment", lambda *args: called.append(args) or "unused")
+    with pytest.raises(studio.StudioError, match="outcome, demographic, and facet"):
+        studio.generate_segment(project["id"])
+    studio.update_field(project["id"], "who", "outcome", "Fewer blisters", author="user")
+    studio.update_field(project["id"], "who", "demographic", "Weekend runners", author="user")
+    with pytest.raises(studio.StudioError, match="outcome, demographic, and facet"):
+        studio.generate_segment(project["id"])
+    assert called == []
+
+
+def test_generate_segment_writes_one_editable_sentence(studio, monkeypatch):
+    project = studio.create_project("Run", "Trail Shoes")
+    studio.update_field(project["id"], "who", "outcome", "Fewer blisters", author="user")
+    studio.update_field(project["id"], "who", "demographic", "Weekend runners", author="user")
+    studio.update_field(project["id"], "who", "facet", "They start on cold pavement", author="user")
+    studio.update_field(project["id"], "what", "concept", "One idea", author="user")
+    monkeypatch.setattr(
+        studio,
+        "_synthesize_segment",
+        lambda outcome, demographic, facet: (
+            "Weekend runners experiencing cold pavement, actively seeking fewer blisters"
+            if outcome == "Fewer blisters" and demographic == "Weekend runners" else ""
+        ),
+    )
+    saved = studio.generate_segment(project["id"])
+    segment = saved["stages"]["who"]["fields"]["segment"]
+    assert segment["text"] == "Weekend runners experiencing cold pavement, actively seeking fewer blisters"
+    assert segment["author"] == "user"
+    assert saved["stages"]["who"]["fields"]["outcome"]["text"] == "Fewer blisters"
+    assert saved["stages"]["who"]["fields"]["demographic"]["text"] == "Weekend runners"
+    assert saved["stages"]["who"]["fields"]["facet"]["text"] == "They start on cold pavement"
+    assert saved["stages"]["what"]["fields"]["concept"]["needs_review"] is True
+
+
+def test_generate_segment_keeps_the_previous_sentence_when_synthesis_fails(studio, monkeypatch):
+    project = studio.create_project("Run", "Trail Shoes")
+    studio.update_field(project["id"], "who", "outcome", "Fewer blisters", author="user")
+    studio.update_field(project["id"], "who", "demographic", "Weekend runners", author="user")
+    studio.update_field(project["id"], "who", "facet", "Cold pavement", author="user")
+    studio.update_field(project["id"], "who", "segment", "Hand written", author="user")
+
+    def fail(outcome, demographic, facet):
+        raise studio.StudioError("Could not generate a segment.", status=502)
+
+    monkeypatch.setattr(studio, "_synthesize_segment", fail)
+    with pytest.raises(studio.StudioError, match="Could not generate a segment"):
+        studio.generate_segment(project["id"])
+    assert studio.get_project(project["id"])["stages"]["who"]["fields"]["segment"]["text"] == "Hand written"
+
+    monkeypatch.setattr(studio, "_synthesize_segment", lambda *args: "   ")
+    with pytest.raises(studio.StudioError, match="Could not generate a segment"):
+        studio.generate_segment(project["id"])
+    assert studio.get_project(project["id"])["stages"]["who"]["fields"]["segment"]["text"] == "Hand written"
+
+
+def test_synthesize_segment_sends_only_the_three_blocks(studio, monkeypatch):
+    seen = {}
+
+    def fake(messages):
+        seen["messages"] = messages
+        return "People experiencing friction, actively seeking relief."
+
+    monkeypatch.setattr(studio, "_call_segment_llm", fake)
+    sentence = studio._synthesize_segment("relief " + ("x" * 600), "People", "friction")
+    assert sentence == "People experiencing friction, actively seeking relief."
+    system, user = seen["messages"]
+    assert "actively seeking" in system["content"]
+    assert "Outcome: relief " in user["content"]
+    assert "Demographic: People" in user["content"]
+    assert "Facet: friction" in user["content"]
+    outcome_line = user["content"].splitlines()[0]
+    assert len(outcome_line) <= len("Outcome: ") + 500
+    assert outcome_line.endswith("…")
+
+
+def test_audience_step_wires_reuse_and_generation():
+    script = Path(__file__).resolve().parents[1].joinpath("static", "creative_studio.js").read_text(encoding="utf-8")
+    assert "function _creativeWhoBody" in script
+    assert "function creativePickBlock" in script
+    assert "function creativeGenerateSegment" in script
+    assert "Reuse a saved outcome" in script
+    assert "Reuse a saved demographic" in script
+    assert "Reuse a saved facet" in script
+    assert "This product" in script
+    assert "Other projects" in script
+    assert "Generate segment" in script
+    assert "Add an outcome, demographic, and facet first." in script
+    assert "/segment" in script
