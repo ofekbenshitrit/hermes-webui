@@ -108,6 +108,72 @@ def test_upstream_edit_preserves_downstream_and_flags_review(studio):
     assert hook["data"]["status"] == "review_recommended"
 
 
+def test_field_review_flags_only_dependents(studio):
+    project = studio.create_project("Deps")
+    studio.update_field(project["id"], "copy", "pain", "Cold stairs", author="user")
+    demo = studio.update_field(project["id"], "who", "demographic", "Night shift", author="user")
+    assert all(item["field"] != "pain" for item in demo["review_fields"])
+    assert not studio.get_project(project["id"], field="pain")["data"].get("needs_review")
+    studio.update_field(project["id"], "hook", "final_hook", "Keep the line", author="user")
+    studio.set_stage_status(project["id"], "hook", "approved")
+    flagged = studio.update_field(project["id"], "what", "concept", "One quiet idea", author="user")
+    assert {"stage": "hook", "field": "final_hook"} in flagged["review_fields"]
+    hook = studio.get_project(project["id"], stage="hook")["data"]
+    assert hook["fields"]["final_hook"]["text"] == "Keep the line"
+    assert hook["fields"]["final_hook"]["needs_review"] is True
+    assert hook["status"] == "review_recommended"
+    studio.update_field(project["id"], "hook", "final_hook", "Keep the line.", author="user")
+    cleared = studio.get_project(project["id"], stage="hook")["data"]
+    assert cleared["fields"]["final_hook"]["text"] == "Keep the line."
+    assert not cleared["fields"]["final_hook"].get("needs_review")
+    assert cleared["status"] == "draft"
+
+
+def test_handoff_omits_hook_process_and_full_keeps_it(studio):
+    project = studio.create_project("Handoff")
+    studio.update_field(project["id"], "hook", "final_hook", "Ship this line", author="user")
+    studio.update_field(project["id"], "hook", "deep_fry", "Process draft", author="user")
+    studio.update_field(project["id"], "copy", "pain", "Included pain", author="user")
+    studio.update_field(project["id"], "copy", "promise", "Hidden promise", author="user", include=False)
+    handoff = studio.export_markdown(project["id"], include_alternatives=True)
+    assert handoff["mode"] == "handoff"
+    assert "Ship this line" in handoff["markdown"]
+    assert "Process draft" not in handoff["markdown"]
+    assert "Included pain" in handoff["markdown"]
+    assert "Hidden promise" not in handoff["markdown"]
+    assert "Status:" not in handoff["markdown"]
+    assert "Author:" not in handoff["markdown"]
+    assert "_Empty._" not in handoff["markdown"]
+    full = studio.export_markdown(project["id"], mode="full")
+    assert "Process draft" in full["markdown"]
+    assert "Status:" in full["markdown"]
+
+
+def test_legacy_review_survives_a_missing_field(studio):
+    project = studio.create_project("Legacy shape")
+    studio.update_field(project["id"], "hook", "final_hook", "Keep", author="user")
+    studio.set_stage_status(project["id"], "hook", "review_recommended")
+    path = studio._store_path()
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    del payload["projects"][project["id"]]["stages"]["hook"]["fields"]["format"]
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    loaded = studio.get_project(project["id"])
+    hook = loaded["stages"]["hook"]
+    assert hook["status"] == "review_recommended"
+    assert hook["fields"]["final_hook"]["text"] == "Keep"
+    assert "needs_review" not in hook["fields"]["final_hook"]
+    assert hook["fields"]["format"]["text"] == ""
+    assert "format" in studio.FIELDS["hook"] and "hook_type" in studio.FIELDS["hook"]
+
+
+def test_core_trigger_does_not_require_a_hook_type(studio):
+    project = studio.create_project("Idea")
+    view = studio.get_project(project["id"], field="core_trigger", for_suggestion=True)
+    assert "hook.hook_type" not in view["missing"]
+    assert "what.concept" in view["missing"]
+    assert "hook.hook_type" in view["helpful_missing"]
+
+
 def test_ambiguous_name_does_not_write(studio):
     studio.create_project("Same")
     studio.create_project("Same")
@@ -131,11 +197,14 @@ def test_export_claim_labels_and_optional_alternatives(studio):
     proposal = studio.save_proposal(project["id"], "what", "mechanism", "Unused alternative")
     studio.save_alternative(project["id"], proposal["proposal"]["id"])
     quiet = studio.export_markdown(project["id"], include_alternatives=False)
+    assert quiet["mode"] == "handoff"
     assert "needs_verification" in quiet["markdown"]
     assert "Unused alternative" not in quiet["markdown"]
     assert "does not certify" in quiet["markdown"]
-    loud = studio.export_markdown(project["id"], include_alternatives=True)
+    assert "Status:" not in quiet["markdown"]
+    loud = studio.export_markdown(project["id"], include_alternatives=True, mode="full")
     assert "Unused alternative" in loud["markdown"]
+    assert "Status:" in loud["markdown"]
 
 
 def test_summary_confirmation_does_not_copy_assumptions_into_facts(studio):
@@ -295,6 +364,14 @@ def test_static_panel_wires_stage_switch_proposals_and_export():
     assert "Suggest directions" not in script
     assert "function creativeExport" in script
     assert "function creativeCopyExport" in script
+    assert "function creativeMoveStage" in script
+    assert ">Back</button>" in script
+    assert ">Continue</button>" in script
+    assert 'data-export-mode="handoff"' in script
+    assert 'data-export-mode="full"' in script
+    assert 'data-hook-group="direction"' in script
+    assert "mode=${encodeURIComponent(mode)}" in script
+    assert "writeText(text)" in script
     assert "Nothing is selected for you until you replace a field." in script
     assert ">Replace</button>" in script
     sessions = (root / "static" / "sessions.js").read_text(encoding="utf-8")

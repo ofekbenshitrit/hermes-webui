@@ -606,6 +606,10 @@ _CREATIVE_CONTRACT = (
     "Critique notes gaps and unsupported claims and revises only when asked. "
     "Never invent proof, numbers, testimonials, features, outcomes, or usage conditions. "
     "Framework examples are copywriting examples, not evidence. "
+    "Wizard order is brief, who, what, hook, casts, then copy. "
+    "hook.format is placement. hook_type is the opening approach. They are different fields. "
+    "final_hook is the selected opening. caveman_simple, deep_fry, walk_it_back, and make_it_bang are working notes. "
+    "If required context is missing, ask or mark the proposal exploratory. Do not present a guess as grounded. "
     "After a write, the result includes project, field, and saved text. If a write fails, say so."
 )
 
@@ -881,9 +885,11 @@ async def handle_export_creative_project(arguments: dict) -> list[TextContent]:
 
     project_id = str(arguments.get("project_id") or "")
     include = arguments.get("include_alternatives")
+    mode = arguments.get("mode")
     return _creative_text(_creative_store_call(lambda: export_markdown(
         project_id,
         include_alternatives=None if include is None else bool(include),
+        mode=None if mode is None else str(mode),
     )))
 
 
@@ -1150,12 +1156,13 @@ TOOLS = [
     ),
     Tool(
         name="export_creative_project",
-        description="Export the selected Creative Studio answers as Markdown, including claim labels. Alternatives are included only when include_alternatives is true. Does not write a finished ad script." + _CREATIVE_CONTRACT,
+        description="Export a Creative Studio project. mode handoff (default) is the selected final brief. mode full is the working document with statuses, intermediate fields, and decision notes. Alternatives are included only in full mode when include_alternatives is true. Does not write a finished ad script." + _CREATIVE_CONTRACT,
         inputSchema={
             "type": "object",
             "properties": {
                 "project_id": {"type": "string"},
                 "include_alternatives": {"type": "boolean"},
+                "mode": {"type": "string", "enum": ["handoff", "full"]},
             },
             "required": ["project_id"],
         },

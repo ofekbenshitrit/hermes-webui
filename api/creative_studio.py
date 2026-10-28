@@ -75,8 +75,8 @@ FIELDS: dict[str, tuple[str, ...]] = {
     "review": (),
 }
 
-# Changing a field marks these later stages review_recommended when they
-# already hold work. Empty not_started stages stay untouched.
+# Older stage-wide cascade. The write path uses FIELD_REVIEW_INDEX instead,
+# so an edit flags only fields that list the edited field as context.
 DOWNSTREAM: dict[str, tuple[str, ...]] = {
     "brief": ("who", "what", "hook", "casts", "copy"),
     "who": ("what", "hook", "casts", "copy"),
@@ -87,44 +87,176 @@ DOWNSTREAM: dict[str, tuple[str, ...]] = {
     "review": (),
 }
 
-# Context a suggestion for this field must include. Missing non-empty checks
-# are reported; the store does not invent values.
-SUGGESTION_CONTEXT: dict[str, tuple[tuple[str, str], ...]] = {
-    "segment": (
-        ("brief", "product_facts"),
-        ("brief", "audience_notes"),
-        ("brief", "objective"),
-        ("who", "outcome"),
-        ("who", "demographic"),
-        ("who", "facet"),
-    ),
-    "concept": (("who", "segment"), ("brief", "product_facts")),
-    "angle": (("who", "segment"), ("brief", "product_facts"), ("what", "concept")),
-    "ump": (("who", "segment"), ("brief", "product_facts"), ("what", "concept")),
-    "ums": (("who", "segment"), ("brief", "product_facts"), ("what", "concept"), ("what", "ump")),
-    "mechanism": (("who", "segment"), ("brief", "product_facts"), ("what", "ump"), ("what", "ums")),
-    "hook_type": (("what", "concept"), ("what", "angle"), ("what", "mechanism"), ("who", "segment"), ("brief", "format_length")),
-    "visual_hook": (("what", "concept"), ("what", "angle"), ("what", "mechanism"), ("who", "segment"), ("hook", "format")),
-    "verbal_hook": (("what", "concept"), ("what", "angle"), ("what", "mechanism"), ("who", "segment"), ("hook", "format")),
-    "core_trigger": (("what", "concept"), ("hook", "hook_type"), ("who", "segment")),
-    "caveman_simple": (("hook", "verbal_hook"), ("what", "concept")),
-    "deep_fry": (("hook", "verbal_hook"), ("what", "concept")),
-    "walk_it_back": (("hook", "verbal_hook"), ("what", "mechanism")),
-    "make_it_bang": (("hook", "verbal_hook"), ("what", "concept")),
-    "final_hook": (("hook", "verbal_hook"), ("hook", "visual_hook"), ("what", "concept"), ("what", "mechanism")),
-    "format": (("brief", "format_length"), ("brief", "channel")),
-    "conceit": (("hook", "final_hook"), ("hook", "format"), ("what", "concept")),
-    "actors": (("hook", "final_hook"), ("casts", "conceit")),
-    "style": (("hook", "final_hook"), ("casts", "conceit")),
-    "terrain": (("hook", "final_hook"), ("casts", "conceit")),
-    "setup": (("hook", "final_hook"), ("hook", "format"), ("casts", "conceit")),
-    "pain": (("who", "segment"), ("what", "concept"), ("what", "mechanism"), ("hook", "final_hook")),
-    "promise": (("who", "segment"), ("what", "concept"), ("what", "mechanism"), ("hook", "final_hook")),
-    "proof": (("who", "segment"), ("what", "concept"), ("what", "mechanism"), ("brief", "sources")),
-    "curiosity": (("who", "segment"), ("what", "concept"), ("hook", "final_hook")),
-    "constraints": (("brief", "product_facts"), ("what", "mechanism")),
-    "conditions": (("brief", "product_facts"), ("what", "mechanism")),
+# required: missing context makes a draft exploratory.
+# helpful: used when present, and an edit still flags dependents that have text.
+FIELD_CONTEXT: dict[str, dict[str, tuple[tuple[str, str], ...]]] = {
+    "outcome": {
+        "required": (("brief", "product_facts"),),
+        "helpful": (("brief", "audience_notes"),),
+    },
+    "demographic": {
+        "required": (("brief", "product_facts"),),
+        "helpful": (("brief", "audience_notes"),),
+    },
+    "facet": {
+        "required": (("brief", "product_facts"),),
+        "helpful": (("brief", "audience_notes"),),
+    },
+    "segment": {
+        "required": (
+            ("brief", "product_facts"),
+            ("who", "outcome"),
+            ("who", "demographic"),
+            ("who", "facet"),
+        ),
+        "helpful": (("brief", "audience_notes"), ("brief", "objective")),
+    },
+    "concept": {
+        "required": (("who", "segment"), ("brief", "product_facts")),
+        "helpful": (("brief", "objective"),),
+    },
+    "angle": {
+        "required": (("who", "segment"), ("what", "concept")),
+        "helpful": (("brief", "product_facts"),),
+    },
+    "ump": {
+        "required": (("who", "segment"), ("what", "concept")),
+        "helpful": (("brief", "product_facts"),),
+    },
+    "ums": {
+        "required": (("who", "segment"), ("what", "concept"), ("what", "ump")),
+        "helpful": (("brief", "product_facts"),),
+    },
+    "mechanism": {
+        "required": (("what", "ump"), ("what", "ums")),
+        "helpful": (("who", "segment"), ("brief", "product_facts")),
+    },
+    "hook_type": {
+        "required": (("what", "concept"), ("who", "segment")),
+        "helpful": (("what", "angle"), ("what", "mechanism"), ("brief", "format_length")),
+    },
+    "format": {
+        "required": (),
+        "helpful": (("brief", "format_length"), ("brief", "channel")),
+    },
+    "visual_hook": {
+        "required": (("what", "concept"), ("who", "segment")),
+        "helpful": (("what", "angle"), ("what", "mechanism"), ("hook", "format")),
+    },
+    "verbal_hook": {
+        "required": (("what", "concept"), ("who", "segment")),
+        "helpful": (("what", "angle"), ("what", "mechanism"), ("hook", "format")),
+    },
+    "core_trigger": {
+        "required": (("what", "concept"), ("who", "segment")),
+        "helpful": (("hook", "hook_type"),),
+    },
+    "caveman_simple": {
+        "required": (("what", "concept"),),
+        "helpful": (("who", "segment"), ("hook", "verbal_hook")),
+    },
+    "deep_fry": {
+        "required": (("what", "concept"),),
+        "helpful": (("hook", "verbal_hook"), ("who", "segment")),
+    },
+    "walk_it_back": {
+        "required": (("what", "concept"), ("what", "mechanism")),
+        "helpful": (("hook", "verbal_hook"), ("brief", "product_facts")),
+    },
+    "make_it_bang": {
+        "required": (("what", "concept"),),
+        "helpful": (("hook", "verbal_hook"), ("hook", "format"), ("hook", "final_hook")),
+    },
+    "final_hook": {
+        "required": (("what", "concept"), ("who", "segment"), ("what", "mechanism")),
+        "helpful": (
+            ("hook", "visual_hook"),
+            ("hook", "verbal_hook"),
+            ("hook", "format"),
+            ("hook", "hook_type"),
+        ),
+    },
+    "conceit": {
+        "required": (("hook", "final_hook"), ("what", "concept")),
+        "helpful": (("hook", "format"),),
+    },
+    "actors": {
+        "required": (("casts", "conceit"),),
+        "helpful": (("hook", "final_hook"),),
+    },
+    "style": {
+        "required": (("casts", "conceit"),),
+        "helpful": (("hook", "final_hook"),),
+    },
+    "terrain": {
+        "required": (("casts", "conceit"),),
+        "helpful": (("hook", "final_hook"),),
+    },
+    "setup": {
+        "required": (("casts", "conceit"), ("hook", "final_hook")),
+        "helpful": (("hook", "format"),),
+    },
+    "pain": {
+        "required": (("who", "segment"), ("what", "concept"), ("hook", "final_hook")),
+        "helpful": (("what", "mechanism"),),
+    },
+    "promise": {
+        "required": (("who", "segment"), ("what", "concept"), ("hook", "final_hook")),
+        "helpful": (("what", "mechanism"),),
+    },
+    "proof": {
+        "required": (("what", "concept"),),
+        "helpful": (("who", "segment"), ("what", "mechanism"), ("brief", "sources")),
+    },
+    "curiosity": {
+        "required": (("what", "concept"), ("hook", "final_hook")),
+        "helpful": (("who", "segment"),),
+    },
+    "constraints": {
+        "required": (("brief", "product_facts"),),
+        "helpful": (("what", "mechanism"),),
+    },
+    "conditions": {
+        "required": (("brief", "product_facts"),),
+        "helpful": (("what", "mechanism"),),
+    },
 }
+
+WIZARD_STEP_LABELS = {
+    "brief": "Product & objective",
+    "who": "Audience",
+    "what": "Core idea",
+    "hook": "Hook",
+    "casts": "Execution",
+    "copy": "Copy & export",
+    "review": "Review",
+}
+EXPORT_MODES = frozenset({"handoff", "full"})
+
+
+def _field_owner(field: str) -> str:
+    for stage, names in FIELDS.items():
+        if field in names:
+            return stage
+    return ""
+
+
+def _review_index() -> dict[tuple[str, str], tuple[tuple[str, str], ...]]:
+    buckets: dict[tuple[str, str], list[tuple[str, str]]] = {}
+    for field, spec in FIELD_CONTEXT.items():
+        owner = _field_owner(field)
+        if not owner:
+            continue
+        target = (owner, field)
+        for kind in ("required", "helpful"):
+            for edge in spec.get(kind) or ():
+                rows = buckets.setdefault(edge, [])
+                if target not in rows:
+                    rows.append(target)
+    return {key: tuple(value) for key, value in buckets.items()}
+
+
+FIELD_REVIEW_INDEX = _review_index()
 
 COPY_FIELDS = set(FIELDS["copy"])
 SUMMARY_FIELDS = ("summary_provided", "summary_assumptions", "summary_missing")
@@ -151,21 +283,21 @@ FIELD_HELP = {
     "demographic": "Observable traits of the audience.",
     "facet": "The specific circumstance that makes the message land.",
     "segment": "One audience: outcome × demographic × facet.",
-    "concept": "One idea, 8–10 words, no 'and'. It is the collision between the market's false belief and the real mechanism (UMP), not the product's features. It must be immediately plausible, showable, and point at a villain that is not the customer. Archetypes: the trap, the missing mechanism, the category killer.",
-    "angle": "The point of view on the concept: villain/false solution, root-cause mechanism, us vs them, a daily micro-moment, a counter-intuitive warning, or a functional before/after.",
-    "ump": "Unique mechanism of the problem: why the problem actually happens.",
-    "ums": "Unique mechanism of the solution: how this product physically fixes that fault.",
-    "mechanism": "UMP plus UMS in plain language: how the product produces the outcome.",
-    "hook_type": "Which hook pattern to build: pattern interrupt, counter-intuitive why, visceral micro-moment, visual us-vs-them, or insider confession.",
-    "visual_hook": "What is seen in the first three seconds: motion, a pattern break, or a physical demo. Not a talking head.",
-    "verbal_hook": "The first spoken or written line, about 7–10 words. It opens a curiosity gap or attacks a false belief.",
-    "core_trigger": "The psychological engine holding the viewer: dissonance, specificity, or an information gap.",
-    "caveman_simple": "The central idea stripped to one primitive sentence. A hook does not also carry the problem, the solution, and the mechanism.",
-    "deep_fry": "Sharpen the line: a good thing that harms, reversed causation, a sticky rename, or a tightrope claim.",
-    "walk_it_back": "The next line that proves the extreme hook and returns it to the real mechanism without lying.",
-    "make_it_bang": "Pass the line through the five filters: interesting words in the first five, dramatic verbs, a specific time and scene, a statement not a lazy question, one sentence.",
-    "final_hook": "The shippable hook. It creates a prediction error, survives 'so what?', still reads as news with the logo removed, and the first five words stand alone.",
-    "format": "The content format the hook has to fit.",
+    "concept": "The single idea this ad should communicate, drawn from this product, audience, and message. One idea is easier to show than two ideas joined together. Guidance, not a headline formula.",
+    "angle": "The point of view on that idea: a false solution, the root-cause mechanism, us vs them, a daily moment, a counter-intuitive warning, or a functional before/after.",
+    "ump": "Unique mechanism of the problem: why the problem happens. Keep it distinct from the solution.",
+    "ums": "Unique mechanism of the solution: how this product addresses that problem. Do not fold it into the problem.",
+    "mechanism": "A plain-language synthesis of the problem mechanism and the solution mechanism. Mark any part that still needs a source.",
+    "hook_type": "Optional hook approach, such as a pattern interrupt or a counter-intuitive opening. This is not the format, and it is not required before the idea is clear.",
+    "visual_hook": "What is seen in the opening, when the format uses a picture. It should complement the verbal line, not repeat it. Leave it empty when the format has no picture.",
+    "verbal_hook": "The spoken or written opening. One idea, specific to this product and audience, and short enough for the chosen format.",
+    "core_trigger": "The one idea the hook commits to. If the draft contains two competing ideas, ask which one to keep.",
+    "caveman_simple": "A plain-language version of that one idea. A working note, not the final line.",
+    "deep_fry": "An exploratory, more provocative draft of the committed idea. Not a final claim, and not permission to assert something the facts do not support.",
+    "walk_it_back": "The provocative draft walked back to the strongest version the known facts support. If support is missing, leave the claim needing a source.",
+    "make_it_bang": "Polish notes: does it open with the compelling part, stay specific, stay short, keep one idea, fit the format, and match a supported claim? Not a score.",
+    "final_hook": "The opening you are willing to ship. Judge it qualitatively: first words, one idea, format fit, and whether the claim is supported or still needs a source. It is not a score.",
+    "format": "Where and how the ad runs, including length or placement. This is not the hook approach.",
     "conceit": "The central execution idea for the creative.",
     "actors": "Who or what is on camera.",
     "style": "The visual style.",
@@ -412,10 +544,43 @@ def _write_store(store: dict, path: Path | None = None) -> None:
     })
 
 
+def _ensure_fields(project: dict) -> bool:
+    """Add catalog fields missing from older projects. Do not rewrite text or status."""
+    changed = False
+    stages = project.get("stages")
+    if not isinstance(stages, dict):
+        project["stages"] = {}
+        stages = project["stages"]
+        changed = True
+    for stage in STAGES:
+        row = stages.get(stage)
+        if not isinstance(row, dict):
+            stages[stage] = {"status": "not_started", "reason": "", "fields": {}}
+            row = stages[stage]
+            changed = True
+        if row.get("status") not in STAGE_STATUSES:
+            row["status"] = "not_started"
+            changed = True
+        if "reason" not in row:
+            row["reason"] = ""
+            changed = True
+        fields = row.get("fields")
+        if not isinstance(fields, dict):
+            row["fields"] = {}
+            fields = row["fields"]
+            changed = True
+        for index, name in enumerate(FIELDS[stage]):
+            if not isinstance(fields.get(name), dict):
+                fields[name] = _empty_field(index)
+                changed = True
+    return changed
+
+
 def _prepare_project(project: dict) -> bool:
     if not isinstance(project.get("chat"), list):
         project["chat"] = []
-    changed = _ensure_threads(project)
+    changed = _ensure_fields(project)
+    changed = _ensure_threads(project) or changed
     changed = _migrate_chat_session(project) or changed
     return _ensure_tab_for_bound_session(project) or changed
 
@@ -630,6 +795,7 @@ def _stage_has_work(stage_row: dict) -> bool:
 
 
 def _mark_downstream(project: dict, stage: str) -> list[str]:
+    """Stage-wide cascade kept for callers that still want it. Writes use _mark_dependents."""
     marked = []
     for name in DOWNSTREAM.get(stage, ()):
         row = project["stages"][name]
@@ -643,6 +809,70 @@ def _mark_downstream(project: dict, stage: str) -> list[str]:
         elif name not in marked:
             marked.append(name)
     return marked
+
+
+def _stage_review_keys(row: dict) -> bool:
+    return any(
+        isinstance(slot, dict) and "needs_review" in slot
+        for slot in (row.get("fields") or {}).values()
+    )
+
+
+def _materialize_legacy_review(project: dict, stage: str) -> None:
+    """A stage flagged before per-field review still means every filled field."""
+    row = project["stages"][stage]
+    if row.get("status") != "review_recommended" or _stage_review_keys(row):
+        return
+    for slot in (row.get("fields") or {}).values():
+        if isinstance(slot, dict) and (slot.get("text") or "").strip():
+            slot["needs_review"] = True
+
+
+def _settle_stage_review(project: dict, stage: str) -> None:
+    row = project["stages"][stage]
+    if row.get("status") == "not_applicable":
+        return
+    flagged = any(
+        isinstance(slot, dict) and slot.get("needs_review")
+        for slot in (row.get("fields") or {}).values()
+    )
+    if flagged:
+        row["status"] = "review_recommended"
+        return
+    if row.get("status") == "review_recommended" and _stage_review_keys(row):
+        row["status"] = "draft"
+
+
+def _clear_own_review(project: dict, stage: str, field: str) -> None:
+    row = project["stages"][stage]
+    legacy = row.get("status") == "review_recommended" and not _stage_review_keys(row)
+    _materialize_legacy_review(project, stage)
+    slot = _field(project, stage, field)
+    if slot.get("needs_review") or legacy:
+        slot["needs_review"] = False
+    _settle_stage_review(project, stage)
+
+
+def _mark_dependents(project: dict, stage: str, field: str) -> tuple[list[str], list[dict]]:
+    """Flag filled fields that list this field as required or helpful context."""
+    review_fields = []
+    for dep_stage, dep_field in FIELD_REVIEW_INDEX.get((stage, field), ()):
+        row = project["stages"].get(dep_stage) or {}
+        if row.get("status") == "not_applicable":
+            continue
+        slot = (row.get("fields") or {}).get(dep_field)
+        if not isinstance(slot, dict) or not (slot.get("text") or "").strip():
+            continue
+        _materialize_legacy_review(project, dep_stage)
+        slot["needs_review"] = True
+        if row.get("status") != "review_recommended":
+            row["status"] = "review_recommended"
+        review_fields.append({"stage": dep_stage, "field": dep_field})
+    stages = []
+    for item in review_fields:
+        if item["stage"] not in stages:
+            stages.append(item["stage"])
+    return stages, review_fields
 
 
 def _apply_claim(text: str, claim: str | None, source_ref: str | None) -> tuple[str, str, bool]:
@@ -788,7 +1018,7 @@ def get_project(project_id: str | None = None, name: str | None = None, stage: s
             raise StudioError("unknown stage")
         if field:
             _require_field(stage or _stage_for_field(field), field)
-        view = project
+        view = _public_project(project) if not stage and not field else project
         if stage and not field:
             view = {"id": project["id"], "name": project["name"], "stage": stage, "data": project["stages"][stage]}
         elif field:
@@ -802,7 +1032,9 @@ def get_project(project_id: str | None = None, name: str | None = None, stage: s
             }
         if for_suggestion and field:
             owner = stage or _stage_for_field(field)
-            context, missing = _suggestion_bundle(project, field)
+            context, missing, helpful_missing = _suggestion_bundle(project, field)
+            facts = _field_text(project, "brief", "product_facts")
+            exploratory = bool(missing) or (not _product_note(project) and not facts)
             view = {
                 "id": project["id"],
                 "name": project["name"],
@@ -811,14 +1043,52 @@ def get_project(project_id: str | None = None, name: str | None = None, stage: s
                 "selected": project["stages"][owner]["fields"][field],
                 "context": context,
                 "missing": missing,
+                "helpful_missing": helpful_missing,
+                "exploratory": exploratory,
                 "guidance": (
-                    "Use this context. If missing is non-empty, ask a focused question "
-                    "or label the proposal exploratory. Do not present context-free text "
-                    "as a project-consistent recommendation. Save at most three proposals. "
-                    "Do not change the selected value."
+                    "Use this context. missing lists inputs required for a grounded draft. "
+                    "helpful_missing lists optional context. If missing is non-empty, ask "
+                    "a focused question or label the proposal exploratory. Do not present "
+                    "a guess as grounded. Save at most three proposals. Do not change the "
+                    "selected value."
                 ),
             }
         return view
+
+
+def _field_context_view() -> dict:
+    view = {}
+    for field, spec in FIELD_CONTEXT.items():
+        view[field] = {
+            "required": [f"{stage}.{name}" for stage, name in spec.get("required") or ()],
+            "helpful": [f"{stage}.{name}" for stage, name in spec.get("helpful") or ()],
+        }
+    return view
+
+
+def _product_note_view(project: dict) -> dict:
+    text = _product_note(project)
+    return {
+        "name": _product_name(project),
+        "available": bool(text),
+        "excerpt": text,
+    }
+
+
+def _public_project(project: dict) -> dict:
+    view = copy.deepcopy(project)
+    note = _product_note_view(project)
+    view["product_note"] = note
+    view["exploratory_product"] = (not note["available"]) and not _field_text(project, "brief", "product_facts")
+    view["field_context"] = _field_context_view()
+    return view
+
+
+def _field_text(project: dict, stage: str, field: str) -> str:
+    try:
+        return (project["stages"][stage]["fields"][field].get("text") or "").strip()
+    except (KeyError, TypeError, AttributeError):
+        return ""
 
 
 def _stage_for_field(field: str) -> str:
@@ -828,27 +1098,44 @@ def _stage_for_field(field: str) -> str:
     raise StudioError("unknown field")
 
 
-def _suggestion_bundle(project: dict, field: str) -> tuple[dict, list[str]]:
-    keys = SUGGESTION_CONTEXT.get(field, (("brief", "product_facts"), ("brief", "audience_notes")))
+def _context_spec(field: str) -> dict:
+    spec = FIELD_CONTEXT.get(field)
+    if spec:
+        return spec
+    return {
+        "required": (("brief", "product_facts"), ("brief", "audience_notes")),
+        "helpful": (),
+    }
+
+
+def _suggestion_bundle(project: dict, field: str) -> tuple[dict, list[str], list[str]]:
+    spec = _context_spec(field)
     context = {}
     missing = []
+    helpful_missing = []
     brief_bits = []
     for stage, name in (("brief", "product_offer"), ("brief", "objective"), ("brief", "channel")):
         text = project["stages"][stage]["fields"][name]["text"].strip()
         if text:
             brief_bits.append({"stage": stage, "field": name, "text": text})
     context["brief"] = brief_bits
-    for stage, name in keys:
-        slot = project["stages"][stage]["fields"][name]
-        text = (slot.get("text") or "").strip()
-        context[f"{stage}.{name}"] = {
-            "text": text,
-            "claim": slot.get("claim"),
-            "author": slot.get("author"),
-        }
-        if not text:
-            missing.append(f"{stage}.{name}")
-    return context, missing
+
+    def take(pairs, role: str, gap: list[str]) -> None:
+        for stage, name in pairs:
+            slot = project["stages"][stage]["fields"][name]
+            text = (slot.get("text") or "").strip()
+            context[f"{stage}.{name}"] = {
+                "text": text,
+                "claim": slot.get("claim"),
+                "author": slot.get("author"),
+                "role": role,
+            }
+            if not text:
+                gap.append(f"{stage}.{name}")
+
+    take(spec.get("required") or (), "required", missing)
+    take(spec.get("helpful") or (), "helpful", helpful_missing)
+    return context, missing, helpful_missing
 
 
 def rename_project(project_id: str, name: str) -> dict:
@@ -919,11 +1206,13 @@ def update_field(project_id: str, stage: str, field: str, text: str, *,
             if order is not None:
                 slot["order"] = int(order)
         marked = []
+        review_fields = []
         if (slot["text"] or "") != previous:
             row = project["stages"][stage]
             if row["status"] == "not_started":
                 row["status"] = "draft"
-            marked = _mark_downstream(project, stage)
+            _clear_own_review(project, stage, field)
+            marked, review_fields = _mark_dependents(project, stage, field)
         saved = _save(project)
         return {
             "project_id": project_id,
@@ -936,6 +1225,7 @@ def update_field(project_id: str, stage: str, field: str, text: str, *,
             "regulated": slot["regulated"],
             "updated_at": saved["updated_at"],
             "review_recommended": marked,
+            "review_fields": review_fields,
         }
 
 
@@ -1070,7 +1360,8 @@ def _accept(project_id: str, proposal_id: str, edited_text: str | None) -> dict:
         proposal["updated_at"] = _now()
         if project["stages"][stage]["status"] == "not_started":
             project["stages"][stage]["status"] = "draft"
-        marked = _mark_downstream(project, stage)
+        _clear_own_review(project, stage, field)
+        marked, review_fields = _mark_dependents(project, stage, field)
         saved = _save(project)
         return {
             "project_id": project_id,
@@ -1082,6 +1373,7 @@ def _accept(project_id: str, proposal_id: str, edited_text: str | None) -> dict:
             "author": slot["author"],
             "proposal_status": proposal["status"],
             "review_recommended": marked,
+            "review_fields": review_fields,
             "updated_at": saved["updated_at"],
         }
 
@@ -1138,7 +1430,8 @@ def select_alternative(project_id: str, proposal_id: str) -> dict:
         slot["updated_at"] = _now()
         if project["stages"][stage]["status"] in {"not_started", "approved"}:
             project["stages"][stage]["status"] = "draft"
-        marked = _mark_downstream(project, stage)
+        _clear_own_review(project, stage, field)
+        marked, review_fields = _mark_dependents(project, stage, field)
         saved = _save(project)
         return {
             "project_id": project_id,
@@ -1149,6 +1442,7 @@ def select_alternative(project_id: str, proposal_id: str) -> dict:
             "claim": slot["claim"],
             "updated_at": saved["updated_at"],
             "review_recommended": marked,
+            "review_fields": review_fields,
         }
 
 
@@ -1222,7 +1516,7 @@ def update_concept_checks(project_id: str, checks: dict) -> dict:
 
 
 def set_export_options(project_id: str, *, include_alternatives: bool | None = None,
-                       excluded_blocks: list | None = None) -> dict:
+                       excluded_blocks: list | None = None, mode: str | None = None) -> dict:
     with _studio_lock():
         project = _load(project_id)
         options = project.setdefault("export_options", {})
@@ -1233,6 +1527,11 @@ def set_export_options(project_id: str, *, include_alternatives: bool | None = N
             if bad:
                 raise StudioError("unknown copy block")
             options["excluded_blocks"] = list(excluded_blocks)
+        if mode is not None:
+            chosen = str(mode or "").strip()
+            if chosen not in EXPORT_MODES:
+                raise StudioError("invalid export mode")
+            options["mode"] = chosen
         saved = _save(project)
         return {"project_id": project_id, "export_options": saved["export_options"], "updated_at": saved["updated_at"]}
 
@@ -1257,7 +1556,7 @@ def set_active_project(project_id: str) -> dict:
 
 
 def export_markdown(project_id: str, include_alternatives: bool | None = None,
-                    excluded_blocks: list | None = None) -> dict:
+                    excluded_blocks: list | None = None, mode: str | None = None) -> dict:
     with _studio_lock():
         project = _load(project_id)
         options = dict(project.get("export_options") or {})
@@ -1265,13 +1564,119 @@ def export_markdown(project_id: str, include_alternatives: bool | None = None,
             options["include_alternatives"] = bool(include_alternatives)
         if excluded_blocks is not None:
             options["excluded_blocks"] = list(excluded_blocks)
-        markdown = _render_markdown(project, options)
+        chosen = str(mode or options.get("mode") or "handoff").strip()
+        if chosen not in EXPORT_MODES:
+            raise StudioError("invalid export mode")
+        options["mode"] = chosen
+        markdown = _render_handoff(project, options) if chosen == "handoff" else _render_markdown(project, options)
         return {
             "project_id": project_id,
             "name": project["name"],
+            "mode": chosen,
             "markdown": markdown,
             "updated_at": project["updated_at"],
         }
+
+
+def _handoff_notes(slot: dict) -> list[str]:
+    notes = []
+    claim = slot.get("claim") or "user_approved"
+    if claim != "user_approved":
+        notes.append(f"Claim: {claim}")
+    if slot.get("regulated") or claim == "needs_verification":
+        notes.append("Needs verification: regulated or unsupported-claim wording is present.")
+    source = (slot.get("source_ref") or "").strip()
+    if source:
+        notes.append(f"Source: {source}")
+    return notes
+
+
+def _handoff_blocks(pairs: list[tuple[str, dict]]) -> list[str]:
+    ready = []
+    for heading, slot in pairs:
+        if not isinstance(slot, dict):
+            continue
+        text = (slot.get("text") or "").strip()
+        if not text:
+            continue
+        ready.append((heading, slot, text))
+    if not ready:
+        return []
+    lines = []
+    for heading, slot, text in ready:
+        lines.append(f"### {heading}")
+        notes = _handoff_notes(slot)
+        if notes:
+            lines.extend(notes)
+        lines.append("")
+        lines.append(text)
+        lines.append("")
+    return lines
+
+
+def _append_handoff_section(lines: list[str], title: str, pairs: list[tuple[str, dict]]) -> None:
+    body = _handoff_blocks(pairs)
+    if not body:
+        return
+    lines.append(f"## {title}")
+    lines.append("")
+    lines.extend(body)
+
+
+def _render_handoff(project: dict, options: dict) -> str:
+    """Selected final material. Working notes, empty fields, and statuses stay out."""
+    stages = project["stages"]
+    brief = stages["brief"]["fields"]
+    who = stages["who"]["fields"]
+    what = stages["what"]["fields"]
+    hook = stages["hook"]["fields"]
+    casts = stages["casts"]["fields"]
+    copy = stages["copy"]["fields"]
+    lines = [
+        f"# {project['name']}",
+        "",
+        "This export is a creative working brief. It does not certify legal, medical, financial, or platform-policy compliance.",
+        "",
+    ]
+    _append_handoff_section(lines, "Objective", [("Objective", brief["objective"])])
+    if (who["segment"].get("text") or "").strip():
+        audience = [("Segment", who["segment"])]
+    else:
+        audience = [
+            ("Outcome", who["outcome"]),
+            ("Demographic", who["demographic"]),
+            ("Facet", who["facet"]),
+        ]
+    _append_handoff_section(lines, "Audience", audience)
+    _append_handoff_section(lines, "Core idea", [
+        ("Core idea", what["concept"]),
+        ("Angle", what["angle"]),
+    ])
+    _append_handoff_section(lines, "Mechanism", [
+        ("Summary", what["mechanism"]),
+        ("Problem mechanism (UMP)", what["ump"]),
+        ("Solution mechanism (UMS)", what["ums"]),
+    ])
+    _append_handoff_section(lines, "Hook", [
+        ("Final hook", hook["final_hook"]),
+        ("Visual hook", hook["visual_hook"]),
+        ("Verbal hook", hook["verbal_hook"]),
+    ])
+    _append_handoff_section(lines, "Execution", [
+        ("Conceit", casts["conceit"]),
+        ("Actors", casts["actors"]),
+        ("Style", casts["style"]),
+        ("Terrain", casts["terrain"]),
+        ("Setup", casts["setup"]),
+    ])
+    excluded = set(options.get("excluded_blocks") or [])
+    copy_pairs = []
+    for name, slot in sorted(copy.items(), key=lambda item: item[1].get("order", 0)):
+        if name in excluded or not slot.get("include", True):
+            continue
+        copy_pairs.append((name.replace("_", " ").title(), slot))
+    _append_handoff_section(lines, "Copy", copy_pairs)
+    return "\n".join(lines).rstrip() + "\n"
 
 
 def _render_markdown(project: dict, options: dict) -> str:
@@ -1379,7 +1784,10 @@ def handle_creative_get(handler, parsed):
     if tail == "/export":
         include = qs.get("include_alternatives")
         flag = None if include is None else include == "1"
-        return _http_call(handler, lambda: export_markdown(project_id, include_alternatives=flag))
+        mode = qs.get("mode") or None
+        return _http_call(handler, lambda: export_markdown(
+            project_id, include_alternatives=flag, mode=mode,
+        ))
     return False
 
 
@@ -1508,6 +1916,7 @@ def handle_creative_post(handler, parsed, body: dict):
             project_id,
             include_alternatives=body.get("include_alternatives") if "include_alternatives" in body else None,
             excluded_blocks=body.get("excluded_blocks") if "excluded_blocks" in body else None,
+            mode=body.get("mode") if "mode" in body else None,
         ))
     return False
 
@@ -1863,7 +2272,10 @@ def _studio_job(project: dict) -> str:
         "After that call, reply with one short sentence. "
         "Use the tool whose name ends with update_creative_field only when "
         "the user tells you to change the selected text. "
-        "Do not edit the project store any other way."
+        "Do not edit the project store any other way. "
+        "If required context for a field is missing, ask for it or mark the "
+        "proposal exploratory. Do not present a guess as grounded. "
+        "Name the wizard step and the field on every proposal."
     )
 
 
@@ -1875,6 +2287,33 @@ def _field_index() -> str:
         if names:
             lines.append(f"{stage}: {', '.join(names)}")
     return "Fields:\n" + "\n".join(lines)
+
+
+def _dependency_blurb(field: str) -> str:
+    spec = _context_spec(field)
+    required = ", ".join(f"{stage}.{name}" for stage, name in spec.get("required") or ()) or "(none)"
+    helpful = ", ".join(f"{stage}.{name}" for stage, name in spec.get("helpful") or ()) or "(none)"
+    return (
+        f"Required for a grounded draft of {field}: {required}. "
+        f"Helpful context: {helpful}."
+    )
+
+
+def _wizard_guide() -> str:
+    order = ", ".join(
+        f"{stage} ({label})"
+        for stage, label in WIZARD_STEP_LABELS.items()
+        if stage != "review"
+    )
+    return (
+        "Wizard steps, in order: " + order + ". "
+        "hook.format is where and how the ad runs. hook.hook_type is the opening approach. "
+        "They are different fields. The selected opening is hook.final_hook. "
+        "caveman_simple, deep_fry, walk_it_back, and make_it_bang are working notes, "
+        "not the final hook. A final-hook proposal uses the committed concept, the "
+        "audience segment, the mechanism, the format constraints, and the claim state "
+        "of those fields. Do not invent product facts, proof, numbers, or testimonials."
+    )
 
 
 def _profile_config_path(profile: str | None) -> Path:
@@ -2006,9 +2445,18 @@ def _render_studio_context(project: dict, binding: dict, note: str) -> str:
     parts.append(_studio_job(project))
     if stage:
         status = ((project.get("stages") or {}).get(stage) or {}).get("status") or "not_started"
+        label = WIZARD_STEP_LABELS.get(stage) or stage
         parts.append(f"Selected stage: {stage} ({status})")
+        parts.append(f"Wizard step: {label} ({stage}).")
     if field:
         parts.append(f"Selected field: {field}")
+        parts.append(_dependency_blurb(field))
+        if field == "final_hook":
+            parts.append(
+                "A final hook uses the committed concept, audience segment, mechanism, "
+                "format constraints, and the claim state of those fields. "
+                "Visual and verbal lines are optional when the format does not need both."
+            )
     if field and stage:
         if scope == "field":
             parts.append("This conversation is only this field.")
@@ -2030,6 +2478,7 @@ def _render_studio_context(project: dict, binding: dict, note: str) -> str:
         )
         parts.append("This conversation is the whole project.")
         parts.append(_field_index())
+        parts.append(_wizard_guide())
         parts.append("Document:\n" + ("\n".join(_project_context_lines(project)) or "(empty)"))
     text = "\n\n".join(parts)
     if len(text) > _CONTEXT_CAP:
