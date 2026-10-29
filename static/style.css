@@ -5455,6 +5455,10 @@ main.main > #mainPlugin{display:none;}
 .creative-prereq li.missing,.creative-context-list li.missing{color:#c47b2b;}
 .creative-note{max-height:160px;overflow:auto;white-space:pre-wrap;margin:8px 0 0;font:inherit;font-size:13px;line-height:1.45;}
 .creative-hook-prompt p{margin:6px 0 0;white-space:pre-wrap;}
+.creative-pair{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start;}
+.creative-quote{margin:0;padding:10px 12px;border:1px solid var(--border);border-radius:10px;}
+.creative-quote p{margin:6px 0 0;white-space:pre-wrap;}
+@media (max-width:480px){.creative-pair{grid-template-columns:1fr;}}
 #creativeExportPreview{max-height:280px;overflow:auto;white-space:pre-wrap;font-size:12px;line-height:1.45;}
 .creative-save.failed{color:#c44;}
 #mainCreative{--kx-base:#1f1f1f;--kx-surface:#252525;--kx-elevated:#313131;--kx-border:#414141;--kx-subtle:#313131;--kx-text:#ffffff;--kx-muted:#717171;}

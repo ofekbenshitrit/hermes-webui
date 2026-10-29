@@ -157,48 +157,49 @@ FIELD_CONTEXT: dict[str, dict[str, tuple[tuple[str, str], ...]]] = {
         "helpful": (("who", "segment"), ("brief", "product_facts")),
     },
     "hook_type": {
-        "required": (("what", "concept"), ("who", "segment")),
-        "helpful": (("what", "angle"), ("what", "mechanism"), ("brief", "format_length")),
+        "required": (("hook", "core_trigger"),),
+        "helpful": (("what", "concept"), ("who", "segment")),
     },
     "format": {
         "required": (),
-        "helpful": (("brief", "format_length"), ("brief", "channel")),
+        "helpful": (),
     },
     "visual_hook": {
-        "required": (("what", "concept"), ("who", "segment")),
-        "helpful": (("what", "angle"), ("what", "mechanism"), ("hook", "format")),
+        "required": (("hook", "verbal_hook"),),
+        "helpful": (("hook", "walk_it_back"), ("what", "concept")),
     },
     "verbal_hook": {
-        "required": (("what", "concept"), ("who", "segment")),
-        "helpful": (("what", "angle"), ("what", "mechanism"), ("hook", "format")),
+        "required": (("hook", "walk_it_back"),),
+        "helpful": (("hook", "format"), ("what", "concept"), ("who", "segment")),
     },
     "core_trigger": {
         "required": (("what", "concept"), ("who", "segment")),
-        "helpful": (("hook", "hook_type"),),
+        "helpful": (),
     },
     "caveman_simple": {
         "required": (("what", "concept"),),
-        "helpful": (("who", "segment"), ("hook", "verbal_hook")),
+        "helpful": (("who", "segment"),),
     },
     "deep_fry": {
-        "required": (("what", "concept"),),
-        "helpful": (("hook", "verbal_hook"), ("who", "segment")),
+        "required": (("hook", "core_trigger"), ("what", "concept")),
+        "helpful": (("hook", "hook_type"), ("who", "segment")),
     },
     "walk_it_back": {
-        "required": (("what", "concept"), ("what", "mechanism")),
-        "helpful": (("hook", "verbal_hook"), ("brief", "product_facts")),
+        "required": (("hook", "deep_fry"), ("what", "mechanism")),
+        "helpful": (("what", "concept"), ("brief", "product_facts"), ("who", "segment")),
     },
     "make_it_bang": {
         "required": (("what", "concept"),),
         "helpful": (("hook", "verbal_hook"), ("hook", "format"), ("hook", "final_hook")),
     },
     "final_hook": {
-        "required": (("what", "concept"), ("who", "segment"), ("what", "mechanism")),
+        "required": (("hook", "verbal_hook"), ("hook", "visual_hook")),
         "helpful": (
-            ("hook", "visual_hook"),
-            ("hook", "verbal_hook"),
+            ("hook", "walk_it_back"),
             ("hook", "format"),
-            ("hook", "hook_type"),
+            ("what", "concept"),
+            ("who", "segment"),
+            ("what", "mechanism"),
         ),
     },
     "conceit": {
@@ -316,6 +317,20 @@ _STRATEGY_LABELS = {
         "objections": "Handle objections",
         "urgency": "Urgency",
     },
+    "hook_type": {
+        "good_is_bad": "Good thing is bad",
+        "bad_is_good": "Bad thing is good",
+        "ineffective_harmful": "Ineffective is harmful",
+        "identity_contrast": "Identity contrast",
+        "reverse_causation": "Reverse causation",
+        "rename": "Rename",
+    },
+}
+_HOOK_MOVE_ALIASES = {
+    "good is bad": "good_is_bad",
+    "bad is good": "bad_is_good",
+    "ineffective to harmful": "ineffective_harmful",
+    "sticky phrasing": "rename",
 }
 
 
@@ -353,9 +368,35 @@ def _normalize_message_approach(text: str) -> str:
     return ", ".join(token for token in _MESSAGE_APPROACH_ORDER if token in chosen)
 
 
+def _coerce_hook_move(text: str) -> str:
+    """Store a known deep-fry move as an id. Keep an older free-text approach."""
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return ""
+    key = _strategy_key(cleaned)
+    token = _strategy_canon("hook_type").get(key) or _HOOK_MOVE_ALIASES.get(key)
+    return token if token is not None else cleaned
+
+
+def _has_two_ideas(text: str) -> bool:
+    value = " ".join((text or "").split())
+    if not value:
+        return False
+    if re.search(r"\band\b", value, re.IGNORECASE):
+        return True
+    return len([part for part in re.split(r"[.!?]+", value) if part.strip()]) > 1
+
+
+def _require_one_concept(field: str, text: str) -> None:
+    if field == "core_trigger" and _has_two_ideas(text):
+        raise StudioError("Pick one idea. The core concept is one short sentence.")
+
+
 def _coerce_strategy_text(field: str, text: str | None) -> str:
     """Keep free text unchanged. Enum fields store canonical ids, or empty."""
     raw = "" if text is None else str(text)
+    if field == "hook_type":
+        return _coerce_hook_move(raw)
     if field == "message_approach":
         return _normalize_message_approach(raw)
     canon = _strategy_canon(field)
@@ -449,16 +490,16 @@ FIELD_HELP = {
     "ump": "Unique mechanism of the problem: why the problem happens. Keep it distinct from the solution.",
     "ums": "Unique mechanism of the solution: how this product addresses that problem. Do not fold it into the problem.",
     "mechanism": "A plain-language synthesis of the problem mechanism and the solution mechanism. Mark any part that still needs a source.",
-    "hook_type": "Optional hook approach, such as a pattern interrupt or a counter-intuitive opening. This is not the format, and it is not required before the idea is clear.",
-    "visual_hook": "What is seen in the opening, when the format uses a picture. It should complement the verbal line, not repeat it. Leave it empty when the format has no picture.",
-    "verbal_hook": "The spoken or written opening. One idea, specific to this product and audience, and short enough for the chosen format.",
-    "core_trigger": "The one idea the hook commits to. If the draft contains two competing ideas, ask which one to keep.",
-    "caveman_simple": "A plain-language version of that one idea. A working note, not the final line.",
-    "deep_fry": "An exploratory, more provocative draft of the committed idea. Not a final claim, and not permission to assert something the facts do not support.",
-    "walk_it_back": "The provocative draft walked back to the strongest version the known facts support. If support is missing, leave the claim needing a source.",
-    "make_it_bang": "Polish notes: does it open with the compelling part, stay specific, stay short, keep one idea, fit the format, and match a supported claim? Not a score.",
-    "final_hook": "The opening you are willing to ship. Judge it qualitatively: first words, one idea, format fit, and whether the claim is supported or still needs a source. It is not a score.",
-    "format": "Where and how the ad runs, including length or placement. This is not the hook approach.",
+    "hook_type": "The deep-fry move. Good thing is bad, bad thing is good, ineffective is harmful, identity contrast, reverse causation, or rename. This is not the format, and it comes after the one concept.",
+    "visual_hook": "The opening image or first three seconds. It contrasts with or reinforces the verbal line. A hook ships as this pair.",
+    "verbal_hook": "The first spoken or written line. The idea leads the first words. One idea, specific, no generic question.",
+    "core_trigger": "The one idea, in caveman language: one short sentence. If the draft has two ideas, or joins them with and, ask which one to keep. Do not save both.",
+    "caveman_simple": "Earlier plain note. The committed idea lives in core_trigger. Do not start a second concept here.",
+    "deep_fry": "The concept pushed to the chosen move. Psychology before proof. A draft, not a verified claim.",
+    "walk_it_back": "The fried angle walked back to the strongest claim the mechanism supports. Keep the fried draft. If support is missing, leave the claim needing a source.",
+    "make_it_bang": "Earlier polish notes. The line lives in verbal_hook and the picture in visual_hook. Not a score.",
+    "final_hook": "The pair you will ship: the verbal line and the visual opening together. One idea, and a claim that is supported or still needs a source. It is not a score.",
+    "format": "The asset and its constraint, together: UGC, founder, static, reel, or feed, plus length or placement. One field. It does not come before the idea.",
     "conceit": "The central execution idea for the creative.",
     "actors": "Who or what is on camera.",
     "style": "The visual style.",
@@ -754,10 +795,27 @@ def _ensure_fields(project: dict) -> bool:
     return changed
 
 
+def _migrate_hook_concept(project: dict) -> bool:
+    """Move an older caveman note into the one concept field when that field is empty."""
+    hook = ((project.get("stages") or {}).get("hook") or {}).get("fields") or {}
+    concept = hook.get("core_trigger")
+    plain = hook.get("caveman_simple")
+    if not isinstance(concept, dict) or not isinstance(plain, dict):
+        return False
+    if (concept.get("text") or "").strip() or not (plain.get("text") or "").strip():
+        return False
+    concept["text"] = plain.get("text") or ""
+    concept["author"] = plain.get("author") or concept.get("author") or "user"
+    concept["updated_at"] = plain.get("updated_at") or concept.get("updated_at") or _now()
+    plain["text"] = ""
+    return True
+
+
 def _prepare_project(project: dict) -> bool:
     if not isinstance(project.get("chat"), list):
         project["chat"] = []
     changed = _ensure_fields(project)
+    changed = _migrate_hook_concept(project) or changed
     changed = _ensure_threads(project) or changed
     changed = _migrate_chat_session(project) or changed
     return _ensure_tab_for_bound_session(project) or changed
@@ -1465,6 +1523,7 @@ def update_field(project_id: str, stage: str, field: str, text: str, *,
         raise StudioError("invalid author")
     _require_field(stage, field)
     text = _coerce_strategy_text(field, text)
+    _require_one_concept(field, text)
     with _studio_lock():
         project = _load(project_id)
         slot = _field(project, stage, field)
@@ -1594,6 +1653,7 @@ def save_proposal(project_id: str, stage: str, field: str, text: str, *,
     body = (text or "").strip()
     if not body:
         raise StudioError("proposal text is required")
+    _require_one_concept(field, body)
     with _studio_lock():
         project = _load(project_id)
         slot = _field(project, stage, field)
@@ -1675,14 +1735,17 @@ def _accept(project_id: str, proposal_id: str, edited_text: str | None) -> dict:
         stage, field, slot, proposal = _find_proposal(project, proposal_id)
         if edited_text is None:
             final = (proposal.get("revised_text") or proposal.get("text") or "").strip()
-            proposal["status"] = "accepted"
+            status = "accepted"
         else:
             final = edited_text.strip()
             if not final:
                 raise StudioError("edited text is required")
-            proposal["revised_text"] = final
-            proposal["status"] = "edited_accepted"
+            status = "edited_accepted"
         final = _coerce_strategy_text(field, final)
+        _require_one_concept(field, final)
+        if status == "edited_accepted":
+            proposal["revised_text"] = final
+        proposal["status"] = status
         chosen, ref, regulated = _apply_claim(final, None, slot.get("source_ref"))
         slot["text"] = final
         if field == "campaign_goal":
@@ -1756,6 +1819,7 @@ def select_alternative(project_id: str, proposal_id: str) -> dict:
         if proposal.get("status") != "alternative":
             raise StudioError("only a saved alternative can be selected")
         final = _coerce_strategy_text(field, (proposal.get("revised_text") or proposal.get("text") or "").strip())
+        _require_one_concept(field, final)
         chosen, ref, regulated = _apply_claim(final, None, "")
         slot["text"] = final
         if field == "campaign_goal":
@@ -2029,9 +2093,10 @@ def _render_handoff(project: dict, options: dict) -> str:
         ("Solution mechanism (UMS)", what["ums"]),
     ])
     _append_handoff_section(lines, "Hook", [
-        ("Final hook", hook["final_hook"]),
-        ("Visual hook", hook["visual_hook"]),
+        ("Final hook pair", hook["final_hook"]),
         ("Verbal hook", hook["verbal_hook"]),
+        ("Visual hook", hook["visual_hook"]),
+        ("Format and placement", hook["format"]),
     ])
     _append_handoff_section(lines, "Execution", [
         ("Conceit", casts["conceit"]),
@@ -2048,6 +2113,22 @@ def _render_handoff(project: dict, options: dict) -> str:
         copy_pairs.append((name.replace("_", " ").title(), slot))
     _append_handoff_section(lines, "Copy", copy_pairs)
     return "\n".join(lines).rstrip() + "\n"
+
+
+_EXPORT_LABELS = {
+    "hook_type": "Deep-fry move",
+    "core_trigger": "Core concept",
+    "caveman_simple": "Earlier caveman note",
+    "deep_fry": "Deep-fried angle",
+    "walk_it_back": "Grounded claim",
+    "make_it_bang": "Earlier polish notes",
+    "verbal_hook": "Verbal hook",
+    "visual_hook": "Visual hook",
+    "format": "Format and placement",
+    "final_hook": "Final hook pair",
+    "channel": "Channel",
+    "format_length": "Length and placement",
+}
 
 
 def _render_markdown(project: dict, options: dict) -> str:
@@ -2083,7 +2164,7 @@ def _render_markdown(project: dict, options: dict) -> str:
         for field, slot in fields:
             if stage == "copy" and (field in excluded or not slot.get("include", True)):
                 continue
-            title = field.replace("_", " ").title()
+            title = _EXPORT_LABELS.get(field) or field.replace("_", " ").title()
             lines.append(f"### {title}")
             lines.append(f"Author: {slot.get('author') or 'user'}")
             lines.append(f"Claim: {slot.get('claim') or 'user_approved'}")
@@ -2092,7 +2173,10 @@ def _render_markdown(project: dict, options: dict) -> str:
             if slot.get("source_ref"):
                 lines.append(f"Source: {slot['source_ref']}")
             lines.append("")
-            lines.append(slot.get("text") or "_Empty._")
+            body = slot.get("text") or ""
+            if field == "hook_type" and body.strip():
+                body = _strategy_label(field, body.strip())
+            lines.append(body or "_Empty._")
             lines.append("")
             if include_alts:
                 alts = [item for item in slot.get("proposals") or [] if item.get("status") == "alternative"]
@@ -3289,12 +3373,15 @@ def _wizard_guide() -> str:
         "and it does not uniquely determine the concept. "
         "Educate, objection handling, and urgency are message_approach values. "
         "Cold and retargeting are campaign_context, not goals or awareness levels. "
-        "hook.format is where and how the ad runs. hook.hook_type is the opening approach. "
-        "They are different fields. The selected opening is hook.final_hook. "
-        "caveman_simple, deep_fry, walk_it_back, and make_it_bang are working notes, "
-        "not the final hook. A final-hook proposal uses the committed concept, the "
-        "audience segment, the mechanism, the format constraints, and the claim state "
-        "of those fields. Do not invent product facts, proof, numbers, or testimonials."
+        "The hook step is idea first. hook.core_trigger is one caveman sentence. "
+        "Two ideas, or a sentence joined with and, are rejected: ask which one to keep. "
+        "hook.hook_type is the deep-fry move: good_is_bad, bad_is_good, ineffective_harmful, "
+        "identity_contrast, reverse_causation, or rename. It is not the format. "
+        "hook.deep_fry is that move pushed past the facts, and it is not a verified claim. "
+        "hook.walk_it_back walks that angle back to the mechanism and keeps the fried draft. "
+        "hook.verbal_hook and hook.visual_hook are one pair. hook.final_hook is the pair you will ship. "
+        "hook.format is the asset, placement, and length in one field, after the idea. "
+        "caveman_simple and make_it_bang are earlier notes. Do not invent product facts, proof, numbers, or testimonials."
     )
 
 
@@ -3438,9 +3525,14 @@ def _render_studio_context(project: dict, binding: dict, note: str) -> str:
         parts.append(_dependency_blurb(field))
         if field == "final_hook":
             parts.append(
-                "A final hook uses the committed concept, audience segment, mechanism, "
-                "format constraints, and the claim state of those fields. "
-                "Visual and verbal lines are optional when the format does not need both."
+                "The final hook is the verbal line and the visual opening together. "
+                "Use the grounded claim, one idea, and the format only as a constraint. "
+                "Do not score it."
+            )
+        if field == "core_trigger":
+            parts.append(
+                "Save one short sentence. If the draft contains two ideas, or joins them with and, "
+                "ask which one to keep. Do not save both."
             )
     if field and stage:
         if scope == "field":

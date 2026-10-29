@@ -3,7 +3,7 @@ const CREATIVE_STEPS = [
   {id:'brief', label:'Strategy', title:'Audience & strategy', purpose:'Set the campaign goal and what is known about this audience. Hermes already has the product knowledge.'},
   {id:'who', label:'Audience', title:'Audience', purpose:'Define who the ad is for and the situation or belief that makes the message land.'},
   {id:'what', label:'Idea', title:'Core idea', purpose:'Choose the single idea, then keep the problem mechanism separate from the solution mechanism.'},
-  {id:'hook', label:'Hook', title:'Hook', purpose:'Develop one opening from that idea, ground it in the facts, and polish the line you will ship.'},
+  {id:'hook', label:'Hook', title:'Hook', purpose:'Isolate one idea, fry it, walk it back to the facts, then pair the line with the picture.'},
   {id:'casts', label:'Execution', title:'Execution', purpose:'Specify how the selected idea and hook appear in the ad.'},
   {id:'copy', label:'Copy', title:'Copy & export', purpose:'Assemble the copy blocks and export a handoff of the selected work.'},
 ];
@@ -40,18 +40,18 @@ const CREATIVE_HELP = {
   ump:'Why the problem actually happens. Keep this separate from the solution.',
   ums:'How this product physically fixes that fault. Keep this separate from the problem.',
   mechanism:'UMP plus UMS: how the product produces the outcome. Unsupported claims stay labeled Needs source/verification.',
-  hook_type:'Optional hook approach. This is not the format, and it is not required before the idea is clear.',
-  format:'Where and how the ad runs, including length or placement. This is not the hook approach.',
+  hook_type:'The move that fries the concept. It is not the format, and it comes after the one idea.',
+  format:'The asset and its constraint together: UGC, founder, static, reel, or feed, plus length or placement.',
   channel:'Where the ad will run, if you know it.',
   format_length:'Length or placement limits the hook has to fit.',
-  caveman_simple:'A plain version of the one idea. A working note, not the final line.',
-  core_trigger:'The one idea the hook commits to.',
-  verbal_hook:'The spoken or written opening. Leave it empty when this format has no words.',
-  visual_hook:'The pictured opening. Leave it empty when this format has no picture.',
-  deep_fry:'An exploratory draft. Not a final claim.',
-  walk_it_back:'The exploratory draft walked back to what the facts support.',
-  make_it_bang:'Polish notes. Not a score.',
-  final_hook:'The opening you are willing to ship. Review is qualitative: first words, one idea, format, and whether the claim is supported or still needs a source. It is not a score.',
+  caveman_simple:'An earlier plain note. The committed idea is the core concept.',
+  core_trigger:'One idea, in caveman language. One short sentence. A second idea, or a sentence joined with and, has to be cut.',
+  verbal_hook:'The first spoken or written line. The idea leads the first words. One idea, specific, no generic question.',
+  visual_hook:'The opening image or first three seconds. It contrasts with or reinforces the verbal line.',
+  deep_fry:'The concept pushed through the chosen move. A draft, not a verified claim.',
+  walk_it_back:'The fried angle walked back to what the mechanism supports. The fried draft stays.',
+  make_it_bang:'Earlier polish notes. Not the line, and not a score.',
+  final_hook:'The verbal line and the visual opening together. One idea, supported or marked as needing a source. Not a score.',
   conceit:'The central execution idea. A full storyboard is out of scope unless you ask in chat.',
 };
 const CREATIVE_LABELS = {
@@ -82,18 +82,18 @@ const CREATIVE_LABELS = {
   setup:'Setup',
   channel:'Channel',
   format_length:'Length and placement',
-  hook_type:'Hook approach',
-  format:'Format / placement',
+  hook_type:'Deep-fry move',
+  format:'Format and placement',
   ump:'Problem mechanism (UMP)',
   ums:'Solution mechanism (UMS)',
   mechanism:'Mechanism summary',
   concept:'Core idea',
-  caveman_simple:'Caveman-simple',
-  core_trigger:'One central idea',
-  deep_fry:'Exploratory draft',
-  walk_it_back:'Grounded draft',
-  make_it_bang:'Polish notes',
-  final_hook:'Final hook',
+  caveman_simple:'Earlier caveman note',
+  core_trigger:'Core concept',
+  deep_fry:'Deep-fried angle',
+  walk_it_back:'Grounded claim',
+  make_it_bang:'Earlier polish notes',
+  final_hook:'Final hook pair',
   visual_hook:'Visual hook',
   verbal_hook:'Verbal hook',
 };
@@ -127,15 +127,21 @@ const CREATIVE_APPROACH_CHOICES = [
   {id:'objections', label:'Handle objections'},
   {id:'urgency', label:'Urgency'},
 ];
+const CREATIVE_MOVE_CHOICES = [
+  {id:'good_is_bad', label:'Good thing is bad'},
+  {id:'bad_is_good', label:'Bad thing is good'},
+  {id:'ineffective_harmful', label:'Ineffective is harmful'},
+  {id:'identity_contrast', label:'Identity contrast'},
+  {id:'reverse_causation', label:'Reverse causation'},
+  {id:'rename', label:'Rename'},
+];
 const CREATIVE_STEP_FIELDS = {
   brief:[['brief','mass_desire']],
   who:[['who','outcome'],['who','demographic'],['who','facet'],['who','segment']],
   what:[['what','concept'],['what','angle'],['what','ump'],['what','ums'],['what','mechanism']],
   hook:[
-    ['brief','channel'],['brief','format_length'],['hook','format'],['hook','hook_type'],
-    ['hook','caveman_simple'],['hook','core_trigger'],
-    ['hook','verbal_hook'],['hook','visual_hook'],['hook','deep_fry'],['hook','walk_it_back'],
-    ['hook','final_hook'],['hook','make_it_bang'],
+    ['hook','core_trigger'],['hook','hook_type'],['hook','deep_fry'],['hook','walk_it_back'],
+    ['hook','format'],['hook','verbal_hook'],['hook','visual_hook'],['hook','final_hook'],
   ],
   casts:[['casts','conceit'],['casts','actors'],['casts','style'],['casts','terrain'],['casts','setup']],
   copy:[['copy','pain'],['copy','promise'],['copy','proof'],['copy','curiosity'],['copy','constraints'],['copy','conditions']],
@@ -145,7 +151,7 @@ const CREATIVE_PREREQ_FIELDS = {
   brief:[],
   who:['segment'],
   what:['concept','ump','ums','mechanism'],
-  hook:['format','final_hook'],
+  hook:['final_hook'],
   casts:['conceit'],
   copy:['pain','promise'],
 };
@@ -669,6 +675,7 @@ function _creativeChoiceLabel(field, text){
     sophistication:CREATIVE_SOPHISTICATION_CHOICES,
     campaign_context:CREATIVE_CONTEXT_CHOICES,
     message_approach:CREATIVE_APPROACH_CHOICES,
+    hook_type:CREATIVE_MOVE_CHOICES,
   };
   if(field === 'message_approach'){
     return String(text || '').split(',').map(part => {
@@ -683,11 +690,12 @@ function _creativeChoiceLabel(field, text){
   return text;
 }
 
-function _creativeChoiceGroup(field, legend, choices, current){
+function _creativeChoiceGroup(field, legend, choices, current, stage){
+  const owner = stage || 'brief';
   const radios = choices.map(item => {
     const checked = current === item.id ? ' checked' : '';
     const id = 'creative-' + field + '-' + (item.id || 'none');
-    return `<label class="creative-choice" for="${id}"><input type="radio" id="${id}" name="creative-${field}" value="${_creativeEsc(item.id)}"${checked} onchange="creativePickStrategy('${field}', this.value)"> <span>${_creativeEsc(item.label)}</span></label>`;
+    return `<label class="creative-choice" for="${id}"><input type="radio" id="${id}" name="creative-${field}" value="${_creativeEsc(item.id)}"${checked} onchange="creativePickChoice('${owner}','${field}', this.value)"> <span>${_creativeEsc(item.label)}</span></label>`;
   }).join('');
   return `<div class="creative-choice-group" role="radiogroup" aria-label="${_creativeEsc(legend)}">${radios}</div>`;
 }
@@ -798,8 +806,12 @@ function _creativeInferPrompt(field){
   return 'Propose ' + label + ' for brief.' + field + '. Use the product profile, this creative, and the conversation. Say what is uncertain. Save one proposal with save_creative_proposal. Do not update the selected field.';
 }
 
+async function creativePickChoice(stage, field, value){
+  await creativePutField(stage, field, value);
+}
+
 async function creativePickStrategy(field, value){
-  await creativePutField('brief', field, value);
+  await creativePickChoice('brief', field, value);
 }
 
 async function creativeInfer(field){
@@ -974,24 +986,60 @@ function _creativeRepaintFields(){
   _creativeRestoreOpenDetails();
 }
 
+function _creativeHookSlot(name){
+  return (((_creativeProject.stages.hook || {}).fields || {})[name]) || {text:'', proposals:[]};
+}
+
+function _creativeMoveLabel(){
+  const current = String((_creativeHookSlot('hook_type').text) || '').trim();
+  const found = CREATIVE_MOVE_CHOICES.find(item => item.id === current);
+  return found ? found.label : (current || '');
+}
+
+function _creativeMoveControl(){
+  const slot = _creativeHookSlot('hook_type');
+  const current = String(slot.text || '').trim();
+  const known = CREATIVE_MOVE_CHOICES.some(item => item.id === current);
+  const legacy = current && !known
+    ? `<p class="creative-help">Current note: ${_creativeEsc(current)}. Pick a move to replace it.</p>`
+    : '';
+  const pills = CREATIVE_MOVE_CHOICES.map(item => {
+    const on = known && current === item.id;
+    return `<button type="button" class="creative-pill" aria-pressed="${on ? 'true' : 'false'}" onclick="creativePickChoice('hook','hook_type','${item.id}')">${_creativeEsc(item.label)}</button>`;
+  }).join('');
+  return `<div class="creative-field" data-field="hook_type">
+    <div class="creative-field-label"><label>Deep-fry move</label>${_creativeIsolateButton('hook_type')}</div>
+    <p class="creative-help">${_creativeEsc(CREATIVE_HELP.hook_type)}</p>
+    <div class="creative-pills" role="group" aria-label="Deep-fry move">${pills}</div>
+    ${legacy}
+    ${_creativeProposalMarkup(slot, 'hook_type')}
+  </div>`;
+}
+
+function _creativeHookQuote(field, label){
+  const text = String((_creativeHookSlot(field).text) || '').trim();
+  return `<div class="creative-quote"><strong>${_creativeEsc(label)}</strong><p>${_creativeEsc(text || 'Not written yet.')}</p></div>`;
+}
+
 function _creativeHookBody(){
   const prompt = _creativeHookPrompt
     ? `<div class="creative-card creative-hook-prompt"><strong>Send this in chat</strong><p>${_creativeEsc(_creativeHookPrompt)}</p><p class="creative-help">The draft stays in its field until you replace it.</p></div>`
     : '';
-  const ideaText = [
-    ((_creativeProject.stages.hook.fields.caveman_simple || {}).text) || '',
-    ((_creativeProject.stages.hook.fields.core_trigger || {}).text) || '',
-  ].join(' ');
-  const split = _creativeManyIdeas(ideaText)
-    ? `<p class="creative-help">This draft may contain more than one idea. Pick the one the hook should commit to.</p>`
-    : '';
-  const anchor = String(((_creativeProject.stages.what.fields.concept || {}).text) || '').trim();
-  const anchorCard = `<p class="creative-help">Core idea: ${_creativeEsc(anchor || 'Not chosen yet.')}</p>`;
+  const concept = String((_creativeHookSlot('core_trigger').text) || '');
+  const blocked = _creativeManyIdeas(concept);
+  const block = `<p id="creativeConceptBlock" class="creative-help"${blocked ? '' : ' hidden'}>Pick one idea. The core concept is one short sentence.</p>`;
+  const anchor = String((((_creativeProject.stages.what || {}).fields || {}).concept || {}).text || '').trim();
+  const move = _creativeMoveLabel();
+  const fryPrompt = move
+    ? `Fry the core concept with this move: ${move}. Push the psychology past the facts. Save the draft on hook.deep_fry. Do not treat it as a verified claim, and do not walk it back yet.`
+    : 'No deep-fry move is selected. Propose one move for hook.hook_type and the fried angle for hook.deep_fry. Do not treat the angle as a verified claim.';
+  const groundPrompt = 'Walk the deep-fried angle back to the strongest claim the product mechanism supports. Keep the fried draft. If support is missing, mark the claim as needing a source. Save the grounded claim on hook.walk_it_back.';
+  const bangPrompt = 'Turn the grounded claim into a scroll-stopping pair. Write hook.verbal_hook so the first words carry one specific idea. Write hook.visual_hook so the picture contrasts with or reinforces that line. Save the pair together on hook.final_hook. Do not score it.';
   return `${prompt}
-    <section class="creative-card" data-hook-group="direction"><strong>Hook direction</strong><p class="creative-help">Format is where the ad runs. Hook approach is how it opens. They stay separate.</p>${_creativeContextChips()}${_creativeFieldCard('brief','channel')}${_creativeFieldCard('brief','format_length')}${_creativeFieldCard('hook','format')}${_creativeFieldCard('hook','hook_type', {optional:true})}</section>
-    <section class="creative-card" data-hook-group="idea"><strong>Find the hook idea</strong>${anchorCard}${split}${_creativeFieldCard('hook','caveman_simple')}${_creativeFieldCard('hook','core_trigger')}</section>
-    <section class="creative-card" data-hook-group="explore"><strong>Working drafts</strong><p class="creative-help">Exploratory lines stay drafts. Grounding keeps the original and does not turn an unsupported claim into a fact.</p><div class="creative-actions"><button type="button" onclick="creativeHookAction('deep_fry','Explore a more provocative version of the committed idea. Keep it as a draft, and do not treat it as a verified claim.')">Explore</button><button type="button" onclick="creativeHookAction('walk_it_back','Walk the exploratory draft back to the strongest version the product facts support. Keep the original draft. If support is missing, mark the claim as needing a source.')">Ground</button></div>${_creativeFieldCard('hook','verbal_hook')}${_creativeFieldCard('hook','visual_hook')}${_creativeFieldCard('hook','deep_fry', {accept:true})}${_creativeFieldCard('hook','walk_it_back', {accept:true})}</section>
-    <section class="creative-card" data-hook-group="polish"><strong>Polish and select</strong><p class="creative-help">Does it open with the compelling part, stay specific, keep one idea, fit the format, and stay supported or marked as needing a source? The visual line should complement the verbal line. This is not a score.</p><div class="creative-actions"><button type="button" onclick="creativeHookAction('final_hook','Polish the selected hook for one clear idea, the chosen format, and a claim that is supported or explicitly needs a source. Do not score it.')">Polish</button></div>${_creativeFieldCard('hook','final_hook')}<details><summary>Polish notes</summary>${_creativeFieldCard('hook','make_it_bang')}</details></section>`;
+    <section class="creative-card" data-hook-group="isolate"><strong>Isolate and commit</strong><p class="creative-help">One idea, in caveman language. Core idea: ${_creativeEsc(anchor || 'Not chosen yet.')}</p>${_creativeContextChips()}${_creativeFieldCard('hook','core_trigger')}${block}</section>
+    <section class="creative-card" data-hook-group="fry"><strong>Deep fry</strong><p class="creative-help">Push the committed idea through one move. Psychology before proof.</p>${_creativeMoveControl()}<div class="creative-actions"><button type="button" onclick="creativeHookAction('deep_fry',${JSON.stringify(fryPrompt).replace(/"/g, '&quot;')})">Fry</button></div>${_creativeFieldCard('hook','deep_fry')}</section>
+    <section class="creative-card" data-hook-group="ground"><strong>Walk it back</strong><p class="creative-help">Keep the fried angle. Walk the claim back to what the mechanism supports. If nothing supports it, mark it as needing a source.</p><div class="creative-actions"><button type="button" onclick="creativeHookAction('walk_it_back',${JSON.stringify(groundPrompt).replace(/"/g, '&quot;')})">Walk it back</button></div><div class="creative-pair">${_creativeHookQuote('deep_fry','Deep-fried angle')}${_creativeFieldCard('hook','walk_it_back', {accept:true, acceptLabel:'Use as the line'})}</div></section>
+    <section class="creative-card" data-hook-group="bang"><strong>Make it bang</strong><p class="creative-help">The hook is a pair: the first line and the opening picture. Format is the asset and its length, after the idea. This is not a score.</p>${_creativeFieldCard('hook','format')}<div class="creative-pair">${_creativeFieldCard('hook','verbal_hook')}${_creativeFieldCard('hook','visual_hook')}</div><div class="creative-actions"><button type="button" onclick="creativeHookAction('final_hook',${JSON.stringify(bangPrompt).replace(/"/g, '&quot;')})">Make it bang</button></div>${_creativeFieldCard('hook','final_hook')}</section>`;
 }
 
 function _creativeContextChips(){
@@ -1026,6 +1074,14 @@ function _creativeFilled(key){
   return !!String(slot.text || '').trim();
 }
 
+function _creativeOnThisStep(key){
+  const parts = String(key || '').split('.');
+  if(parts.length !== 2) return false;
+  const [stage, field] = parts;
+  if(stage === _creativeStage) return true;
+  return (CREATIVE_STEP_FIELDS[_creativeStage] || []).some(pair => pair[0] === stage && pair[1] === field);
+}
+
 function _creativePrereqMarkup(){
   const names = CREATIVE_PREREQ_FIELDS[_creativeStage] || [];
   const ctx = (_creativeProject && _creativeProject.field_context) || {};
@@ -1033,9 +1089,11 @@ function _creativePrereqMarkup(){
   const helpful = new Map();
   names.forEach(name => {
     const spec = ctx[name] || {};
-    (spec.required || []).forEach(key => required.set(key, _creativeFilled(key)));
+    (spec.required || []).forEach(key => {
+      if(!_creativeOnThisStep(key)) required.set(key, _creativeFilled(key));
+    });
     (spec.helpful || []).forEach(key => {
-      if(!required.has(key)) helpful.set(key, _creativeFilled(key));
+      if(!_creativeOnThisStep(key) && !required.has(key)) helpful.set(key, _creativeFilled(key));
     });
   });
   if(!required.size && !helpful.size) return '';
@@ -1505,6 +1563,8 @@ function _creativeFieldSignature(stage){
     mode: _creativeExportMode,
     focus: _creativeFocusField,
     prompt: _creativeHookPrompt,
+    concept: String(((((_creativeProject.stages || {}).hook || {}).fields || {}).core_trigger || {}).text || ''),
+    move: String(((((_creativeProject.stages || {}).hook || {}).fields || {}).hook_type || {}).text || ''),
     strategyPrompt: _creativeStrategyPrompt,
     anchor: ['what.concept','who.segment','brief.campaign_goal','brief.awareness','brief.product_offer'].map(_creativeFilled),
     avatarComposer: _creativeAvatarComposer,
@@ -1608,7 +1668,7 @@ function _creativeFieldCard(stageId, name, options){
   const review = slot.needs_review ? '<span class="creative-claim needs">Needs review</span>' : '';
   const optional = options.optional ? '<span class="creative-claim">Optional</span>' : '';
   const copyTools = stageId === 'copy' ? `<div class="creative-inline-tools"><label><input type="checkbox" ${slot.include !== false ? 'checked' : ''} onchange="creativeToggleInclude('${name}', this.checked)"> Include</label> <button type="button" class="creative-inline-btn" onclick="creativeNudgeOrder('${name}', -1)">Up</button> <button type="button" class="creative-inline-btn" onclick="creativeNudgeOrder('${name}', 1)">Down</button></div>` : '';
-  const accept = options.accept ? `<button type="button" class="creative-inline-btn" onclick="creativeAcceptFinal('${name}')">Accept as final</button>` : '';
+  const accept = options.accept ? `<button type="button" class="creative-inline-btn" onclick="creativeAcceptFinal('${name}')">${_creativeEsc(options.acceptLabel || 'Accept as final')}</button>` : '';
   const picker = options.picker || '';
   const lead = options.lead || '';
   const control = `<textarea data-creative-stage="${stageId}" data-creative-field="${name}" dir="auto" rows="4" oninput="creativeScheduleSave('${name}')">${_creativeEsc(slot.text || '')}</textarea>`;
@@ -1631,6 +1691,18 @@ function _creativeFieldCard(stageId, name, options){
 }
 
 function creativeScheduleSave(field){
+  if(field === 'core_trigger'){
+    const input = document.querySelector('[data-creative-field="core_trigger"]');
+    const note = document.getElementById('creativeConceptBlock');
+    const blocked = !!(input && _creativeManyIdeas(input.value));
+    if(note) note.hidden = !blocked;
+    if(blocked){
+      clearTimeout(_creativeTimers[field]);
+      delete _creativeTimers[field];
+      _creativeDirty = Object.keys(_creativeTimers).length > 0;
+      return;
+    }
+  }
   _creativeDirty = true;
   _creativeSaveState = 'Saving…';
   const label = document.getElementById('creativeSaveState');

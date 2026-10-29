@@ -170,8 +170,59 @@ def test_core_trigger_does_not_require_a_hook_type(studio):
     project = studio.create_project("Idea")
     view = studio.get_project(project["id"], field="core_trigger", for_suggestion=True)
     assert "hook.hook_type" not in view["missing"]
+    assert "hook.hook_type" not in view["helpful_missing"]
     assert "what.concept" in view["missing"]
-    assert "hook.hook_type" in view["helpful_missing"]
+    assert "hook.format" not in view["missing"]
+
+
+def test_core_concept_rejects_a_second_idea(studio):
+    project = studio.create_project("One")
+    with pytest.raises(studio.StudioError, match="one idea"):
+        studio.update_field(
+            project["id"], "hook", "core_trigger",
+            "Celebrities hide a secret and they skip coffee", author="user",
+        )
+    with pytest.raises(studio.StudioError, match="one idea"):
+        studio.save_proposal(
+            project["id"], "hook", "core_trigger", "Secret one. Secret two.",
+        )
+    saved = studio.update_field(
+        project["id"], "hook", "core_trigger", "Celebrities hide a secret", author="user",
+    )
+    assert saved["value"] == "Celebrities hide a secret"
+
+
+def test_hook_move_accepts_a_label_and_keeps_legacy_text(studio):
+    project = studio.create_project("Move")
+    saved = studio.update_field(project["id"], "hook", "hook_type", "Good thing is bad", author="user")
+    assert saved["value"] == "good_is_bad"
+    legacy = studio.update_field(project["id"], "hook", "hook_type", "Pattern interrupt", author="user")
+    assert legacy["value"] == "Pattern interrupt"
+
+
+def test_older_caveman_note_becomes_the_core_concept(studio):
+    project = studio.create_project("Migrate")
+    studio.update_field(project["id"], "hook", "caveman_simple", "Sleep is the leak", author="user")
+    moved = studio.get_project(project["id"])
+    assert moved["stages"]["hook"]["fields"]["core_trigger"]["text"] == "Sleep is the leak"
+    assert moved["stages"]["hook"]["fields"]["caveman_simple"]["text"] == ""
+    studio.update_field(project["id"], "hook", "core_trigger", "Keep this idea", author="user")
+    studio.update_field(project["id"], "hook", "caveman_simple", "A different note", author="user")
+    kept = studio.get_project(project["id"])
+    assert kept["stages"]["hook"]["fields"]["core_trigger"]["text"] == "Keep this idea"
+    assert kept["stages"]["hook"]["fields"]["caveman_simple"]["text"] == "A different note"
+
+
+def test_fried_angle_does_not_wait_for_format(studio):
+    project = studio.create_project("Fry")
+    view = studio.get_project(project["id"], field="deep_fry", for_suggestion=True)
+    assert "hook.format" not in view["missing"]
+    assert "brief.channel" not in view["missing"]
+    assert "brief.format_length" not in view["missing"]
+    final = studio.get_project(project["id"], field="final_hook", for_suggestion=True)
+    assert "hook.verbal_hook" in final["missing"]
+    assert "hook.visual_hook" in final["missing"]
+    assert "hook.format" not in final["missing"]
 
 
 def test_ambiguous_name_does_not_write(studio):
@@ -369,7 +420,10 @@ def test_static_panel_wires_stage_switch_proposals_and_export():
     assert ">Continue</button>" in script
     assert 'data-export-mode="handoff"' in script
     assert 'data-export-mode="full"' in script
-    assert 'data-hook-group="direction"' in script
+    assert 'data-hook-group="isolate"' in script
+    assert script.index('data-hook-group="isolate"') < script.index('data-hook-group="fry"')
+    assert script.index('data-hook-group="fry"') < script.index('data-hook-group="ground"')
+    assert script.index('data-hook-group="ground"') < script.index('data-hook-group="bang"')
     assert "mode=${encodeURIComponent(mode)}" in script
     assert "writeText(text)" in script
     assert "Nothing is selected for you until you replace a field." in script
@@ -1141,6 +1195,96 @@ def test_strategy_edit_preserves_downstream_and_flags_review(studio):
     awareness = studio.get_project(project["id"], field="awareness")["data"]
     assert awareness["text"] == "product_aware"
     assert awareness["needs_review"] is True
+
+
+def test_hook_prereq_lists_earlier_work_only(studio):
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is required to render the prerequisite list")
+    project = studio.create_project("Hook list")
+    studio.update_field(project["id"], "who", "segment", "Night bakers", author="user")
+    studio.update_field(project["id"], "brief", "awareness", "problem_aware", author="user")
+    studio.update_field(project["id"], "brief", "mass_desire", "Rest after a shift", author="user")
+    studio.update_field(project["id"], "brief", "campaign_context", "cold", author="user")
+    opened = studio.get_project(project["id"])
+    script = Path(__file__).resolve().parents[1].joinpath("static", "creative_studio.js")
+    payload = json.dumps({
+        "stage": "hook",
+        "project": {
+            "stages": opened["stages"],
+            "field_context": opened["field_context"],
+        },
+    })
+    rendered = subprocess.run(
+        [node, "-e", (
+            "const fs=require('fs');"
+            "const input=JSON.parse(fs.readFileSync(0,'utf8'));"
+            "eval(fs.readFileSync(process.argv[1],'utf8')+"
+            "'\\n_creativeStage=input.stage;_creativeProject=input.project;"
+            "process.stdout.write(_creativePrereqMarkup());');"
+        ), str(script)],
+        input=payload,
+        text=True,
+        check=True,
+        capture_output=True,
+    ).stdout
+    for label in ("Core idea", "Audience segment", "Mechanism summary", "Campaign goal", "Awareness", "Core desire", "Market sophistication", "Campaign context", "Message approach"):
+        assert label in rendered
+    assert "Audience segment" in rendered and ">Present<" in rendered
+    for label in ("Length and placement", "Channel", "Visual hook", "Verbal hook", "Format / placement", "Hook approach", "Format and placement"):
+        assert label not in rendered
+
+
+def test_hook_step_leads_with_one_concept():
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is required to render the hook step")
+    script = Path(__file__).resolve().parents[1].joinpath("static", "creative_studio.js")
+    payload = json.dumps({
+        "stages": {
+            "brief": {"fields": {}},
+            "who": {"fields": {}},
+            "what": {"fields": {"concept": {"text": "Sleep is the leak"}}},
+            "hook": {"fields": {
+                "core_trigger": {"text": "Sleep is the leak"},
+                "hook_type": {"text": "good_is_bad"},
+                "deep_fry": {"text": ""},
+                "walk_it_back": {"text": ""},
+                "verbal_hook": {"text": ""},
+                "visual_hook": {"text": ""},
+                "format": {"text": ""},
+                "final_hook": {"text": ""},
+            }},
+        },
+    })
+    rendered = subprocess.run(
+        [node, "-e", (
+            "const fs=require('fs');"
+            "const input=JSON.parse(fs.readFileSync(0,'utf8'));"
+            "eval(fs.readFileSync(process.argv[1],'utf8')+"
+            "'\\n_creativeStage=\"hook\";_creativeProject=input;"
+            "process.stdout.write(_creativeHookBody());');"
+        ), str(script)],
+        input=payload,
+        text=True,
+        check=True,
+        capture_output=True,
+    ).stdout
+    order = ["isolate", "fry", "ground", "bang"]
+    positions = [rendered.index(f'data-hook-group="{name}"') for name in order]
+    assert positions == sorted(positions)
+    for label in ("Core concept", "Deep-fry move", "Good thing is bad", "Deep-fried angle", "Grounded claim", "Verbal hook", "Visual hook", "Format and placement", "Final hook pair", "Fry", "Walk it back", "Make it bang"):
+        assert label in rendered
+    for label in ("Channel", "Length and placement", "Caveman-simple", "One central idea", "Hook approach", "Exploratory draft", "Polish notes"):
+        assert label not in rendered
+    assert rendered.index("Format and placement") > rendered.index('data-hook-group="bang"')
+    assert "creative-pair" in rendered
 
 
 def test_strategy_controls_are_separated_in_the_script_and_contract():
