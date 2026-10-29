@@ -1317,3 +1317,75 @@ def test_strategy_controls_are_separated_in_the_script_and_contract():
     ):
         assert name in contract
     assert "the campaign goal or the awareness level" in contract
+
+
+def test_field_guides_use_the_original_framework_wording():
+    import shutil
+    import subprocess
+
+    root = Path(__file__).resolve().parents[1]
+    html = (root / "static" / "index.html").read_text(encoding="utf-8")
+    guide_tag = html.find("static/creative_guide.js")
+    studio_tag = html.find("static/creative_studio.js")
+    assert guide_tag != -1 and studio_tag != -1 and guide_tag < studio_tag
+    guide = (root / "static" / "creative_guide.js").read_text(encoding="utf-8")
+    assert "כתוב כאן" not in guide
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is required to render field guides")
+    runner = r"""
+const stages = {};
+Object.entries(CREATIVE_FIELDS).forEach(([stage, names]) => {
+  stages[stage] = {fields:{}, status:'not_started'};
+  names.forEach(name => stages[stage].fields[name] = {text:'', proposals:[], include:true});
+});
+_creativeProject = {stages, audience_blocks:{outcome:[], demographic:[], facet:[]}, concept_checks:{}, audience_avatars:[], product_note:{}};
+const bodies = [
+  _creativeWhoBody(),
+  (_creativeStage = 'what', _creativeStepBody(stages.what)),
+  _creativeHookBody(),
+  (_creativeStage = 'casts', _creativeStepBody(stages.casts)),
+  (_creativeStage = 'copy', _creativeStepBody(stages.copy)),
+];
+const fields = ['outcome','demographic','facet','segment','concept','angle','ump','ums','mechanism','hook_type','core_trigger','deep_fry','walk_it_back','format','verbal_hook','visual_hook','final_hook','conceit','actors','style','terrain','setup','pain','promise','proof','curiosity','constraints','conditions'];
+const html = bodies.join('\n');
+const missing = fields.filter(name => !html.includes('data-creative-guide="' + name + '"'));
+if(missing.length) throw new Error('missing explain controls: ' + missing.join(','));
+const phrases = {
+  outcome:'התוצאה הרצויה.',
+  concept:'רעיון אחד בלבד (Single Idea)',
+  angle:'ההשוואה הבלתי הוגנת',
+  ump:'למה הבעיה באמת קורית.',
+  mechanism:'UMP + UMS',
+  visual_hook:'Visual Hook (מה רואים)',
+  core_trigger:'הטעות הכי נפוצה היא לנסות להכניס להוק',
+  deep_fry:'Good Thing is Bad (הדבר הטוב הוא האויב)',
+  walk_it_back:'הוק טוב נשמע כמו קליקבייט קיצוני',
+  verbal_hook:'הנדל&quot;ן הראשון',
+  final_hook:'Cognitive Dissonance (דיסוננס קוגניטיבי ושבירת פרדיגמה)',
+  format:'פורמט התוכן.',
+  actors:'שחקנים / דמויות.',
+  pain:'מתהפך לצד השני במיטה',
+  conditions:'מיועד לכאבי כתף ליליים',
+};
+Object.entries(phrases).forEach(([field, phrase]) => {
+  const markup = _creativeGuideMarkup(field);
+  if(!markup.includes('role="dialog"')) throw new Error(field + ' dialog');
+  if(!markup.includes(phrase)) throw new Error(field + ' missing phrase');
+});
+if(_creativeGuideMarkup('campaign_goal')) throw new Error('strategy field has no framework note');
+process.stdout.write('ok');
+"""
+    rendered = subprocess.run(
+        [node, "-e", (
+            "const fs=require('fs');"
+            "const root=process.argv[1];"
+            "eval(fs.readFileSync(root+'/static/creative_guide.js','utf8')+'\\n'+"
+            "fs.readFileSync(root+'/static/creative_studio.js','utf8')+'\\n'+"
+            "process.argv[2]);"
+        ), str(root), runner],
+        text=True,
+        check=True,
+        capture_output=True,
+    )
+    assert rendered.stdout == "ok"

@@ -700,6 +700,90 @@ function _creativeChoiceGroup(field, legend, choices, current, stage, compact){
   return `<div class="creative-choice-group${compact ? ' compact' : ''}" role="radiogroup" aria-label="${_creativeEsc(legend)}">${radios}</div>`;
 }
 
+function _creativeGuideButton(field){
+  if(typeof CREATIVE_GUIDE === 'undefined' || !CREATIVE_GUIDE[field]) return '';
+  const label = CREATIVE_LABELS[field] || _creativeLabel(field);
+  const text = 'Explain ' + label;
+  return `<button type="button" class="creative-guide" data-creative-guide="${field}" aria-haspopup="dialog" aria-label="${_creativeEsc(text)}" title="${_creativeEsc(text)}" onclick="creativeOpenGuide('${field}')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6"/><path d="M12 7.5h.01"/></svg></button>`;
+}
+
+function _creativeGuideItem(item){
+  if(typeof item === 'string') return `<li dir="auto">${_creativeEsc(item)}</li>`;
+  const lead = item.lead ? `<strong>${_creativeEsc(item.lead)}</strong>` : '';
+  const text = item.text ? `${lead ? ' ' : ''}${_creativeEsc(item.text)}` : '';
+  const sub = item.sub ? `<ul>${item.sub.map(_creativeGuideItem).join('')}</ul>` : '';
+  return `<li dir="auto">${lead}${text}${sub}</li>`;
+}
+
+function _creativeGuideBlocks(blocks){
+  return (blocks || []).map(block => {
+    if(block.h2) return `<h3 dir="auto">${_creativeEsc(block.h2)}</h3>`;
+    if(block.h3) return `<h4 dir="auto">${_creativeEsc(block.h3)}</h4>`;
+    if(block.p) return `<p dir="auto">${_creativeEsc(block.p)}</p>`;
+    if(block.em) return `<p dir="auto"><em>${_creativeEsc(block.em)}</em></p>`;
+    if(block.ul) return `<ul>${block.ul.map(_creativeGuideItem).join('')}</ul>`;
+    if(block.ol) return `<ol>${block.ol.map(_creativeGuideItem).join('')}</ol>`;
+    return '';
+  }).join('');
+}
+
+function _creativeGuideMarkup(field){
+  const guide = (typeof CREATIVE_GUIDE !== 'undefined' && CREATIVE_GUIDE[field]) || null;
+  if(!guide) return '';
+  return `<div class="creative-guide-dialog" role="dialog" aria-modal="true" aria-labelledby="creativeGuideTitle" tabindex="-1">
+    <div class="creative-guide-head">
+      <div>
+        <p class="creative-guide-kicker" dir="auto">${_creativeEsc(guide.kicker || '')}</p>
+        <h2 id="creativeGuideTitle" dir="auto">${_creativeEsc(guide.title || '')}</h2>
+      </div>
+      <button type="button" class="creative-guide-close" aria-label="Close" onclick="creativeCloseGuide()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    </div>
+    <div class="creative-guide-body">${_creativeGuideBlocks(guide.blocks)}</div>
+  </div>`;
+}
+
+let _creativeGuideField = '';
+let _creativeGuideReturn = null;
+
+function _creativeGuideOnKey(event){
+  if(event.key !== 'Escape' || !_creativeGuideField) return;
+  event.preventDefault();
+  event.stopPropagation();
+  creativeCloseGuide();
+}
+
+function creativeOpenGuide(field){
+  if(typeof CREATIVE_GUIDE === 'undefined' || !CREATIVE_GUIDE[field]) return;
+  _creativeGuideField = field;
+  _creativeGuideReturn = document.activeElement;
+  const host = document.getElementById('mainCreative') || document.body;
+  let layer = document.getElementById('creativeGuideLayer');
+  if(!layer){
+    layer = document.createElement('div');
+    layer.id = 'creativeGuideLayer';
+    layer.className = 'creative-guide-layer';
+    layer.addEventListener('click', event => {
+      if(event.target === layer) creativeCloseGuide();
+    });
+    host.appendChild(layer);
+  }
+  layer.innerHTML = _creativeGuideMarkup(field);
+  document.removeEventListener('keydown', _creativeGuideOnKey);
+  document.addEventListener('keydown', _creativeGuideOnKey);
+  const dialog = layer.querySelector('.creative-guide-dialog');
+  if(dialog && typeof dialog.focus === 'function') dialog.focus();
+}
+
+function creativeCloseGuide(){
+  _creativeGuideField = '';
+  const layer = document.getElementById('creativeGuideLayer');
+  if(layer) layer.remove();
+  document.removeEventListener('keydown', _creativeGuideOnKey);
+  const back = _creativeGuideReturn;
+  _creativeGuideReturn = null;
+  if(back && typeof back.focus === 'function') back.focus();
+}
+
 function _creativeIsolateButton(field){
   const isolated = _creativeFocusField === field;
   const label = CREATIVE_LABELS[field] || _creativeLabel(field);
@@ -1024,7 +1108,7 @@ function _creativeMoveControl(){
     ? `<p class="creative-help">Current note: ${_creativeEsc(current)}. Pick a move to replace it.</p>`
     : '';
   return `<div class="creative-field" data-field="hook_type">
-    <div class="creative-field-label"><label>Deep-fry move</label>${_creativeIsolateButton('hook_type')}</div>
+    <div class="creative-field-label"><label>Deep-fry move</label><span class="creative-field-tools">${_creativeGuideButton('hook_type')}${_creativeIsolateButton('hook_type')}</span></div>
     <p class="creative-help">${_creativeEsc(CREATIVE_HELP.hook_type)}</p>
     ${_creativeChoiceGroup('hook_type', 'Deep-fry move', CREATIVE_MOVE_CHOICES, known ? current : '', 'hook', true)}
     ${legacy}
@@ -1672,7 +1756,7 @@ function _creativeFieldCard(stageId, name, options){
   return `<div class="creative-field${isolated ? ' isolated' : ''}" data-field="${name}">
     <div class="creative-field-label">
       <label>${_creativeEsc(label)} ${optional}${claim}</label>
-      <span class="creative-field-tools">${copyTools}${_creativeIsolateButton(name)}</span>
+      <span class="creative-field-tools">${_creativeGuideButton(name)}${copyTools}${_creativeIsolateButton(name)}</span>
     </div>
     ${help}
     ${picker}
