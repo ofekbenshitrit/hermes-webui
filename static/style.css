@@ -5305,6 +5305,18 @@ main.main > #mainPlugin{display:none;}
 #mainCreative .creative-isolate{padding:2px 8px;border:none;border-radius:999px;background:transparent;color:var(--muted);font-size:11px;font-weight:600;}
 #mainCreative .creative-isolate:hover,#mainCreative .creative-isolate.on{background:var(--accent-bg);color:var(--text);border:none;}
 .creative-field textarea,.creative-field input,.creative-field select{width:100%;box-sizing:border-box;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px 10px;font:inherit;font-size:14px;text-align:start;}
+#mainCreative .creative-strategy-section{margin:0 0 16px;}
+#mainCreative .creative-strategy-section h3,
+#mainCreative .creative-strategy-section legend{margin:0;font-size:14px;font-weight:600;}
+#mainCreative .creative-choice-group{display:flex;flex-direction:column;align-items:flex-start;gap:6px;margin:0 0 8px;}
+#mainCreative .creative-choice{display:flex;align-items:flex-start;gap:8px;font-size:14px;line-height:1.4;}
+#mainCreative .creative-choice input{margin-top:3px;}
+#mainCreative .creative-unknown{margin:0 0 8px;}
+#mainCreative .creative-unknown.on{background:var(--text);color:var(--bg);}
+#mainCreative .creative-evidence{margin:0;padding-left:18px;}
+#mainCreative .creative-evidence li{margin:0 0 8px;}
+#mainCreative .creative-evidence p{margin:2px 0 0;}
+#mainCreative .creative-strategy-section details{margin-top:12px;}
 #mainCreative .creative-pills{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 8px;}
 #mainCreative .creative-fields button.creative-pill{border-radius:999px;background:transparent;color:var(--text);padding:6px 12px;}
 #mainCreative .creative-fields button.creative-pill[aria-pressed="true"]{background:var(--text);color:var(--bg);border-color:var(--text);}
@@ -5411,6 +5423,7 @@ main.main > #mainPlugin{display:none;}
 #mainCreative .creative-quiet-actions button:hover{color:var(--text);background:transparent;border:none;}
 .creative-inline-tools{display:flex;gap:8px;align-items:center;margin-bottom:6px;font-size:12px;}
 .creative-card{border:1px solid var(--border);border-radius:8px;padding:8px;margin:8px 0;}
+#mainCreative fieldset.creative-card{min-inline-size:0;}
 .creative-suggest{
   margin-top:8px;
   padding:10px 12px 10px;

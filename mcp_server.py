@@ -578,19 +578,21 @@ def _run_mcp_v2() -> None:
 
 _CREATIVE_STAGES = ("brief", "who", "what", "hook", "casts", "copy")
 _CREATIVE_FIELD_NAMES = (
-    "product_offer", "product_facts", "audience_notes", "objective", "channel",
+    "product_offer", "product_facts", "audience_notes", "objective", "campaign_goal",
+    "awareness", "mass_desire", "sophistication", "campaign_context", "channel",
     "format_length", "assets", "sources", "summary_provided", "summary_assumptions",
     "summary_missing", "outcome", "demographic", "facet", "segment", "concept",
-    "angle", "ump", "ums", "mechanism", "hook_type", "visual_hook", "verbal_hook",
+    "angle", "ump", "ums", "mechanism", "message_approach", "hook_type", "visual_hook", "verbal_hook",
     "core_trigger", "caveman_simple", "deep_fry", "walk_it_back", "make_it_bang",
     "final_hook", "format", "conceit", "actors", "style", "terrain", "setup",
     "pain", "promise", "proof", "curiosity", "constraints", "conditions",
 )
 _CREATIVE_FIELD_INDEX = (
-    "brief: product_offer, product_facts, audience_notes, objective, channel, "
+    "brief: product_offer, product_facts, audience_notes, objective, campaign_goal, "
+    "awareness, mass_desire, sophistication, campaign_context, channel, "
     "format_length, assets, sources, summary_provided, summary_assumptions, summary_missing. "
     "who: outcome, demographic, facet, segment. "
-    "what: concept, angle, ump, ums, mechanism. "
+    "what: concept, angle, ump, ums, mechanism, message_approach. "
     "hook: hook_type, visual_hook, verbal_hook, core_trigger, caveman_simple, "
     "deep_fry, walk_it_back, make_it_bang, final_hook, format. "
     "casts: conceit, actors, style, terrain, setup. "
@@ -607,6 +609,15 @@ _CREATIVE_CONTRACT = (
     "Never invent proof, numbers, testimonials, features, outcomes, or usage conditions. "
     "Framework examples are copywriting examples, not evidence. "
     "Wizard order is brief, who, what, hook, casts, then copy. "
+    "brief.campaign_goal is the business result: purchase, lead, traffic, or reach. "
+    "brief.awareness is unaware, problem_aware, solution_aware, product_aware, most_aware, or unknown. "
+    "unknown is not a confirmed level. "
+    "brief.sophistication is stage_1 through stage_5 or unknown, and it is not awareness. "
+    "brief.campaign_context is cold or retargeting, not a goal. "
+    "what.message_approach is educate, objections, or urgency, not a goal or an awareness level. "
+    "brief.objective is an earlier free-text value. Do not treat it as the campaign goal or the awareness level. "
+    "A studio-default campaign goal is not a confirmed fact. "
+    "Save inferences with save_creative_proposal. Do not write them with update_creative_field unless the user asks to change that field. "
     "hook.format is placement. hook_type is the opening approach. They are different fields. "
     "final_hook is the selected opening. caveman_simple, deep_fry, walk_it_back, and make_it_bang are working notes. "
     "If required context is missing, ask or mark the proposal exploratory. Do not present a guess as grounded. "

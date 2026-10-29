@@ -50,6 +50,11 @@ FIELDS: dict[str, tuple[str, ...]] = {
         "product_facts",
         "audience_notes",
         "objective",
+        "campaign_goal",
+        "awareness",
+        "mass_desire",
+        "sophistication",
+        "campaign_context",
         "channel",
         "format_length",
         "assets",
@@ -59,7 +64,7 @@ FIELDS: dict[str, tuple[str, ...]] = {
         "summary_missing",
     ),
     "who": ("outcome", "demographic", "facet", "segment"),
-    "what": ("concept", "angle", "ump", "ums", "mechanism"),
+    "what": ("concept", "angle", "ump", "ums", "mechanism", "message_approach"),
     "hook": (
         "hook_type",
         "visual_hook",
@@ -122,6 +127,14 @@ FIELD_CONTEXT: dict[str, dict[str, tuple[tuple[str, str], ...]]] = {
             ("who", "facet"),
         ),
         "helpful": (("brief", "audience_notes"), ("brief", "objective"), ("brief", "product_facts")),
+    },
+    "awareness": {
+        "required": (),
+        "helpful": (("brief", "audience_notes"),),
+    },
+    "mass_desire": {
+        "required": (),
+        "helpful": (("who", "outcome"), ("brief", "audience_notes"), ("brief", "product_facts")),
     },
     "concept": {
         "required": (("who", "segment"),),
@@ -234,8 +247,27 @@ FIELD_CONTEXT: dict[str, dict[str, tuple[tuple[str, str], ...]]] = {
     },
 }
 
+# Helpful strategy context for the idea and the hook. Awareness is an input,
+# not a concept generator, so these stay helpful rather than required.
+_STRATEGY_CONTEXT = (
+    ("brief", "campaign_goal"),
+    ("brief", "awareness"),
+    ("brief", "mass_desire"),
+    ("brief", "sophistication"),
+    ("brief", "campaign_context"),
+    ("what", "message_approach"),
+)
+for _strategy_target in ("concept", "angle", *FIELDS["hook"]):
+    _strategy_spec = FIELD_CONTEXT[_strategy_target]
+    _strategy_helpful = list(_strategy_spec["helpful"])
+    for _strategy_edge in _STRATEGY_CONTEXT:
+        if _strategy_edge not in _strategy_helpful:
+            _strategy_helpful.append(_strategy_edge)
+    _strategy_spec["helpful"] = tuple(_strategy_helpful)
+del _strategy_target, _strategy_spec, _strategy_helpful, _strategy_edge
+
 WIZARD_STEP_LABELS = {
-    "brief": "Product & objective",
+    "brief": "Audience & strategy",
     "who": "Audience",
     "what": "Core idea",
     "hook": "Hook",
@@ -244,6 +276,117 @@ WIZARD_STEP_LABELS = {
     "review": "Review",
 }
 EXPORT_MODES = frozenset({"handoff", "full"})
+
+_LEGACY_COLD_OBJECTIVE = (
+    "Cold Acquisition (Direct Sale). Broad appeal, mechanism introduction, and skepticism breaking."
+)
+_LEGACY_RETARGET_OBJECTIVE = (
+    "Retargeting & Objections. Overcome skepticism, price or efficacy objections, and comparison to alternatives."
+)
+_MESSAGE_APPROACH_ORDER = ("educate", "objections", "urgency")
+_STRATEGY_LABELS = {
+    "campaign_goal": {
+        "purchase": "Purchase / conversion",
+        "lead": "Lead",
+        "traffic": "Traffic",
+        "reach": "Reach / awareness",
+    },
+    "awareness": {
+        "unaware": "Unaware",
+        "problem_aware": "Problem aware",
+        "solution_aware": "Solution aware",
+        "product_aware": "Product aware",
+        "most_aware": "Most aware",
+        "unknown": "Unknown",
+    },
+    "sophistication": {
+        "stage_1": "Stage 1",
+        "stage_2": "Stage 2",
+        "stage_3": "Stage 3",
+        "stage_4": "Stage 4",
+        "stage_5": "Stage 5",
+        "unknown": "Unknown",
+    },
+    "campaign_context": {
+        "cold": "Cold acquisition",
+        "retargeting": "Retargeting",
+    },
+    "message_approach": {
+        "educate": "Educate",
+        "objections": "Handle objections",
+        "urgency": "Urgency",
+    },
+}
+
+
+def _strategy_key(text: str) -> str:
+    return " ".join(text.casefold().replace("_", " ").replace("/", " ").split())
+
+
+def _strategy_canon(field: str) -> dict[str, str]:
+    labels = _STRATEGY_LABELS.get(field) or {}
+    canon = {}
+    for token, label in labels.items():
+        canon[_strategy_key(token)] = token
+        canon[_strategy_key(label)] = token
+    return canon
+
+
+def _normalize_message_approach(text: str) -> str:
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return ""
+    canon = _strategy_canon("message_approach")
+    chosen = []
+    for part in cleaned.split(","):
+        key = _strategy_key(part)
+        if not key:
+            continue
+        token = canon.get(key)
+        if token is None or token in chosen:
+            if token is None:
+                raise StudioError("invalid message_approach")
+            continue
+        chosen.append(token)
+    if not chosen:
+        raise StudioError("invalid message_approach")
+    return ", ".join(token for token in _MESSAGE_APPROACH_ORDER if token in chosen)
+
+
+def _coerce_strategy_text(field: str, text: str | None) -> str:
+    """Keep free text unchanged. Enum fields store canonical ids, or empty."""
+    raw = "" if text is None else str(text)
+    if field == "message_approach":
+        return _normalize_message_approach(raw)
+    canon = _strategy_canon(field)
+    if not canon:
+        return raw
+    cleaned = raw.strip()
+    if not cleaned:
+        return ""
+    token = canon.get(_strategy_key(cleaned))
+    if token is None:
+        raise StudioError(f"invalid {field}")
+    return token
+
+
+def _field_confirmation(field: str, slot: dict) -> str:
+    text = (slot.get("text") or "").strip()
+    if not text:
+        return "empty"
+    if field in {"awareness", "sophistication"} and text == "unknown":
+        return "unknown"
+    if field == "campaign_goal" and slot.get("origin") == "default":
+        return "default"
+    return "confirmed"
+
+
+def _strategy_label(field: str, text: str) -> str:
+    labels = _STRATEGY_LABELS.get(field) or {}
+    if field == "message_approach":
+        parts = [labels.get(part.strip(), part.strip()) for part in text.split(",") if part.strip()]
+        return ", ".join(parts)
+    return labels.get(text, text)
 
 
 def _field_owner(field: str) -> str:
@@ -287,8 +430,14 @@ _LOCKS_GUARD = threading.Lock()
 FIELD_HELP = {
     "product_offer": "The product this creative is about. Every later field stays about this product.",
     "product_facts": "Optional legacy notes. The product file is already in the prompt. Do not ask the user to retype it, and do not treat an empty value as missing grounding.",
-    "audience_notes": "What is already known about who buys, before the Who stage is written.",
-    "objective": "The job of this creative: what it should make the viewer do or believe.",
+    "audience_notes": "What is already known about who buys, before the Who stage is written. Awareness belongs to this selected audience, not to the product.",
+    "objective": "Earlier free-text objective kept from older projects. It is not a campaign goal or an awareness level.",
+    "campaign_goal": "The business result this creative should drive: purchase, lead, traffic, or reach. Not the audience's awareness and not a message tactic. A studio default is not confirmation that this product's goal was researched.",
+    "awareness": "How aware this selected audience is: unaware, problem aware, solution aware, product aware, or most aware. Unknown means the level is not confirmed. Awareness constrains the message and does not by itself choose the angle.",
+    "mass_desire": "The desire this audience already has. It can be confirmed from known audience or product material. An inference stays a proposal until the user applies it.",
+    "sophistication": "Optional. Schwartz's stages of how exposed this market is to similar claims and solutions. This is not awareness. Unknown means it is not confirmed.",
+    "campaign_context": "Optional. Cold means the audience has not been sold this product yet. Retargeting means they have. This is not a campaign goal.",
+    "message_approach": "Optional attributes of the concept: educate, handle objections, or urgency. Not a campaign goal or an awareness level.",
     "channel": "Where the creative will run.",
     "format_length": "Length and placement the hook and format have to fit.",
     "outcome": "The result the audience wants. Not a feature list.",
@@ -1034,6 +1183,10 @@ def create_project(name: str, product: str = "", product_source: str = "") -> di
     with _studio_lock():
         project = _blank_project(cleaned, product=(product or "").strip())
         project["product_source"] = (product_source or "").strip()
+        goal = project["stages"]["brief"]["fields"]["campaign_goal"]
+        goal["text"] = "purchase"
+        goal["origin"] = "default"
+        goal["updated_at"] = project["updated_at"]
         _save(project)
         _set_active_id(project["id"])
         return project
@@ -1070,6 +1223,10 @@ def get_project(project_id: str | None = None, name: str | None = None, stage: s
                     "product_id": _product_id(project),
                 }
             exploratory = bool(missing)
+            unresolved = [
+                key for key, row in (context.get("strategy") or {}).items()
+                if isinstance(row, dict) and row.get("confirmation") in {"unknown", "default"}
+            ]
             view = {
                 "id": project["id"],
                 "name": project["name"],
@@ -1079,6 +1236,7 @@ def get_project(project_id: str | None = None, name: str | None = None, stage: s
                 "context": context,
                 "missing": missing,
                 "helpful_missing": helpful_missing,
+                "unresolved": unresolved,
                 "exploratory": exploratory,
                 "guidance": (
                     "Use this context. missing lists inputs required for a grounded draft. "
@@ -1086,6 +1244,15 @@ def get_project(project_id: str | None = None, name: str | None = None, stage: s
                     "a focused question or label the proposal exploratory. Do not present "
                     "a guess as grounded. The product profile is grounding. An empty "
                     "brief.product_facts field does not make the draft exploratory. "
+                    "campaign_goal, awareness, mass_desire, sophistication, campaign_context, "
+                    "and message_approach are separate fields. brief.objective is an earlier "
+                    "free-text value, not a campaign goal or an awareness level. "
+                    "confirmation default or unknown is not a confirmed fact. "
+                    "strategy_sources lists evidence already on the project and does not "
+                    "choose a level. If product_note, audience_notes, and outcome are all "
+                    "absent, ask one focused question or mark the proposal exploratory. "
+                    "Do not invent market research, product claims, mechanisms, or audience "
+                    "facts. Pending proposals are not selected values. "
                     "Save at most three proposals. Do not change the selected value."
                 ),
             }
@@ -1124,7 +1291,65 @@ def _public_project(project: dict) -> dict:
     view["audience_avatars"] = _audience_avatars(project)
     view["audience_blocks"] = _audience_blocks(project)
     view["field_context"] = _field_context_view()
+    view["legacy_objective"] = _legacy_objective_view(project)
     return view
+
+
+def _legacy_objective_view(project: dict) -> dict | None:
+    """Classify a stored objective for display. Does not rewrite the project."""
+    text = _field_text(project, "brief", "objective")
+    if not text:
+        return None
+    if text == _LEGACY_COLD_OBJECTIVE:
+        kind, value = "campaign_context", "cold"
+    elif text == _LEGACY_RETARGET_OBJECTIVE:
+        kind, value = "campaign_context", "retargeting"
+    else:
+        kind, value = "ambiguous", ""
+    return {
+        "text": text,
+        "kind": kind,
+        "value": value,
+        "applied": bool(value) and _field_text(project, "brief", "campaign_context") == value,
+    }
+
+
+def _strategy_snapshot(project: dict) -> dict:
+    rows = {}
+    for stage, name in (
+        ("brief", "campaign_goal"),
+        ("brief", "awareness"),
+        ("brief", "mass_desire"),
+        ("brief", "sophistication"),
+        ("brief", "campaign_context"),
+        ("what", "message_approach"),
+    ):
+        slot = project["stages"][stage]["fields"][name]
+        text = (slot.get("text") or "").strip()
+        rows[f"{stage}.{name}"] = {
+            "text": text,
+            "confirmation": _field_confirmation(name, slot),
+            "origin": slot.get("origin") or "",
+            "claim": slot.get("claim"),
+            "author": slot.get("author"),
+            "pending_proposals": sum(
+                1 for item in slot.get("proposals") or []
+                if item.get("status") in {"proposed", "in_discussion"}
+            ),
+        }
+    return rows
+
+
+def _strategy_sources(project: dict) -> dict:
+    """Evidence already stored. Presence is not an inferred awareness or desire."""
+    note = _product_note(project).strip()
+    avatar = _field_text(project, "brief", "audience_notes")
+    outcome = _field_text(project, "who", "outcome")
+    return {
+        "product_note": {"present": bool(note)},
+        "audience_notes": {"present": bool(avatar), "text": avatar},
+        "outcome": {"present": bool(outcome), "text": outcome},
+    }
 
 
 def _field_text(project: dict, stage: str, field: str) -> str:
@@ -1159,8 +1384,13 @@ def _suggestion_bundle(project: dict, field: str) -> tuple[dict, list[str], list
     brief_bits = []
     for stage, name in (("brief", "product_offer"), ("brief", "objective"), ("brief", "channel")):
         text = project["stages"][stage]["fields"][name]["text"].strip()
-        if text:
-            brief_bits.append({"stage": stage, "field": name, "text": text})
+        if not text:
+            continue
+        item = {"stage": stage, "field": name, "text": text}
+        if name == "objective":
+            item["confirmation"] = "legacy"
+            item["note"] = "Earlier objective. Not a campaign goal or an awareness level."
+        brief_bits.append(item)
     context["brief"] = brief_bits
 
     def take(pairs, role: str, gap: list[str]) -> None:
@@ -1172,12 +1402,15 @@ def _suggestion_bundle(project: dict, field: str) -> tuple[dict, list[str], list
                 "claim": slot.get("claim"),
                 "author": slot.get("author"),
                 "role": role,
+                "confirmation": _field_confirmation(name, slot),
             }
             if not text:
                 gap.append(f"{stage}.{name}")
 
     take(spec.get("required") or (), "required", missing)
     take(spec.get("helpful") or (), "helpful", helpful_missing)
+    context["strategy"] = _strategy_snapshot(project)
+    context["strategy_sources"] = _strategy_sources(project)
     return context, missing, helpful_missing
 
 
@@ -1232,11 +1465,14 @@ def update_field(project_id: str, stage: str, field: str, text: str, *,
     if author not in {"user", "agent"}:
         raise StudioError("invalid author")
     _require_field(stage, field)
+    text = _coerce_strategy_text(field, text)
     with _studio_lock():
         project = _load(project_id)
         slot = _field(project, stage, field)
         previous = slot.get("text") or ""
         slot["text"] = text if text is not None else ""
+        if field == "campaign_goal":
+            slot["origin"] = "user"
         chosen, ref, regulated = _apply_claim(slot["text"], claim, source_ref if source_ref is not None else slot.get("source_ref"))
         slot["claim"] = chosen
         slot["source_ref"] = ref
@@ -1447,8 +1683,11 @@ def _accept(project_id: str, proposal_id: str, edited_text: str | None) -> dict:
                 raise StudioError("edited text is required")
             proposal["revised_text"] = final
             proposal["status"] = "edited_accepted"
+        final = _coerce_strategy_text(field, final)
         chosen, ref, regulated = _apply_claim(final, None, slot.get("source_ref"))
         slot["text"] = final
+        if field == "campaign_goal":
+            slot["origin"] = "user"
         slot["author"] = "agent"
         slot["claim"] = chosen
         slot["source_ref"] = ref
@@ -1517,9 +1756,11 @@ def select_alternative(project_id: str, proposal_id: str) -> dict:
         stage, field, slot, proposal = _find_proposal(project, proposal_id)
         if proposal.get("status") != "alternative":
             raise StudioError("only a saved alternative can be selected")
-        final = (proposal.get("revised_text") or proposal.get("text") or "").strip()
+        final = _coerce_strategy_text(field, (proposal.get("revised_text") or proposal.get("text") or "").strip())
         chosen, ref, regulated = _apply_claim(final, None, "")
         slot["text"] = final
+        if field == "campaign_goal":
+            slot["origin"] = "user"
         slot["author"] = "user"
         slot["claim"] = chosen
         slot["source_ref"] = ref
@@ -1682,6 +1923,10 @@ def _handoff_notes(slot: dict) -> list[str]:
         notes.append(f"Claim: {claim}")
     if slot.get("regulated") or claim == "needs_verification":
         notes.append("Needs verification: regulated or unsupported-claim wording is present.")
+    if slot.get("origin") == "default":
+        notes.append("Studio default, not confirmed for this product.")
+    if slot.get("strategy_note"):
+        notes.append(slot["strategy_note"])
     source = (slot.get("source_ref") or "").strip()
     if source:
         notes.append(f"Source: {source}")
@@ -1711,6 +1956,32 @@ def _handoff_blocks(pairs: list[tuple[str, dict]]) -> list[str]:
     return lines
 
 
+def _present_strategy_slot(field: str, slot: dict) -> dict | None:
+    text = (slot.get("text") or "").strip()
+    if not text:
+        return None
+    shown = dict(slot)
+    shown["text"] = _strategy_label(field, text)
+    if field in {"awareness", "sophistication"} and text == "unknown":
+        shown["strategy_note"] = "Not a confirmed level."
+    return shown
+
+
+def _strategy_handoff_pairs(brief: dict) -> list[tuple[str, dict]]:
+    pairs = []
+    for field, heading in (
+        ("campaign_goal", "Campaign goal"),
+        ("awareness", "Awareness"),
+        ("mass_desire", "Core desire"),
+        ("sophistication", "Market sophistication"),
+        ("campaign_context", "Campaign context"),
+    ):
+        shown = _present_strategy_slot(field, brief[field])
+        if shown:
+            pairs.append((heading, shown))
+    return pairs
+
+
 def _append_handoff_section(lines: list[str], title: str, pairs: list[tuple[str, dict]]) -> None:
     body = _handoff_blocks(pairs)
     if not body:
@@ -1735,7 +2006,10 @@ def _render_handoff(project: dict, options: dict) -> str:
         "This export is a creative working brief. It does not certify legal, medical, financial, or platform-policy compliance.",
         "",
     ]
-    _append_handoff_section(lines, "Objective", [("Objective", brief["objective"])])
+    _append_handoff_section(lines, "Strategy", _strategy_handoff_pairs(brief))
+    objective = (brief["objective"].get("text") or "").strip()
+    if objective:
+        _append_handoff_section(lines, "Earlier objective", [("Earlier objective", brief["objective"])])
     if (who["segment"].get("text") or "").strip():
         audience = [("Segment", who["segment"])]
     else:
@@ -1748,6 +2022,7 @@ def _render_handoff(project: dict, options: dict) -> str:
     _append_handoff_section(lines, "Core idea", [
         ("Core idea", what["concept"]),
         ("Angle", what["angle"]),
+        ("Message approach", _present_strategy_slot("message_approach", what["message_approach"]) or {}),
     ])
     _append_handoff_section(lines, "Mechanism", [
         ("Summary", what["mechanism"]),
@@ -2702,6 +2977,22 @@ _FIELD_TEXT_LIMIT = 480
 _PROJECT_CONTEXT_BUDGET = 6000
 
 
+def _context_field_line(stage: str, field_name: str, slot: dict) -> str:
+    text = _compact_field_text((slot or {}).get("text") or "")
+    if not text:
+        return ""
+    confirmation = _field_confirmation(field_name, slot or {})
+    if confirmation == "unknown":
+        body = f"{text} (not a confirmed level)"
+    elif confirmation == "default":
+        body = f"{text} (studio default, not confirmed for this product)"
+    elif field_name == "objective":
+        body = f"{text} (earlier objective, not a campaign goal or awareness level)"
+    else:
+        body = text
+    return f"{stage}.{field_name}: {body}"
+
+
 def _compact_field_text(text: str, limit: int = _FIELD_TEXT_LIMIT) -> str:
     collapsed = re.sub(r"\s+", " ", (text or "").strip())
     if len(collapsed) <= limit:
@@ -2722,10 +3013,9 @@ def _project_context_lines(project: dict, omit: tuple[str, str] | None = None) -
         for field_name in ordered:
             if omit and (name, field_name) == omit:
                 continue
-            text = _compact_field_text((slots.get(field_name) or {}).get("text") or "")
-            if not text:
+            line = _context_field_line(name, field_name, slots.get(field_name) or {})
+            if not line:
                 continue
-            line = f"{name}.{field_name}: {text}"
             if lines and used + len(line) > _PROJECT_CONTEXT_BUDGET:
                 return lines
             lines.append(line)
@@ -2957,6 +3247,12 @@ def _studio_job(project: dict) -> str:
         "The product profile in this prompt is the product source of truth. "
         "Do not ask the user to paste product facts, and do not mark a proposal "
         "exploratory only because brief.product_facts is empty. "
+        "campaign_goal, awareness, mass_desire, sophistication, campaign_context, "
+        "and message_approach are different fields. brief.objective is an earlier "
+        "free-text value, not a campaign goal or an awareness level. "
+        "A value marked unknown or studio default is not a confirmed fact. "
+        "Save an inference with save_creative_proposal. Do not write it as the "
+        "selected value unless the user tells you to change that field. "
         "Name the wizard step and the field on every proposal."
     )
 
@@ -2989,6 +3285,11 @@ def _wizard_guide() -> str:
     )
     return (
         "Wizard steps, in order: " + order + ". "
+        "The first step stores the campaign goal and the audience diagnosis. "
+        "Awareness belongs to the selected audience. It does not set the campaign goal "
+        "and it does not uniquely determine the concept. "
+        "Educate, objection handling, and urgency are message_approach values. "
+        "Cold and retargeting are campaign_context, not goals or awareness levels. "
         "hook.format is where and how the ad runs. hook.hook_type is the opening approach. "
         "They are different fields. The selected opening is hook.final_hook. "
         "caveman_simple, deep_fry, walk_it_back, and make_it_bang are working notes, "

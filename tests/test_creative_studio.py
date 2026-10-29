@@ -805,10 +805,16 @@ def test_brief_step_drops_the_facts_box_and_exploratory_warning():
     assert "Product facts are not on file" not in script
     assert "Nothing here is being treated as a known fact" not in script
     assert "_creativeFieldCard('brief','product_facts')" not in script
-    assert "Cold Acquisition (Direct Sale)" in script
-    assert "Symptom Aware (Educate & Bridge)" in script
-    assert "Retargeting & Objections" in script
-    assert "Offer & Urgency" in script
+    assert "Audience & strategy" in script
+    assert "Campaign goal" in script
+    assert "_creativeChoiceGroup('awareness', 'Awareness'" in script
+    assert 'role="radiogroup"' in script
+    assert "Unknown / Help me infer" in script
+    assert "creative-choice-group" in script
+    assert "creative-pills" not in script
+    assert "Cold Acquisition (Direct Sale)" not in script
+    assert "Symptom Aware (Educate & Bridge)" not in script
+    assert "function creativePickObjective" not in script
     assert "+ New Avatar" in script
     assert "function creativeSaveAvatar" in script
     assert "/avatars" in script
@@ -954,3 +960,198 @@ def test_audience_step_wires_reuse_and_generation():
     assert "Generate segment" in script
     assert "Add an outcome, demographic, and facet first." in script
     assert "/segment" in script
+
+
+_COLD = (
+    "Cold Acquisition (Direct Sale). Broad appeal, mechanism introduction, "
+    "and skepticism breaking."
+)
+_RETARGET = (
+    "Retargeting & Objections. Overcome skepticism, price or efficacy objections, "
+    "and comparison to alternatives."
+)
+_SYMPTOM = (
+    "Symptom Aware (Educate & Bridge). Focus on the pain point or trigger, "
+    "then bridge into the product solution."
+)
+
+
+def _strip_strategy_fields(studio, project_id):
+    path = studio._store_path()
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    row = payload["projects"][project_id]
+    brief = row["stages"]["brief"]["fields"]
+    for name in ("campaign_goal", "awareness", "mass_desire", "sophistication", "campaign_context"):
+        brief.pop(name, None)
+    row["stages"]["what"]["fields"].pop("message_approach", None)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
+def test_new_project_goal_is_a_labeled_default(studio):
+    project = studio.create_project("Launch")
+    goal = project["stages"]["brief"]["fields"]["campaign_goal"]
+    assert goal["text"] == "purchase"
+    assert goal["origin"] == "default"
+    assert project["stages"]["brief"]["fields"]["awareness"]["text"] == ""
+    assert project["stages"]["brief"]["fields"]["objective"]["text"] == ""
+    handoff = studio.export_markdown(project["id"])["markdown"]
+    assert "Purchase / conversion" in handoff
+    assert "Studio default, not confirmed for this product." in handoff
+    assert "### Awareness" not in handoff
+
+
+def test_goal_awareness_and_message_approach_stay_distinct(studio):
+    project = studio.create_project("Split")
+    studio.update_field(project["id"], "brief", "campaign_goal", "lead", author="user")
+    studio.update_field(project["id"], "brief", "awareness", "problem_aware", author="user")
+    studio.update_field(project["id"], "what", "message_approach", "urgency, educate", author="user")
+    stored = studio.get_project(project["id"])
+    brief = stored["stages"]["brief"]["fields"]
+    assert brief["campaign_goal"]["text"] == "lead"
+    assert brief["campaign_goal"]["origin"] == "user"
+    assert brief["awareness"]["text"] == "problem_aware"
+    assert stored["stages"]["what"]["fields"]["message_approach"]["text"] == "educate, urgency"
+    assert brief["objective"]["text"] == ""
+    with pytest.raises(studio.StudioError, match="invalid awareness"):
+        studio.update_field(project["id"], "brief", "awareness", "Symptom Aware", author="user")
+    assert studio.get_project(project["id"], field="awareness")["data"]["text"] == "problem_aware"
+    with pytest.raises(studio.StudioError, match="invalid campaign_goal"):
+        studio.update_field(project["id"], "brief", "campaign_goal", "cold", author="user")
+
+
+def test_awareness_and_sophistication_round_trip_including_unknown(studio):
+    project = studio.create_project("Levels")
+    levels = ("unaware", "problem_aware", "solution_aware", "product_aware", "most_aware", "unknown")
+    for level in levels:
+        studio.update_field(project["id"], "brief", "awareness", level, author="user")
+        reloaded = studio.get_project(project["id"])
+        assert reloaded["stages"]["brief"]["fields"]["awareness"]["text"] == level
+        handoff = studio.export_markdown(project["id"])["markdown"]
+        full = studio.export_markdown(project["id"], mode="full")["markdown"]
+        label = studio._strategy_label("awareness", level)
+        assert label in handoff
+        assert "### Awareness" in full
+        assert level in full
+    studio.update_field(project["id"], "brief", "sophistication", "unknown", author="user")
+    studio.update_field(project["id"], "brief", "awareness", "product_aware", author="user")
+    both = studio.get_project(project["id"])["stages"]["brief"]["fields"]
+    assert both["awareness"]["text"] == "product_aware"
+    assert both["sophistication"]["text"] == "unknown"
+    handoff = studio.export_markdown(project["id"])["markdown"]
+    assert "Product aware" in handoff
+    assert "### Market sophistication" in handoff
+    assert "Not a confirmed level." in handoff
+    assert "unknown" in studio.export_markdown(project["id"], mode="full")["markdown"]
+    for stage in ("stage_1", "stage_2", "stage_3", "stage_4", "stage_5", "unknown"):
+        studio.update_field(project["id"], "brief", "sophistication", stage, author="user")
+        assert studio.get_project(project["id"], field="sophistication")["data"]["text"] == stage
+
+
+def test_legacy_objective_is_preserved_and_not_remapped(studio):
+    project = studio.create_project("Legacy objective")
+    _strip_strategy_fields(studio, project["id"])
+    path = studio._store_path()
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["projects"][project["id"]]["stages"]["brief"]["fields"]["objective"]["text"] = _SYMPTOM
+    payload["projects"][project["id"]]["stages"]["who"]["fields"]["facet"]["text"] = "Keep this facet"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    loaded = studio.get_project(project["id"])
+    brief = loaded["stages"]["brief"]["fields"]
+    assert brief["objective"]["text"] == _SYMPTOM
+    assert brief["awareness"]["text"] == ""
+    assert brief["campaign_goal"]["text"] == ""
+    assert brief["campaign_context"]["text"] == ""
+    assert loaded["stages"]["who"]["fields"]["facet"]["text"] == "Keep this facet"
+    assert loaded["legacy_objective"]["kind"] == "ambiguous"
+    handoff = studio.export_markdown(project["id"])["markdown"]
+    assert "Earlier objective" in handoff
+    assert "Symptom Aware" in handoff
+    assert "### Campaign goal" not in handoff
+    assert "Problem aware" not in handoff
+
+    cold = studio.create_project("Cold line")
+    studio.update_field(cold["id"], "brief", "objective", _COLD, author="user")
+    studio.update_field(cold["id"], "brief", "campaign_goal", "", author="user")
+    viewed = studio.get_project(cold["id"])
+    assert viewed["legacy_objective"]["kind"] == "campaign_context"
+    assert viewed["legacy_objective"]["value"] == "cold"
+    assert viewed["legacy_objective"]["applied"] is False
+    assert viewed["stages"]["brief"]["fields"]["campaign_context"]["text"] == ""
+    assert viewed["stages"]["brief"]["fields"]["awareness"]["text"] == ""
+    studio.update_field(cold["id"], "brief", "campaign_context", "cold", author="user")
+    applied = studio.get_project(cold["id"])
+    assert applied["stages"]["brief"]["fields"]["objective"]["text"] == _COLD
+    assert applied["stages"]["brief"]["fields"]["campaign_context"]["text"] == "cold"
+    assert applied["legacy_objective"]["applied"] is True
+
+    retarget = studio.create_project("Retarget line")
+    studio.update_field(retarget["id"], "brief", "objective", _RETARGET, author="user")
+    assert studio.get_project(retarget["id"])["legacy_objective"]["value"] == "retargeting"
+    assert studio.get_project(retarget["id"])["stages"]["brief"]["fields"]["campaign_context"]["text"] == ""
+
+
+def test_suggestions_keep_unknown_and_defaults_unconfirmed(studio):
+    project = studio.create_project("Infer")
+    studio.update_field(project["id"], "who", "segment", "Night bakers", author="user")
+    studio.update_field(project["id"], "brief", "awareness", "unknown", author="user")
+    view = studio.get_project(project["id"], field="concept", for_suggestion=True)
+    strategy = view["context"]["strategy"]
+    assert strategy["brief.awareness"]["confirmation"] == "unknown"
+    assert strategy["brief.awareness"]["text"] == "unknown"
+    assert strategy["brief.campaign_goal"]["confirmation"] == "default"
+    assert strategy["brief.campaign_goal"]["text"] == "purchase"
+    sources = view["context"]["strategy_sources"]
+    assert sources["product_note"]["present"] is False
+    assert sources["audience_notes"]["present"] is False
+    assert sources["outcome"]["present"] is False
+    assert "brief.awareness" in view["unresolved"]
+    assert "brief.campaign_goal" in view["unresolved"]
+    assert "not a confirmed fact" in view["guidance"]
+    saved = studio.save_proposal(
+        project["id"], "brief", "awareness", "Problem aware",
+        discussion="The audience line names a situation, not a confirmed level.",
+        exploratory=True,
+    )
+    assert saved["selected_unchanged"] is True
+    assert studio.get_project(project["id"], field="awareness")["data"]["text"] == "unknown"
+    accepted = studio.accept_proposal(project["id"], saved["proposal"]["id"])
+    assert accepted["value"] == "problem_aware"
+    assert studio.get_project(project["id"], field="awareness")["data"]["text"] == "problem_aware"
+
+
+def test_strategy_edit_preserves_downstream_and_flags_review(studio):
+    project = studio.create_project("Review")
+    studio.update_field(project["id"], "who", "segment", "Night bakers", author="user")
+    studio.update_field(project["id"], "what", "concept", "One quiet idea", author="user")
+    studio.update_field(project["id"], "brief", "awareness", "solution_aware", author="user")
+    flagged = studio.update_field(project["id"], "brief", "awareness", "most_aware", author="user")
+    assert {"stage": "what", "field": "concept"} in flagged["review_fields"]
+    concept = studio.get_project(project["id"], field="concept")["data"]
+    assert concept["text"] == "One quiet idea"
+    assert concept["needs_review"] is True
+    studio.update_field(project["id"], "brief", "awareness", "product_aware", author="user")
+    studio.update_field(project["id"], "brief", "audience_notes", "People who bake after a night shift", author="user")
+    awareness = studio.get_project(project["id"], field="awareness")["data"]
+    assert awareness["text"] == "product_aware"
+    assert awareness["needs_review"] is True
+
+
+def test_strategy_controls_are_separated_in_the_script_and_contract():
+    root = Path(__file__).resolve().parents[1]
+    script = (root / "static" / "creative_studio.js").read_text(encoding="utf-8")
+    style = (root / "static" / "style.css").read_text(encoding="utf-8")
+    contract = (root / "mcp_server.py").read_text(encoding="utf-8")
+    group = script.split("function _creativeChoiceGroup", 1)[1].split("function _creativeIsolateButton", 1)[0]
+    assert "Unknown / Help me infer" not in group
+    assert 'role="radiogroup"' in script
+    assert "Audience & strategy" in script
+    assert "function creativeInfer" in script
+    assert "function creativeToggleApproach" in script
+    assert "flex-direction:column" in style
+    for name in (
+        "campaign_goal", "awareness", "mass_desire", "sophistication",
+        "campaign_context", "message_approach",
+    ):
+        assert name in contract
+    assert "the campaign goal or the awareness level" in contract

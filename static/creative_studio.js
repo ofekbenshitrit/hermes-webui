@@ -1,6 +1,6 @@
 /* Creative Studio — guided wizard over /api/creative-studio. */
 const CREATIVE_STEPS = [
-  {id:'brief', label:'Product', title:'Product & objective', purpose:'Choose the objective and the audience. Hermes already has the product knowledge.'},
+  {id:'brief', label:'Strategy', title:'Audience & strategy', purpose:'Set the campaign goal and what is known about this audience. Hermes already has the product knowledge.'},
   {id:'who', label:'Audience', title:'Audience', purpose:'Define who the ad is for and the situation or belief that makes the message land.'},
   {id:'what', label:'Idea', title:'Core idea', purpose:'Choose the single idea, then keep the problem mechanism separate from the solution mechanism.'},
   {id:'hook', label:'Hook', title:'Hook', purpose:'Develop one opening from that idea, ground it in the facts, and polish the line you will ship.'},
@@ -16,9 +16,9 @@ const CREATIVE_STATUS = {
   not_applicable:'Skipped',
 };
 const CREATIVE_FIELDS = {
-  brief:['product_offer','product_facts','audience_notes','objective','channel','format_length','assets','sources','summary_provided','summary_assumptions','summary_missing'],
+  brief:['product_offer','product_facts','audience_notes','objective','campaign_goal','awareness','mass_desire','sophistication','campaign_context','channel','format_length','assets','sources','summary_provided','summary_assumptions','summary_missing'],
   who:['outcome','demographic','facet','segment'],
-  what:['concept','angle','ump','ums','mechanism'],
+  what:['concept','angle','ump','ums','mechanism','message_approach'],
   hook:['hook_type','visual_hook','verbal_hook','core_trigger','caveman_simple','deep_fry','walk_it_back','make_it_bang','final_hook','format'],
   casts:['conceit','actors','style','terrain','setup'],
   copy:['pain','promise','proof','curiosity','constraints','conditions'],
@@ -29,6 +29,12 @@ const CREATIVE_HELP = {
   demographic:'Who they are in observable terms.',
   facet:'The situation or belief that makes the message land.',
   segment:'Outcome, demographic, and facet written as one audience.',
+  campaign_goal:'The business result for this creative. A studio default is not a fact inferred from the product.',
+  awareness:'How aware this selected audience is. Unknown is not a confirmed level, and it does not choose the angle.',
+  mass_desire:'The desire this audience already has. Apply a known source, or leave it blank until you accept a suggestion.',
+  sophistication:'How exposed this market is to similar claims. This is not awareness.',
+  campaign_context:'Whether this creative speaks to people who have not seen the product, or to people who have.',
+  message_approach:'Optional attributes of the idea. These are not the campaign goal or the awareness level.',
   concept:'One idea, not the feature list: the false belief colliding with the real mechanism. One sentence, showable, with a villain that is not the customer.',
   angle:'The point of view: a false solution, the root-cause mechanism, us vs them, a daily moment, a counter-intuitive warning, or a functional before/after.',
   ump:'Why the problem actually happens. Keep this separate from the solution.',
@@ -51,7 +57,13 @@ const CREATIVE_HELP = {
 const CREATIVE_LABELS = {
   product_facts:'Product facts',
   audience_notes:'Audience',
-  objective:'Objective',
+  objective:'Earlier objective',
+  campaign_goal:'Campaign goal',
+  awareness:'Awareness',
+  mass_desire:'Core desire',
+  sophistication:'Market sophistication',
+  campaign_context:'Campaign context',
+  message_approach:'Message approach',
   outcome:'Outcome',
   demographic:'Demographic',
   facet:'Facet',
@@ -85,14 +97,38 @@ const CREATIVE_LABELS = {
   visual_hook:'Visual hook',
   verbal_hook:'Verbal hook',
 };
-const CREATIVE_OBJECTIVES = [
-  {id:'cold_acquisition', label:'Cold Acquisition (Direct Sale)', text:'Cold Acquisition (Direct Sale). Broad appeal, mechanism introduction, and skepticism breaking.'},
-  {id:'symptom_aware', label:'Symptom Aware (Educate & Bridge)', text:'Symptom Aware (Educate & Bridge). Focus on the pain point or trigger, then bridge into the product solution.'},
-  {id:'retargeting', label:'Retargeting & Objections', text:'Retargeting & Objections. Overcome skepticism, price or efficacy objections, and comparison to alternatives.'},
-  {id:'offer_urgency', label:'Offer & Urgency', text:'Offer & Urgency. Direct promo, bundle push, or limited-time framing.'},
+const CREATIVE_GOAL_CHOICES = [
+  {id:'purchase', label:'Purchase / conversion'},
+  {id:'lead', label:'Lead'},
+  {id:'traffic', label:'Traffic'},
+  {id:'reach', label:'Reach / awareness'},
+];
+const CREATIVE_AWARENESS_CHOICES = [
+  {id:'unaware', label:'Unaware'},
+  {id:'problem_aware', label:'Problem aware'},
+  {id:'solution_aware', label:'Solution aware'},
+  {id:'product_aware', label:'Product aware'},
+  {id:'most_aware', label:'Most aware'},
+];
+const CREATIVE_SOPHISTICATION_CHOICES = [
+  {id:'stage_1', label:'Stage 1 — first to make this claim'},
+  {id:'stage_2', label:'Stage 2 — a bigger version of a known claim'},
+  {id:'stage_3', label:'Stage 3 — a new mechanism'},
+  {id:'stage_4', label:'Stage 4 — a better mechanism'},
+  {id:'stage_5', label:'Stage 5 — identification with the audience'},
+];
+const CREATIVE_CONTEXT_CHOICES = [
+  {id:'', label:'Not specified'},
+  {id:'cold', label:'Cold acquisition'},
+  {id:'retargeting', label:'Retargeting'},
+];
+const CREATIVE_APPROACH_CHOICES = [
+  {id:'educate', label:'Educate'},
+  {id:'objections', label:'Handle objections'},
+  {id:'urgency', label:'Urgency'},
 ];
 const CREATIVE_STEP_FIELDS = {
-  brief:[['brief','objective'],['brief','audience_notes']],
+  brief:[['brief','mass_desire']],
   who:[['who','outcome'],['who','demographic'],['who','facet'],['who','segment']],
   what:[['what','concept'],['what','angle'],['what','ump'],['what','ums'],['what','mechanism']],
   hook:[
@@ -106,7 +142,7 @@ const CREATIVE_STEP_FIELDS = {
 };
 const CREATIVE_STORED_BRIEF = ['summary_provided','summary_assumptions','summary_missing','assets','sources'];
 const CREATIVE_PREREQ_FIELDS = {
-  brief:['objective'],
+  brief:[],
   who:['segment'],
   what:['concept','ump','ums','mechanism'],
   hook:['format','final_hook'],
@@ -135,7 +171,7 @@ let _creativeShowToken = 0;
 let _creativeShowing = '';
 let _creativeSessionProjectIdCache = '';
 let _creativeFocusJob = Promise.resolve();
-let _creativeObjectiveCustom = false;
+let _creativeStrategyPrompt = '';
 let _creativeAvatarComposer = false;
 let _creativeSegmentBusy = false;
 const CREATIVE_SEGMENT_HINT = 'Add an outcome, demographic, and facet first.';
@@ -232,7 +268,7 @@ async function creativeOpenProject(id, opts){
   const storedMode = project.export_options && project.export_options.mode;
   if(storedMode === 'full' || storedMode === 'handoff') _creativeExportMode = storedMode;
   if(!(opts && opts.keepStage) || !CREATIVE_STEPS.some(stage => stage.id === _creativeStage)) _creativeStage = 'brief';
-  _creativeObjectiveCustom = false;
+  _creativeStrategyPrompt = '';
   _creativeAvatarComposer = false;
   await api('/api/creative-studio/active', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({project_id:id})});
   await creativeRefreshList();
@@ -478,7 +514,7 @@ function _creativeStepBody(stage){
     const boxes = ['single_idea','plausibility','visualizability','villain'].map(key =>
       `<label><input type="checkbox" ${checks[key] ? 'checked' : ''} onchange="creativeToggleCheck('${key}', this.checked)"> ${_creativeEsc(key.replace(/_/g,' '))}</label>`
     ).join('');
-    extra = `<div class="creative-card"><strong>Concept checks</strong><p class="creative-help">Single idea, plausibility, visualizability, and a villain that is not the customer. These are reminders, not a score.</p><div class="creative-checks">${boxes}</div></div>`;
+    extra = `<div class="creative-card"><strong>Concept checks</strong><p class="creative-help">Single idea, plausibility, visualizability, and a villain that is not the customer. These are reminders, not a score.</p><div class="creative-checks">${boxes}</div></div>${_creativeMessageApproachControl()}`;
   }
   const names = (CREATIVE_STEP_FIELDS[_creativeStage] || []).filter(pair => pair[0] === _creativeStage).map(pair => pair[1]);
   if(_creativeStage === 'copy'){
@@ -501,7 +537,10 @@ function _creativeBriefBody(){
   const storedCard = stored.length
     ? `<details class="creative-card"><summary>Stored brief</summary>${stored.map(fieldName => _creativeFieldCard('brief', fieldName)).join('')}</details>`
     : '';
-  return `${noteCard}${_creativeObjectiveControl()}${_creativeAudienceControl()}${storedCard}`;
+  const prompt = _creativeStrategyPrompt
+    ? `<div class="creative-card"><strong>Send this in chat</strong><p>${_creativeEsc(_creativeStrategyPrompt)}</p><p class="creative-help">The suggestion stays separate until you choose Replace.</p></div>`
+    : '';
+  return `${noteCard}${_creativeGoalControl()}${_creativeAudienceControl()}${_creativeDiagnosisControl()}${_creativeLegacyObjective()}${prompt}${storedCard}`;
 }
 
 function _creativeWhoText(name){
@@ -619,33 +658,186 @@ async function creativeGenerateSegment(){
   }
 }
 
-function _creativeObjectiveSlot(){
-  return (((_creativeProject.stages.brief || {}).fields || {}).objective) || {text:'', proposals:[]};
+function _creativeBriefSlot(name){
+  return ((((_creativeProject.stages || {}).brief || {}).fields || {})[name]) || {text:'', proposals:[]};
 }
 
-function _creativeObjectiveControl(){
-  const slot = _creativeObjectiveSlot();
-  const text = String(slot.text || '');
-  const matched = CREATIVE_OBJECTIVES.find(item => item.text === text.trim());
-  const custom = _creativeObjectiveCustom || (!!text.trim() && !matched);
-  const pills = CREATIVE_OBJECTIVES.map(item => {
-    const pressed = !_creativeObjectiveCustom && !!(matched && matched.id === item.id);
-    return `<button type="button" class="creative-pill" aria-pressed="${pressed ? 'true' : 'false'}" onclick="creativePickObjective('${item.id}')">${_creativeEsc(item.label)}</button>`;
-  }).join('') + `<button type="button" class="creative-pill" aria-pressed="${custom ? 'true' : 'false'}" onclick="creativePickObjective('custom')">Custom</button>`;
-  const isolated = _creativeFocusField === 'objective';
-  const input = custom
-    ? `<textarea data-creative-stage="brief" data-creative-field="objective" dir="auto" rows="3" placeholder="Describe the job of this ad" oninput="creativeScheduleSave('objective')">${_creativeEsc(text)}</textarea>`
-    : '';
-  return `<div class="creative-field${isolated ? ' isolated' : ''}" data-field="objective">
-    <div class="creative-field-label">
-      <label>Objective</label>
-      <button type="button" class="creative-isolate${isolated ? ' on' : ''}" aria-pressed="${isolated ? 'true' : 'false'}" onclick="creativeIsolateField('objective')">${isolated ? 'Isolated' : 'Isolate'}</button>
+function _creativeChoiceLabel(field, text){
+  const lists = {
+    campaign_goal:CREATIVE_GOAL_CHOICES,
+    awareness:CREATIVE_AWARENESS_CHOICES,
+    sophistication:CREATIVE_SOPHISTICATION_CHOICES,
+    campaign_context:CREATIVE_CONTEXT_CHOICES,
+    message_approach:CREATIVE_APPROACH_CHOICES,
+  };
+  if(field === 'message_approach'){
+    return String(text || '').split(',').map(part => {
+      const token = part.trim();
+      const found = CREATIVE_APPROACH_CHOICES.find(item => item.id === token);
+      return found ? found.label : token;
+    }).filter(Boolean).join(', ');
+  }
+  const found = (lists[field] || []).find(item => item.id === text);
+  if(found) return found.label;
+  if(text === 'unknown') return 'Unknown';
+  return text;
+}
+
+function _creativeChoiceGroup(field, legend, choices, current){
+  const radios = choices.map(item => {
+    const checked = current === item.id ? ' checked' : '';
+    const id = 'creative-' + field + '-' + (item.id || 'none');
+    return `<label class="creative-choice" for="${id}"><input type="radio" id="${id}" name="creative-${field}" value="${_creativeEsc(item.id)}"${checked} onchange="creativePickStrategy('${field}', this.value)"> <span>${_creativeEsc(item.label)}</span></label>`;
+  }).join('');
+  return `<div class="creative-choice-group" role="radiogroup" aria-label="${_creativeEsc(legend)}">${radios}</div>`;
+}
+
+function _creativeIsolateButton(field){
+  const isolated = _creativeFocusField === field;
+  return `<button type="button" class="creative-isolate${isolated ? ' on' : ''}" aria-pressed="${isolated ? 'true' : 'false'}" onclick="creativeIsolateField('${field}')">${isolated ? 'Isolated' : 'Isolate'}</button>`;
+}
+
+function _creativeGoalControl(){
+  const slot = _creativeBriefSlot('campaign_goal');
+  const current = String(slot.text || '').trim();
+  const help = slot.origin === 'default'
+    ? 'Studio default. Not inferred from this product.'
+    : 'The business result for this creative. It is not the audience’s awareness.';
+  return `<section class="creative-card creative-strategy-section" data-field="campaign_goal">
+    <div class="creative-field-label"><h3>Campaign goal</h3>${_creativeIsolateButton('campaign_goal')}</div>
+    <p class="creative-help">${_creativeEsc(help)}</p>
+    ${_creativeChoiceGroup('campaign_goal', 'Campaign goal', CREATIVE_GOAL_CHOICES, current)}
+    ${_creativeProposalMarkup(slot, 'campaign_goal')}
+  </section>`;
+}
+
+function _creativeEvidenceRows(){
+  const note = (_creativeProject && _creativeProject.product_note) || {};
+  return [
+    {id:'product', label:'Product note', text: note.available ? String(note.excerpt || '').trim() : ''},
+    {id:'avatar', label:'Audience avatar', text: String((_creativeBriefSlot('audience_notes').text) || '').trim()},
+    {id:'outcome', label:'Audience outcome', text: _creativeWhoText('outcome').trim()},
+  ];
+}
+
+function _creativeEvidenceMarkup(){
+  const rows = _creativeEvidenceRows().map(row => {
+    const body = row.text
+      ? `<p dir="auto">${_creativeEsc(row.text)}</p>`
+      : '<p class="creative-help">Not on file.</p>';
+    return `<li><strong>${_creativeEsc(row.label)}</strong>${body}</li>`;
+  }).join('');
+  return `<div class="creative-evidence-block"><strong>Project evidence</strong><p class="creative-help">A suggestion can use only this. It is not an inferred awareness level, desire, or sophistication stage.</p><ul class="creative-evidence">${rows}</ul></div>`;
+}
+
+function _creativeUnknownButton(field, current){
+  const on = current === 'unknown';
+  return `<button type="button" class="creative-unknown${on ? ' on' : ''}" aria-pressed="${on ? 'true' : 'false'}" onclick="creativeInfer('${field}')">Unknown / Help me infer</button>`;
+}
+
+function _creativeDiagnosisControl(){
+  const awareness = _creativeBriefSlot('awareness');
+  const awarenessText = String(awareness.text || '').trim();
+  const avatar = String((_creativeBriefSlot('audience_notes').text) || '').trim();
+  const avatarLine = avatar
+    ? `Applies to this audience: ${avatar}`
+    : 'Choose an audience above. Awareness belongs to that audience, not to the product.';
+  const desire = _creativeBriefSlot('mass_desire');
+  const sources = _creativeEvidenceRows().filter(row => row.text).map(row =>
+    `<button type="button" onclick="creativeApplyDesire('${row.id}')">Use ${_creativeEsc(row.label)}</button>`
+  ).join('');
+  const sophistication = _creativeBriefSlot('sophistication');
+  const sophisticationText = String(sophistication.text || '').trim();
+  const context = _creativeBriefSlot('campaign_context');
+  const contextText = String(context.text || '').trim();
+  return `<section class="creative-card creative-strategy-section" data-field="awareness">
+    <div class="creative-field-label"><h3>Audience diagnosis</h3>${_creativeIsolateButton('awareness')}</div>
+    <p class="creative-help">${_creativeEsc(avatarLine)}</p>
+    <p class="creative-help">Awareness</p>
+    ${_creativeChoiceGroup('awareness', 'Awareness', CREATIVE_AWARENESS_CHOICES, awarenessText === 'unknown' ? '' : awarenessText)}
+    ${_creativeUnknownButton('awareness', awarenessText)}
+    ${_creativeProposalMarkup(awareness, 'awareness')}
+    <div class="creative-field" data-field="mass_desire">
+      <div class="creative-field-label"><label for="creativeMassDesire">Core desire</label>${_creativeIsolateButton('mass_desire')}</div>
+      <p class="creative-help">${_creativeEsc(CREATIVE_HELP.mass_desire)}</p>
+      <textarea id="creativeMassDesire" data-creative-stage="brief" data-creative-field="mass_desire" dir="auto" rows="3" oninput="creativeScheduleSave('mass_desire')">${_creativeEsc(desire.text || '')}</textarea>
+      <div class="creative-actions">${sources}<button type="button" onclick="creativeInfer('mass_desire')">Help me infer</button></div>
+      ${_creativeProposalMarkup(desire, 'mass_desire')}
     </div>
-    <p class="creative-help">The job of this ad.</p>
-    <div class="creative-pills" role="group" aria-label="Objective">${pills}</div>
-    ${input}
-    ${_creativeProposalMarkup(slot)}
-  </div>`;
+    ${_creativeEvidenceMarkup()}
+    <details data-field="sophistication">
+      <summary>Market sophistication (optional)</summary>
+      <p class="creative-help">${_creativeEsc(CREATIVE_HELP.sophistication)}</p>
+      ${_creativeChoiceGroup('sophistication', 'Market sophistication', CREATIVE_SOPHISTICATION_CHOICES, sophisticationText === 'unknown' ? '' : sophisticationText)}
+      ${_creativeUnknownButton('sophistication', sophisticationText)}
+      ${_creativeProposalMarkup(sophistication, 'sophistication')}
+    </details>
+    <details data-field="campaign_context">
+      <summary>Campaign context (optional)</summary>
+      <p class="creative-help">${_creativeEsc(CREATIVE_HELP.campaign_context)}</p>
+      ${_creativeChoiceGroup('campaign_context', 'Campaign context', CREATIVE_CONTEXT_CHOICES, contextText)}
+      ${_creativeProposalMarkup(context, 'campaign_context')}
+    </details>
+  </section>`;
+}
+
+function _creativeLegacyObjective(){
+  const legacy = _creativeProject && _creativeProject.legacy_objective;
+  if(!legacy || !String(legacy.text || '').trim()) return '';
+  let action = '<p class="creative-help">This is kept from an earlier version. It is not a campaign goal or an awareness level.</p>';
+  if(legacy.kind === 'campaign_context' && legacy.value && !legacy.applied){
+    const label = legacy.value === 'cold' ? 'Cold acquisition' : 'Retargeting';
+    action = `<p class="creative-help">This matches campaign context only. It does not set awareness or the campaign goal.</p><button type="button" onclick="creativePickStrategy('campaign_context','${legacy.value}')">Record as campaign context: ${_creativeEsc(label)}</button>`;
+  }else if(legacy.applied){
+    action = '<p class="creative-help">Recorded as campaign context. The earlier line is still kept.</p>';
+  }
+  return `<details class="creative-card" data-field="objective"><summary>Earlier objective (kept)</summary><p dir="auto">${_creativeEsc(legacy.text)}</p>${action}</details>`;
+}
+
+function _creativeMessageApproachControl(){
+  const slot = ((((_creativeProject.stages || {}).what || {}).fields || {}).message_approach) || {text:'', proposals:[]};
+  const selected = new Set(String(slot.text || '').split(',').map(part => part.trim()).filter(Boolean));
+  const boxes = CREATIVE_APPROACH_CHOICES.map(item => {
+    const id = 'creative-approach-' + item.id;
+    return `<label class="creative-choice" for="${id}"><input type="checkbox" id="${id}" ${selected.has(item.id) ? 'checked' : ''} onchange="creativeToggleApproach('${item.id}', this.checked)"> <span>${_creativeEsc(item.label)}</span></label>`;
+  }).join('');
+  return `<fieldset class="creative-card creative-strategy-section"><legend>Message approach</legend><p class="creative-help">${_creativeEsc(CREATIVE_HELP.message_approach)}</p><div class="creative-choice-group">${boxes}</div>${_creativeProposalMarkup(slot, 'message_approach')}</fieldset>`;
+}
+
+function _creativeInferPrompt(field){
+  const label = CREATIVE_LABELS[field] || field;
+  const evidence = _creativeEvidenceRows().map(row => row.label + ': ' + (row.text || 'not on file')).join('\n');
+  return 'Propose ' + label + ' for brief.' + field + '. Use only this project evidence:\n' + evidence + '\nSay what is uncertain. Save one proposal with save_creative_proposal. Do not update the selected field. If the evidence is missing, ask one focused question instead of inventing a level.';
+}
+
+async function creativePickStrategy(field, value){
+  await creativePutField('brief', field, value);
+}
+
+async function creativeInfer(field){
+  if(field === 'awareness' || field === 'sophistication'){
+    await creativePutField('brief', field, 'unknown');
+    if(_creativeSaveState === 'Save failed') return;
+  }
+  _creativeStrategyPrompt = _creativeInferPrompt(field);
+  _creativeFocusField = field;
+  _creativeChatOpen = true;
+  creativeRenderWorkspace();
+}
+
+async function creativeApplyDesire(source){
+  const row = _creativeEvidenceRows().find(item => item.id === source);
+  if(!row || !String(row.text || '').trim()) return;
+  await creativePutField('brief', 'mass_desire', row.text);
+}
+
+async function creativeToggleApproach(id, on){
+  const slot = ((((_creativeProject.stages || {}).what || {}).fields || {}).message_approach) || {};
+  const selected = new Set(String(slot.text || '').split(',').map(part => part.trim()).filter(Boolean));
+  if(on) selected.add(id);
+  else selected.delete(id);
+  const text = CREATIVE_APPROACH_CHOICES.filter(item => selected.has(item.id)).map(item => item.id).join(', ');
+  await creativePutField('what', 'message_approach', text);
 }
 
 function _creativeAudienceRows(){
@@ -702,20 +894,6 @@ function _creativeAudienceControl(){
     ${composer}
     ${_creativeProposalMarkup(slot)}
   </div>`;
-}
-
-async function creativePickObjective(id){
-  if(id === 'custom'){
-    _creativeObjectiveCustom = true;
-    _creativeRepaintFields();
-    const node = document.querySelector('[data-creative-field="objective"]');
-    if(node) node.focus();
-    return;
-  }
-  const preset = CREATIVE_OBJECTIVES.find(item => item.id === id);
-  if(!preset) return;
-  _creativeObjectiveCustom = false;
-  await creativePutField('brief', 'objective', preset.text);
 }
 
 async function creativePickAvatar(id){
@@ -831,13 +1009,18 @@ function _creativeHookBody(){
 function _creativeContextChips(){
   const bits = [
     ['who','segment','Audience'],
+    ['brief','awareness','Awareness'],
+    ['brief','campaign_goal','Campaign goal'],
     ['what','concept','Core idea'],
-    ['brief','objective','Objective'],
     ['brief','product_offer','Product'],
   ];
   return `<ul class="creative-context-list">${bits.map(([stage, field, label]) => {
-    const text = String((((_creativeProject.stages[stage] || {}).fields || {})[field] || {}).text || '').trim();
-    return `<li class="${text ? 'present' : 'missing'}"><span>${label}</span> ${_creativeEsc(text || 'Missing')}</li>`;
+    const slot = (((_creativeProject.stages[stage] || {}).fields || {})[field]) || {};
+    const text = String(slot.text || '').trim();
+    let display = text ? _creativeChoiceLabel(field, text) : 'Missing';
+    if(field === 'campaign_goal' && slot.origin === 'default' && text) display += ' (studio default)';
+    if(text === 'unknown') display = 'Unknown';
+    return `<li class="${text ? 'present' : 'missing'}"><span>${label}</span> ${_creativeEsc(display)}</li>`;
   }).join('')}</ul>`;
 }
 
@@ -1334,10 +1517,16 @@ function _creativeFieldSignature(stage){
     mode: _creativeExportMode,
     focus: _creativeFocusField,
     prompt: _creativeHookPrompt,
-    anchor: ['what.concept','who.segment','brief.objective','brief.product_offer'].map(_creativeFilled),
-    objectiveCustom: _creativeObjectiveCustom,
+    strategyPrompt: _creativeStrategyPrompt,
+    anchor: ['what.concept','who.segment','brief.campaign_goal','brief.awareness','brief.product_offer'].map(_creativeFilled),
     avatarComposer: _creativeAvatarComposer,
-    objective: String((((_creativeProject.stages.brief || {}).fields || {}).objective || {}).text || ''),
+    strategy: ['campaign_goal','awareness','mass_desire','sophistication','campaign_context','objective'].map(name => {
+      const slot = (((_creativeProject.stages.brief || {}).fields || {})[name]) || {};
+      const pending = (slot.proposals || []).filter(item => item.status === 'proposed' || item.status === 'in_discussion').length;
+      return [name, slot.text || '', slot.origin || '', pending, !!slot.needs_review];
+    }),
+    approach: String(((((_creativeProject.stages || {}).what || {}).fields || {}).message_approach || {}).text || ''),
+    legacy: _creativeProject.legacy_objective || null,
     audience: String((((_creativeProject.stages.brief || {}).fields || {}).audience_notes || {}).text || ''),
     avatars: ((_creativeProject.audience_avatars || []).map(row => row.id + ':' + row.source + ':' + row.text)).join('|'),
     blocks: CREATIVE_BLOCK_FIELDS.map(item => {
@@ -1401,9 +1590,10 @@ function _creativeSyncLive(){
   }
 }
 
-function _creativeProposalMarkup(slot){
+function _creativeProposalMarkup(slot, field){
   return ((slot && slot.proposals) || []).filter(item => item.status === 'proposed' || item.status === 'in_discussion').map(proposal => {
     const next = ((proposal.revised_text || proposal.text) || '').trim();
+    const shown = field ? _creativeChoiceLabel(field, next) : next;
     const note = (proposal.discussion || '').trim();
     const kicker = proposal.exploratory ? 'Exploratory suggestion' : 'Suggestion';
     const reason = note ? `<p class="creative-suggest-note" dir="auto">${_creativeEsc(note)}</p>` : '';
@@ -1412,7 +1602,7 @@ function _creativeProposalMarkup(slot){
         <span class="creative-suggest-kicker">${kicker}</span>
       </div>
       ${reason}
-      <p class="creative-suggest-next" dir="auto">${_creativeEsc(next)}</p>
+      <p class="creative-suggest-next" dir="auto">${_creativeEsc(shown)}</p>
       <div class="creative-actions">
         <button type="button" class="creative-suggest-dismiss" onclick="creativeProposalAction('${proposal.id}','dismiss')">Dismiss</button>
         <button type="button" class="creative-suggest-apply" onclick="creativeProposalAction('${proposal.id}','accept')">Replace</button>
