@@ -5347,18 +5347,22 @@ main.main > #mainPlugin{display:none;}
 #mainCreative .creative-fields .creative-isolate:hover,
 #mainCreative .creative-fields .creative-isolate.on{background:var(--accent-bg);color:var(--text);border:none;}
 .creative-field textarea,.creative-field input,.creative-field select{width:100%;box-sizing:border-box;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px 10px;font:inherit;font-size:14px;text-align:start;}
-#mainCreative .creative-fields .creative-picker{position:relative;margin:0 0 8px;}
+#mainCreative .creative-fields .creative-picker{position:relative;margin:0 0 8px;min-width:0;}
 #mainCreative .creative-fields .creative-picker-trigger{
-  display:flex;align-items:flex-start;gap:10px;width:100%;box-sizing:border-box;
+  display:block;position:relative;width:100%;height:auto;box-sizing:border-box;
   background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:8px;
-  padding:8px 10px;font-size:14px;font-weight:400;line-height:1.45;text-align:start;white-space:normal;
+  padding:8px 28px 8px 10px;font-size:14px;font-weight:400;line-height:1.45;
+  text-align:start;white-space:normal;overflow:visible;
 }
 #mainCreative .creative-fields .creative-picker-trigger:hover{background:var(--bg);color:var(--text);border-color:var(--border);}
 #mainCreative .creative-fields .creative-picker-trigger:focus-visible{outline:2px solid var(--text);outline-offset:1px;}
-#mainCreative .creative-fields .creative-picker-value{flex:1;min-width:0;white-space:normal;overflow-wrap:anywhere;}
-#mainCreative .creative-fields .creative-picker-chevron{flex:0 0 auto;margin-top:7px;color:var(--muted);}
+#mainCreative .creative-fields .creative-picker-value,
+#mainCreative .creative-fields .creative-picker-option span{
+  display:block;white-space:normal;overflow-wrap:anywhere;word-break:break-word;line-height:1.45;
+}
+#mainCreative .creative-fields .creative-picker-chevron{position:absolute;top:14px;inset-inline-end:12px;color:var(--muted);}
 #mainCreative .creative-fields .creative-picker-panel{
-  position:absolute;z-index:12;inset-inline:0;top:calc(100% + 4px);
+  position:absolute;z-index:12;inset-inline:0;top:calc(100% + 4px);width:auto;
   max-height:min(420px,60vh);overflow:auto;box-sizing:border-box;
   padding:6px;border:1px solid var(--border);border-radius:10px;background:var(--bg);
   box-shadow:0 10px 28px rgba(0,0,0,.22);
@@ -5366,9 +5370,9 @@ main.main > #mainPlugin{display:none;}
 #mainCreative .creative-fields .creative-picker-panel[hidden]{display:none;}
 #mainCreative .creative-fields .creative-picker-label{padding:8px 10px 2px;font-size:11px;font-weight:650;color:var(--muted);}
 #mainCreative .creative-fields .creative-picker-option{
-  display:block;width:100%;box-sizing:border-box;margin:0;padding:8px 10px;
+  display:block;width:100%;height:auto;box-sizing:border-box;margin:0;padding:8px 10px;
   border:none;border-radius:8px;background:transparent;color:var(--text);
-  font-size:14px;font-weight:400;line-height:1.45;text-align:start;white-space:normal;overflow-wrap:anywhere;
+  font-size:14px;font-weight:400;line-height:1.45;text-align:start;white-space:normal;overflow:visible;
 }
 #mainCreative .creative-fields .creative-picker-option:hover,
 #mainCreative .creative-fields .creative-picker-option[aria-selected="true"]{background:var(--accent-bg);color:var(--text);border:none;}
