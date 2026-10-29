@@ -1,11 +1,11 @@
 /* Creative Studio — guided wizard over /api/creative-studio. */
 const CREATIVE_STEPS = [
-  {id:'brief', label:'Strategy', title:'Audience & strategy', purpose:'Set the campaign goal and what is known about this audience. Hermes already has the product knowledge.'},
-  {id:'who', label:'Audience', title:'Audience', purpose:'Define who the ad is for and the situation or belief that makes the message land.'},
-  {id:'what', label:'Idea', title:'Core idea', purpose:'Choose the single idea, then keep the problem mechanism separate from the solution mechanism.'},
-  {id:'hook', label:'Hook', title:'Hook', purpose:'Isolate one idea, fry it, walk it back to the facts, then pair the line with the picture.'},
-  {id:'casts', label:'Execution', title:'Execution', purpose:'Specify how the selected idea and hook appear in the ad.'},
-  {id:'copy', label:'Copy', title:'Copy & export', purpose:'Assemble the copy blocks and export a handoff of the selected work.'},
+  {id:'brief', label:'Strategy', title:'Audience & strategy', purpose:'The goal, the audience, and how aware they are.'},
+  {id:'who', label:'Audience', title:'Audience', purpose:'Who the ad is for, in one sentence.'},
+  {id:'what', label:'Idea', title:'Core idea', purpose:'One idea, then the problem and how the product fixes it.'},
+  {id:'hook', label:'Hook', title:'Hook', purpose:'One line, and the picture that opens the ad.'},
+  {id:'casts', label:'Execution', title:'Execution', purpose:'How that idea shows up in the ad.'},
+  {id:'copy', label:'Copy', title:'Copy & export', purpose:'The lines to hand off, in the order they should run.'},
 ];
 const CREATIVE_STAGES = CREATIVE_STEPS;
 const CREATIVE_STATUS = {
@@ -111,11 +111,11 @@ const CREATIVE_AWARENESS_CHOICES = [
   {id:'most_aware', label:'Most aware'},
 ];
 const CREATIVE_SOPHISTICATION_CHOICES = [
-  {id:'stage_1', label:'Stage 1 — first to make this claim'},
-  {id:'stage_2', label:'Stage 2 — a bigger version of a known claim'},
-  {id:'stage_3', label:'Stage 3 — a new mechanism'},
-  {id:'stage_4', label:'Stage 4 — a better mechanism'},
-  {id:'stage_5', label:'Stage 5 — identification with the audience'},
+  {id:'stage_1', label:'First to make this claim'},
+  {id:'stage_2', label:'A bigger version of a known claim'},
+  {id:'stage_3', label:'A new mechanism'},
+  {id:'stage_4', label:'A better mechanism'},
+  {id:'stage_5', label:'Identification with the audience'},
 ];
 const CREATIVE_CONTEXT_CHOICES = [
   {id:'', label:'Not specified'},
@@ -306,7 +306,7 @@ function _creativeCreateMarkup(){
     <div class="creative-wizard-body">
       <p class="creative-wizard-kicker">New creative</p>
       <h2>Name it and name the product</h2>
-      <p class="creative-wizard-lead">Type the product name. Every chat in this creative includes that name, and Hermes looks the product up the way it already knows it.</p>
+      <p class="creative-wizard-lead">Name the creative and the product. Hermes looks the product up from the notes it already has.</p>
       <label for="creativeCreateName">Creative name</label>
       <input id="creativeCreateName" name="name" dir="auto" required maxlength="160" autocomplete="off" placeholder="Spring launch">
       <label for="creativeCreateProduct">Product</label>
@@ -397,12 +397,13 @@ function creativeRenderWorkspace(){
     return;
   }
   if(!_creativeProject){
-    root.innerHTML = '<div class="main-view-empty"><div class="main-view-empty-title">Creative Studio</div><div class="main-view-empty-sub">Start a creative with a name and a product. Hermes already has the product notes, so this step only records which one you mean.</div><button type="button" class="creative-inline-btn" onclick="creativeNewProject()">New creative</button></div>';
+    root.innerHTML = '<div class="main-view-empty"><div class="main-view-empty-title">Creative Studio</div><div class="main-view-empty-sub">Start with a name and a product. Hermes already has the product notes.</div><button type="button" class="creative-inline-btn" onclick="creativeNewProject()">New creative</button></div>';
     void creativeReleaseChat();
     return;
   }
   const project = _creativeProject;
   const stage = project.stages[_creativeStage] || {fields:{}, status:'not_started'};
+  const saveText = _creativeSaveState === 'Saved' ? '' : _creativeSaveState;
   const chatPane = _creativeChatOpen ? `${_creativeChatTabsMarkup()}
       <div class="creative-chat-resizer" role="separator" aria-orientation="vertical" aria-label="Resize chat" onpointerdown="creativeChatResizeStart(event)"></div>
       <aside class="creative-chat" id="creativeAssistant" aria-label="Project chat">
@@ -412,9 +413,8 @@ function creativeRenderWorkspace(){
     <div class="creative-frame${_creativeChatOpen ? '' : ' chat-closed'}" style="--creative-chat-width:${_creativeChatWidth}px">
     <div class="creative-header">
       <div class="creative-project-chip">
-        <svg class="creative-chip-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-8 8H7l-4 3V12a8 8 0 1 1 18 0z"/><path d="M12 8v8M8 12h8"/></svg>
         <span class="creative-project-name">${_creativeEsc(project.name)}</span>
-        <span class="creative-save ${_creativeSaveState === 'Save failed' ? 'failed' : ''}" id="creativeSaveState">${_creativeEsc(_creativeSaveState)}</span>
+        <span class="creative-save ${_creativeSaveState === 'Save failed' ? 'failed' : ''}" id="creativeSaveState">${_creativeEsc(saveText)}</span>
         <button type="button" class="creative-icon-btn" aria-label="Project actions" aria-expanded="false" onclick="creativeToggleMenu(event)">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
         </button>
@@ -426,17 +426,18 @@ function creativeRenderWorkspace(){
           <button type="button" class="creative-menu-danger" onclick="creativeDeleteProject('${project.id}')">Delete</button>
         </div>
       </div>
-      <div class="creative-stagebar" role="tablist" aria-label="Creative steps" onkeydown="creativeStageKey(event)">${CREATIVE_STEPS.map(item => {
-      const status = (project.stages[item.id] && project.stages[item.id].status) || 'not_started';
-      const selected = item.id === _creativeStage;
-      return `<button type="button" role="tab" id="creativeTab-${item.id}" class="creative-stage-tab${selected ? ' active' : ''}" aria-selected="${selected ? 'true' : 'false'}" tabindex="${selected ? '0' : '-1'}" title="${_creativeEsc(item.title)}" onclick="creativeSetStage('${item.id}')"><span>${item.label}</span><i class="creative-dot creative-dot-${_creativeEsc(status)}" title="${_creativeEsc(_creativeStatusLabel(status))}"></i></button>`;
-    }).join('')}</div>
       <div class="creative-header-tools">
         <button type="button" class="creative-icon-btn${_creativeChatOpen ? ' on' : ''}" aria-label="${_creativeChatOpen ? 'Hide chat' : 'Show chat'}" aria-pressed="${_creativeChatOpen ? 'true' : 'false'}" onclick="creativeToggleChat()">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M14 4v16"/></svg>
         </button>
       </div>
     </div>
+    <div class="creative-stagebar" role="tablist" aria-label="Creative steps" onkeydown="creativeStageKey(event)">${CREATIVE_STEPS.map(item => {
+      const status = (project.stages[item.id] && project.stages[item.id].status) || 'not_started';
+      const statusLabel = _creativeStatusLabel(status);
+      const selected = item.id === _creativeStage;
+      return `<button type="button" role="tab" id="creativeTab-${item.id}" class="creative-stage-tab${selected ? ' active' : ''}" aria-selected="${selected ? 'true' : 'false'}" aria-label="${_creativeEsc(item.label + ', ' + statusLabel)}" tabindex="${selected ? '0' : '-1'}" title="${_creativeEsc(statusLabel)}" onclick="creativeSetStage('${item.id}')"><span>${item.label}</span><i class="creative-dot creative-dot-${_creativeEsc(status)}"></i></button>`;
+    }).join('')}</div>
       <div class="creative-fields" id="creativeFields" role="tabpanel" aria-labelledby="creativeTab-${_creativeStage}">${_creativeStageMarkup(stage)}</div>
       ${chatPane}
     </div>`;
@@ -507,7 +508,8 @@ function _creativeStageMarkup(stage){
   const index = CREATIVE_STEPS.findIndex(item => item.id === _creativeStage);
   const nav = `<div class="creative-step-nav"><button type="button" class="creative-ghost" onclick="creativeMoveStage(-1)" ${index <= 0 ? 'disabled' : ''}>Back</button><button type="button" class="creative-primary" onclick="creativeMoveStage(1)" ${index >= CREATIVE_STEPS.length - 1 ? 'disabled' : ''}>Continue</button></div>`;
   const exportBox = (_creativeStage === 'copy' || _creativeExportOpen) ? _creativeExportCard() : '';
-  return `<div class="creative-stage-head"><div><p class="creative-wizard-kicker">Step ${index + 1} of ${CREATIVE_STEPS.length}</p><h2>${_creativeEsc(meta ? meta.title : '')}</h2><p class="creative-help">${_creativeEsc(meta ? meta.purpose : '')} Ask Hermes to suggest a field. Nothing is selected for you until you replace a field.</p></div><label class="creative-status-select">Step <select aria-label="Step status" onchange="creativeMarkStage(this.value)">${options}</select></label></div>${_creativeReviewNotice()}${_creativePrereqMarkup()}${_creativeStepBody(stage)}${exportBox}${nav}`;
+  const purpose = meta && meta.purpose ? `<p class="creative-help">${_creativeEsc(meta.purpose)}</p>` : '';
+  return `<div class="creative-stage"><header class="creative-stage-head"><div><h2>${_creativeEsc(meta ? meta.title : '')}</h2>${purpose}</div><label class="creative-status-select"><span>Status</span><select aria-label="Step status" onchange="creativeMarkStage(this.value)">${options}</select></label></header>${_creativeReviewNotice()}${_creativePrereqMarkup()}<div class="creative-stage-body">${_creativeStepBody(stage)}</div>${exportBox}${nav}</div>`;
 }
 
 function _creativeStepBody(stage){
@@ -520,13 +522,13 @@ function _creativeStepBody(stage){
     const boxes = ['single_idea','plausibility','visualizability','villain'].map(key =>
       `<label><input type="checkbox" ${checks[key] ? 'checked' : ''} onchange="creativeToggleCheck('${key}', this.checked)"> ${_creativeEsc(key.replace(/_/g,' '))}</label>`
     ).join('');
-    extra = `<div class="creative-card"><strong>Concept checks</strong><p class="creative-help">Single idea, plausibility, visualizability, and a villain that is not the customer. These are reminders, not a score.</p><div class="creative-checks">${boxes}</div></div>${_creativeMessageApproachControl()}`;
+    extra = `${_creativeMessageApproachControl()}<div class="creative-checks-row"><span>Reminders</span><div class="creative-checks">${boxes}</div></div>`;
   }
   const names = (CREATIVE_STEP_FIELDS[_creativeStage] || []).filter(pair => pair[0] === _creativeStage).map(pair => pair[1]);
   if(_creativeStage === 'copy'){
     names.sort((a, b) => ((stage.fields[a] && stage.fields[a].order) || 0) - ((stage.fields[b] && stage.fields[b].order) || 0));
   }
-  return extra + names.map(name => _creativeFieldCard(_creativeStage, name)).join('');
+  return names.map(name => _creativeFieldCard(_creativeStage, name)).join('') + extra;
 }
 
 function _creativeBriefBody(){
@@ -534,19 +536,17 @@ function _creativeBriefBody(){
   const offer = ((_creativeProject.stages.brief.fields.product_offer || {}).text) || '';
   const name = note.name || offer || 'this product';
   const noteCard = note.available
-    ? `<div class="creative-card"><strong>Product knowledge</strong><p class="creative-help">Read from the Hermes product note and brand guidelines for ${_creativeEsc(name)}. Editing this project does not change that note.</p><pre class="creative-note">${_creativeEsc(note.excerpt || '')}</pre></div>`
+    ? `<details class="creative-fold" data-field="product_note"><summary>Product knowledge</summary><p class="creative-help">From the Hermes note for ${_creativeEsc(name)}. Editing here does not change that note.</p><pre class="creative-note">${_creativeEsc(note.excerpt || '')}</pre></details>`
     : '';
   const stored = CREATIVE_STORED_BRIEF.filter(fieldName => {
     const slot = _creativeProject.stages.brief.fields[fieldName] || {};
     return String(slot.text || '').trim();
   });
   const storedCard = stored.length
-    ? `<details class="creative-card"><summary>Stored brief</summary>${stored.map(fieldName => _creativeFieldCard('brief', fieldName)).join('')}</details>`
+    ? `<details class="creative-fold" data-field="stored_brief"><summary>Earlier brief notes</summary>${stored.map(fieldName => _creativeFieldCard('brief', fieldName)).join('')}</details>`
     : '';
-  const prompt = _creativeStrategyPrompt
-    ? `<div class="creative-card"><strong>Send this in chat</strong><p>${_creativeEsc(_creativeStrategyPrompt)}</p><p class="creative-help">The suggestion stays separate until you choose Replace.</p></div>`
-    : '';
-  return `${noteCard}${_creativeGoalControl()}${_creativeAudienceControl()}${_creativeDiagnosisControl()}${_creativeLegacyObjective()}${prompt}${storedCard}`;
+  const prompt = _creativePromptBar(_creativeStrategyPrompt);
+  return `${prompt}${_creativeGoalControl()}${_creativeAudienceControl()}${_creativeDiagnosisControl()}${_creativeLegacyObjective()}${noteCard}${storedCard}`;
 }
 
 function _creativeWhoText(name){
@@ -690,19 +690,43 @@ function _creativeChoiceLabel(field, text){
   return text;
 }
 
-function _creativeChoiceGroup(field, legend, choices, current, stage){
+function _creativeChoiceGroup(field, legend, choices, current, stage, compact){
   const owner = stage || 'brief';
   const radios = choices.map(item => {
     const checked = current === item.id ? ' checked' : '';
     const id = 'creative-' + field + '-' + (item.id || 'none');
     return `<label class="creative-choice" for="${id}"><input type="radio" id="${id}" name="creative-${field}" value="${_creativeEsc(item.id)}"${checked} onchange="creativePickChoice('${owner}','${field}', this.value)"> <span>${_creativeEsc(item.label)}</span></label>`;
   }).join('');
-  return `<div class="creative-choice-group" role="radiogroup" aria-label="${_creativeEsc(legend)}">${radios}</div>`;
+  return `<div class="creative-choice-group${compact ? ' compact' : ''}" role="radiogroup" aria-label="${_creativeEsc(legend)}">${radios}</div>`;
 }
 
 function _creativeIsolateButton(field){
   const isolated = _creativeFocusField === field;
-  return `<button type="button" class="creative-isolate${isolated ? ' on' : ''}" aria-pressed="${isolated ? 'true' : 'false'}" onclick="creativeIsolateField('${field}')">${isolated ? 'Isolated' : 'Isolate'}</button>`;
+  const label = CREATIVE_LABELS[field] || _creativeLabel(field);
+  const text = isolated ? 'Stop focusing ' + label : 'Focus chat on ' + label;
+  return `<button type="button" class="creative-isolate${isolated ? ' on' : ''}" aria-pressed="${isolated ? 'true' : 'false'}" aria-label="${_creativeEsc(text)}" title="${_creativeEsc(text)}" onclick="creativeIsolateField('${field}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></button>`;
+}
+
+function _creativePromptBar(text){
+  const value = String(text || '').trim();
+  if(!value) return '';
+  return `<div class="creative-prompt-bar" role="status"><span>Prompt ready</span><button type="button" onclick="creativeUsePrompt()">Use in chat</button><details><summary>Preview</summary><p>${_creativeEsc(value)}</p></details></div>`;
+}
+
+function creativeUsePrompt(){
+  const text = String((_creativeStage === 'hook' ? _creativeHookPrompt : _creativeStrategyPrompt) || '').trim();
+  if(!text) return;
+  _creativeChatOpen = true;
+  const mount = document.getElementById('creativeChatMount');
+  if(!mount){
+    creativeRenderWorkspace();
+  }
+  const msg = document.getElementById('msg');
+  if(!msg) return;
+  msg.value = text;
+  if(typeof autoResize === 'function') autoResize();
+  else if(typeof updateSendBtn === 'function') updateSendBtn();
+  if(typeof msg.focus === 'function') msg.focus();
 }
 
 function _creativeGoalControl(){
@@ -711,10 +735,10 @@ function _creativeGoalControl(){
   const help = slot.origin === 'default'
     ? 'Studio default. Not inferred from this product.'
     : 'The business result for this creative. It is not the audience’s awareness.';
-  return `<section class="creative-card creative-strategy-section" data-field="campaign_goal">
+  return `<section class="creative-section" data-field="campaign_goal">
     <div class="creative-field-label"><h3>Campaign goal</h3>${_creativeIsolateButton('campaign_goal')}</div>
     <p class="creative-help">${_creativeEsc(help)}</p>
-    ${_creativeChoiceGroup('campaign_goal', 'Campaign goal', CREATIVE_GOAL_CHOICES, current)}
+    ${_creativeChoiceGroup('campaign_goal', 'Campaign goal', CREATIVE_GOAL_CHOICES, current, 'brief', true)}
     ${_creativeProposalMarkup(slot, 'campaign_goal')}
   </section>`;
 }
@@ -738,28 +762,28 @@ function _creativeDiagnosisControl(){
   const awarenessText = String(awareness.text || '').trim();
   const avatar = String((_creativeBriefSlot('audience_notes').text) || '').trim();
   const avatarLine = avatar
-    ? `Applies to this audience: ${avatar}`
-    : 'Choose an audience above. Awareness belongs to that audience, not to the product.';
+    ? avatar
+    : 'Choose an audience above. Awareness belongs to that audience.';
   const desire = _creativeBriefSlot('mass_desire');
   const sources = _creativeEvidenceRows().filter(row => row.text).map(row =>
-    `<button type="button" onclick="creativeApplyDesire('${row.id}')">Use ${_creativeEsc(row.label)}</button>`
+    `<button type="button" class="creative-quiet" onclick="creativeApplyDesire('${row.id}')">Use ${_creativeEsc(row.label)}</button>`
   ).join('');
   const sophistication = _creativeBriefSlot('sophistication');
   const sophisticationText = String(sophistication.text || '').trim();
   const context = _creativeBriefSlot('campaign_context');
   const contextText = String(context.text || '').trim();
-  return `<section class="creative-card creative-strategy-section" data-field="awareness">
+  return `<section class="creative-section" data-field="awareness">
     <div class="creative-field-label"><h3>Audience diagnosis</h3>${_creativeIsolateButton('awareness')}</div>
     <p class="creative-help">${_creativeEsc(avatarLine)}</p>
     <p class="creative-help">Awareness</p>
-    ${_creativeChoiceGroup('awareness', 'Awareness', CREATIVE_AWARENESS_CHOICES, awarenessText === 'unknown' ? '' : awarenessText)}
+    ${_creativeChoiceGroup('awareness', 'Awareness', CREATIVE_AWARENESS_CHOICES, awarenessText === 'unknown' ? '' : awarenessText, 'brief', true)}
     ${_creativeUnknownButton('awareness', awarenessText)}
     ${_creativeProposalMarkup(awareness, 'awareness')}
     <div class="creative-field" data-field="mass_desire">
       <div class="creative-field-label"><label for="creativeMassDesire">Core desire</label>${_creativeIsolateButton('mass_desire')}</div>
       <p class="creative-help">${_creativeEsc(CREATIVE_HELP.mass_desire)}</p>
-      <textarea id="creativeMassDesire" data-creative-stage="brief" data-creative-field="mass_desire" dir="auto" rows="3" oninput="creativeScheduleSave('mass_desire')">${_creativeEsc(desire.text || '')}</textarea>
-      <div class="creative-actions">${sources}<button type="button" onclick="creativeInfer('mass_desire')">Help me infer</button></div>
+      <textarea id="creativeMassDesire" data-creative-stage="brief" data-creative-field="mass_desire" dir="auto" rows="2" oninput="creativeScheduleSave('mass_desire')">${_creativeEsc(desire.text || '')}</textarea>
+      <div class="creative-actions creative-quiet-row">${sources}<button type="button" class="creative-quiet" onclick="creativeInfer('mass_desire')">Help me infer</button></div>
       ${_creativeProposalMarkup(desire, 'mass_desire')}
     </div>
     <details data-field="sophistication">
@@ -772,7 +796,7 @@ function _creativeDiagnosisControl(){
     <details data-field="campaign_context">
       <summary>Campaign context (optional)</summary>
       <p class="creative-help">${_creativeEsc(CREATIVE_HELP.campaign_context)}</p>
-      ${_creativeChoiceGroup('campaign_context', 'Campaign context', CREATIVE_CONTEXT_CHOICES, contextText)}
+      ${_creativeChoiceGroup('campaign_context', 'Campaign context', CREATIVE_CONTEXT_CHOICES, contextText, 'brief', true)}
       ${_creativeProposalMarkup(context, 'campaign_context')}
     </details>
   </section>`;
@@ -798,7 +822,7 @@ function _creativeMessageApproachControl(){
     const id = 'creative-approach-' + item.id;
     return `<label class="creative-choice" for="${id}"><input type="checkbox" id="${id}" ${selected.has(item.id) ? 'checked' : ''} onchange="creativeToggleApproach('${item.id}', this.checked)"> <span>${_creativeEsc(item.label)}</span></label>`;
   }).join('');
-  return `<fieldset class="creative-card creative-strategy-section"><legend>Message approach</legend><p class="creative-help">${_creativeEsc(CREATIVE_HELP.message_approach)}</p><div class="creative-choice-group">${boxes}</div>${_creativeProposalMarkup(slot, 'message_approach')}</fieldset>`;
+  return `<fieldset class="creative-section"><legend>Message approach</legend><p class="creative-help">${_creativeEsc(CREATIVE_HELP.message_approach)}</p><div class="creative-choice-group inline">${boxes}</div>${_creativeProposalMarkup(slot, 'message_approach')}</fieldset>`;
 }
 
 function _creativeInferPrompt(field){
@@ -883,9 +907,9 @@ function _creativeAudienceControl(){
   return `<div class="creative-field${isolated ? ' isolated' : ''}" data-field="audience_notes">
     <div class="creative-field-label">
       <label for="creativeAvatarSelect">Audience</label>
-      <button type="button" class="creative-isolate${isolated ? ' on' : ''}" aria-pressed="${isolated ? 'true' : 'false'}" onclick="creativeIsolateField('audience_notes')">${isolated ? 'Isolated' : 'Isolate'}</button>
+      ${_creativeIsolateButton('audience_notes')}
     </div>
-    <p class="creative-help">Avatars saved for this product, including audiences used on recent ads.</p>
+    <p class="creative-help">Saved for this product, including audiences from recent ads.</p>
     <select id="creativeAvatarSelect" aria-label="Audience avatar" onchange="creativePickAvatar(this.value)">
       <option value=""${!selected && !_creativeAvatarComposer ? ' selected' : ''}>Choose an avatar</option>
       ${options}
@@ -1003,14 +1027,10 @@ function _creativeMoveControl(){
   const legacy = current && !known
     ? `<p class="creative-help">Current note: ${_creativeEsc(current)}. Pick a move to replace it.</p>`
     : '';
-  const pills = CREATIVE_MOVE_CHOICES.map(item => {
-    const on = known && current === item.id;
-    return `<button type="button" class="creative-pill" aria-pressed="${on ? 'true' : 'false'}" onclick="creativePickChoice('hook','hook_type','${item.id}')">${_creativeEsc(item.label)}</button>`;
-  }).join('');
   return `<div class="creative-field" data-field="hook_type">
     <div class="creative-field-label"><label>Deep-fry move</label>${_creativeIsolateButton('hook_type')}</div>
     <p class="creative-help">${_creativeEsc(CREATIVE_HELP.hook_type)}</p>
-    <div class="creative-pills" role="group" aria-label="Deep-fry move">${pills}</div>
+    ${_creativeChoiceGroup('hook_type', 'Deep-fry move', CREATIVE_MOVE_CHOICES, known ? current : '', 'hook', true)}
     ${legacy}
     ${_creativeProposalMarkup(slot, 'hook_type')}
   </div>`;
@@ -1022,9 +1042,7 @@ function _creativeHookQuote(field, label){
 }
 
 function _creativeHookBody(){
-  const prompt = _creativeHookPrompt
-    ? `<div class="creative-card creative-hook-prompt"><strong>Send this in chat</strong><p>${_creativeEsc(_creativeHookPrompt)}</p><p class="creative-help">The draft stays in its field until you replace it.</p></div>`
-    : '';
+  const prompt = _creativePromptBar(_creativeHookPrompt);
   const concept = String((_creativeHookSlot('core_trigger').text) || '');
   const blocked = _creativeManyIdeas(concept);
   const block = `<p id="creativeConceptBlock" class="creative-help"${blocked ? '' : ' hidden'}>Pick one idea. The core concept is one short sentence.</p>`;
@@ -1036,28 +1054,10 @@ function _creativeHookBody(){
   const groundPrompt = 'Walk the deep-fried angle back to the strongest claim the product mechanism supports. Keep the fried draft. If support is missing, mark the claim as needing a source. Save the grounded claim on hook.walk_it_back.';
   const bangPrompt = 'Turn the grounded claim into a scroll-stopping pair. Write hook.verbal_hook so the first words carry one specific idea. Write hook.visual_hook so the picture contrasts with or reinforces that line. Save the pair together on hook.final_hook. Do not score it.';
   return `${prompt}
-    <section class="creative-card" data-hook-group="isolate"><strong>Isolate and commit</strong><p class="creative-help">One idea, in caveman language. Core idea: ${_creativeEsc(anchor || 'Not chosen yet.')}</p>${_creativeContextChips()}${_creativeFieldCard('hook','core_trigger')}${block}</section>
-    <section class="creative-card" data-hook-group="fry"><strong>Deep fry</strong><p class="creative-help">Push the committed idea through one move. Psychology before proof.</p>${_creativeMoveControl()}<div class="creative-actions"><button type="button" onclick="creativeHookAction('deep_fry',${JSON.stringify(fryPrompt).replace(/"/g, '&quot;')})">Fry</button></div>${_creativeFieldCard('hook','deep_fry')}</section>
-    <section class="creative-card" data-hook-group="ground"><strong>Walk it back</strong><p class="creative-help">Keep the fried angle. Walk the claim back to what the mechanism supports. If nothing supports it, mark it as needing a source.</p><div class="creative-actions"><button type="button" onclick="creativeHookAction('walk_it_back',${JSON.stringify(groundPrompt).replace(/"/g, '&quot;')})">Walk it back</button></div><div class="creative-pair">${_creativeHookQuote('deep_fry','Deep-fried angle')}${_creativeFieldCard('hook','walk_it_back', {accept:true, acceptLabel:'Use as the line'})}</div></section>
-    <section class="creative-card" data-hook-group="bang"><strong>Make it bang</strong><p class="creative-help">The hook is a pair: the first line and the opening picture. Format is the asset and its length, after the idea. This is not a score.</p>${_creativeFieldCard('hook','format')}<div class="creative-pair">${_creativeFieldCard('hook','verbal_hook')}${_creativeFieldCard('hook','visual_hook')}</div><div class="creative-actions"><button type="button" onclick="creativeHookAction('final_hook',${JSON.stringify(bangPrompt).replace(/"/g, '&quot;')})">Make it bang</button></div>${_creativeFieldCard('hook','final_hook')}</section>`;
-}
-
-function _creativeContextChips(){
-  const bits = [
-    ['who','segment','Audience'],
-    ['brief','awareness','Awareness'],
-    ['brief','campaign_goal','Campaign goal'],
-    ['what','concept','Core idea'],
-    ['brief','product_offer','Product'],
-  ];
-  return `<ul class="creative-context-list">${bits.map(([stage, field, label]) => {
-    const slot = (((_creativeProject.stages[stage] || {}).fields || {})[field]) || {};
-    const text = String(slot.text || '').trim();
-    let display = text ? _creativeChoiceLabel(field, text) : 'Missing';
-    if(field === 'campaign_goal' && slot.origin === 'default' && text) display += ' (studio default)';
-    if(text === 'unknown') display = 'Unknown';
-    return `<li class="${text ? 'present' : 'missing'}"><span>${label}</span> ${_creativeEsc(display)}</li>`;
-  }).join('')}</ul>`;
+    <section class="creative-section" data-hook-group="isolate"><strong>Isolate and commit</strong><p class="creative-help">One short sentence. Core idea: ${_creativeEsc(anchor || 'Not chosen yet.')}</p>${_creativeFieldCard('hook','core_trigger')}${block}</section>
+    <section class="creative-section" data-hook-group="fry"><strong>Deep fry</strong><p class="creative-help">Push that idea through one move.</p>${_creativeMoveControl()}<div class="creative-actions"><button type="button" onclick="creativeHookAction('deep_fry',${JSON.stringify(fryPrompt).replace(/"/g, '&quot;')})">Fry</button></div>${_creativeFieldCard('hook','deep_fry')}</section>
+    <section class="creative-section" data-hook-group="ground"><strong>Walk it back</strong><p class="creative-help">Keep the fried angle. Bring the claim back to what the mechanism supports.</p><div class="creative-actions"><button type="button" onclick="creativeHookAction('walk_it_back',${JSON.stringify(groundPrompt).replace(/"/g, '&quot;')})">Walk it back</button></div><div class="creative-pair">${_creativeHookQuote('deep_fry','Deep-fried angle')}${_creativeFieldCard('hook','walk_it_back', {accept:true, acceptLabel:'Use as the line'})}</div></section>
+    <section class="creative-section" data-hook-group="bang"><strong>Make it bang</strong><p class="creative-help">The first line and the opening picture. Format comes after the idea.</p>${_creativeFieldCard('hook','format')}<div class="creative-pair">${_creativeFieldCard('hook','verbal_hook')}${_creativeFieldCard('hook','visual_hook')}</div><div class="creative-actions"><button type="button" onclick="creativeHookAction('final_hook',${JSON.stringify(bangPrompt).replace(/"/g, '&quot;')})">Make it bang</button></div>${_creativeFieldCard('hook','final_hook')}</section>`;
 }
 
 function _creativeManyIdeas(text){
@@ -1103,10 +1103,15 @@ function _creativePrereqMarkup(){
     const state = ok ? 'Present' : (kind === 'required' ? 'Missing, required' : 'Missing, optional');
     return `<li class="${ok ? 'present' : 'missing'}">${_creativeEsc(label)} <span>${state}</span></li>`;
   };
-  const explore = [...required.values()].some(ok => !ok)
-    ? '<p class="creative-help">A suggestion from this step will be exploratory until every required input is present.</p>'
+  const missingRequired = [...required.values()].filter(ok => !ok).length;
+  const summary = missingRequired
+    ? `Earlier work, ${missingRequired} required still open`
+    : 'Earlier work';
+  const explore = missingRequired
+    ? '<p class="creative-help">Suggestions stay exploratory until the required fields are filled.</p>'
     : '';
-  return `<div class="creative-card creative-prereq"><strong>Uses earlier work</strong>${explore}<ul>${[...required].map(([key, ok]) => row(key, ok, 'required')).join('')}${[...helpful].map(([key, ok]) => row(key, ok, 'helpful')).join('')}</ul></div>`;
+  const open = missingRequired ? ' open' : '';
+  return `<details class="creative-prereq" data-field="earlier"${open}><summary>${summary}</summary>${explore}<ul>${[...required].map(([key, ok]) => row(key, ok, 'required')).join('')}${[...helpful].map(([key, ok]) => row(key, ok, 'helpful')).join('')}</ul></details>`;
 }
 
 function _creativeReviewNotice(){
@@ -1608,7 +1613,7 @@ function _creativeSyncLive(){
   if(name) name.textContent = project.name || '';
   const save = document.getElementById('creativeSaveState');
   if(save){
-    save.textContent = _creativeSaveState;
+    save.textContent = _creativeSaveState === 'Saved' ? '' : _creativeSaveState;
     save.classList.toggle('failed', _creativeSaveState === 'Save failed');
   }
   CREATIVE_STAGES.forEach(item => {
@@ -1651,6 +1656,7 @@ function _creativeProposalMarkup(slot, field){
       </div>
       ${reason}
       <p class="creative-suggest-next" dir="auto">${_creativeEsc(shown)}</p>
+      <p class="creative-suggest-note">Nothing is selected for you until you replace a field.</p>
       <div class="creative-actions">
         <button type="button" class="creative-suggest-dismiss" onclick="creativeProposalAction('${proposal.id}','dismiss')">Dismiss</button>
         <button type="button" class="creative-suggest-apply" onclick="creativeProposalAction('${proposal.id}','accept')">Replace</button>
@@ -1667,23 +1673,22 @@ function _creativeFieldCard(stageId, name, options){
   const claim = (slot.claim === 'needs_verification' || slot.regulated) ? '<span class="creative-claim needs">Needs source</span>' : '';
   const review = slot.needs_review ? '<span class="creative-claim needs">Needs review</span>' : '';
   const optional = options.optional ? '<span class="creative-claim">Optional</span>' : '';
-  const copyTools = stageId === 'copy' ? `<div class="creative-inline-tools"><label><input type="checkbox" ${slot.include !== false ? 'checked' : ''} onchange="creativeToggleInclude('${name}', this.checked)"> Include</label> <button type="button" class="creative-inline-btn" onclick="creativeNudgeOrder('${name}', -1)">Up</button> <button type="button" class="creative-inline-btn" onclick="creativeNudgeOrder('${name}', 1)">Down</button></div>` : '';
+  const copyTools = stageId === 'copy' ? `<span class="creative-inline-tools"><label><input type="checkbox" ${slot.include !== false ? 'checked' : ''} onchange="creativeToggleInclude('${name}', this.checked)"> Include</label><button type="button" onclick="creativeNudgeOrder('${name}', -1)">Up</button><button type="button" onclick="creativeNudgeOrder('${name}', 1)">Down</button></span>` : '';
   const accept = options.accept ? `<button type="button" class="creative-inline-btn" onclick="creativeAcceptFinal('${name}')">${_creativeEsc(options.acceptLabel || 'Accept as final')}</button>` : '';
   const picker = options.picker || '';
   const lead = options.lead || '';
-  const control = `<textarea data-creative-stage="${stageId}" data-creative-field="${name}" dir="auto" rows="4" oninput="creativeScheduleSave('${name}')">${_creativeEsc(slot.text || '')}</textarea>`;
+  const control = `<textarea data-creative-stage="${stageId}" data-creative-field="${name}" dir="auto" rows="2" oninput="creativeScheduleSave('${name}')">${_creativeEsc(slot.text || '')}</textarea>`;
   const proposals = _creativeProposalMarkup(slot);
   const isolated = _creativeFocusField === name;
   const label = CREATIVE_LABELS[name] || _creativeLabel(name);
   return `<div class="creative-field${isolated ? ' isolated' : ''}" data-field="${name}">
     <div class="creative-field-label">
       <label>${_creativeEsc(label)} ${optional}${claim}${review}</label>
-      <button type="button" class="creative-isolate${isolated ? ' on' : ''}" aria-pressed="${isolated ? 'true' : 'false'}" onclick="creativeIsolateField('${name}')">${isolated ? 'Isolated' : 'Isolate'}</button>
+      <span class="creative-field-tools">${copyTools}${_creativeIsolateButton(name)}</span>
     </div>
     ${help}
     ${picker}
     ${lead}
-    ${copyTools}
     ${accept}
     ${control}
     ${proposals}
@@ -1727,7 +1732,7 @@ async function creativeSaveField(field){
     _creativeDirty = Object.keys(_creativeTimers).length > 0;
     _creativeSaveState = _creativeDirty ? 'Saving…' : 'Saved';
     const label = document.getElementById('creativeSaveState');
-    if(label) label.textContent = _creativeSaveState;
+    if(label) label.textContent = _creativeSaveState === 'Saved' ? '' : _creativeSaveState;
     if(result.review_fields && result.review_fields.length && typeof showToast === 'function'){
       const names = result.review_fields.map(item => CREATIVE_LABELS[item.field] || _creativeLabel(item.field || '')).join(', ');
       showToast('Needs review: ' + names, 2800);
