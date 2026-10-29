@@ -5358,7 +5358,7 @@ main.main > #mainPlugin{display:none;}
 #mainCreative .creative-fields .creative-picker-trigger:focus-visible{outline:2px solid var(--text);outline-offset:1px;}
 #mainCreative .creative-fields .creative-picker-value,
 #mainCreative .creative-fields .creative-picker-option span{
-  display:block;white-space:normal;overflow-wrap:anywhere;word-break:break-word;line-height:1.45;
+  display:block;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;line-height:1.45;
 }
 #mainCreative .creative-fields .creative-picker-chevron{position:absolute;top:14px;inset-inline-end:12px;color:var(--muted);}
 #mainCreative .creative-fields .creative-picker-panel{

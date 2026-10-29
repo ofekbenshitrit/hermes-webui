@@ -562,6 +562,14 @@ function _creativeWhoParentsReady(useLive){
   });
 }
 
+function _creativeMenuText(row){
+  const text = String((row && row.text) || '').trim();
+  const label = String((row && row.label) || '').trim();
+  if(!text) return label;
+  if(!label || text === label || text.startsWith(label)) return text;
+  return label + '\n' + text;
+}
+
 function _creativePicker(options){
   const selectedId = options.selectedId || '';
   const groups = (options.groups || []).map(([label, items]) => {
@@ -629,7 +637,7 @@ function _creativeBlockPicker(field, label){
   const selected = rows.find(row => String(row.text || '').trim() === current);
   const groups = [['product', 'This product'], ['global', 'Other projects']].map(([scope, groupLabel]) => [
     groupLabel,
-    rows.filter(row => row.scope === scope).map(row => ({id: row.id, label: row.label || row.text})),
+    rows.filter(row => row.scope === scope).map(row => ({id: row.id, label: _creativeMenuText(row)})),
   ]);
   return _creativePicker({
     kind: 'block',
@@ -639,7 +647,7 @@ function _creativeBlockPicker(field, label){
     ariaLabel: label,
     placeholder: label,
     selectedId: selected ? selected.id : '',
-    selectedLabel: selected ? (selected.label || selected.text) : label,
+    selectedLabel: selected ? _creativeMenuText(selected) : label,
     groups,
   });
 }
@@ -1025,7 +1033,7 @@ function _creativeAudienceControl(){
   ];
   const menuGroups = groups.map(([source, label]) => [
     label,
-    rows.filter(row => row.source === source).map(row => ({id: row.id, label: row.label || row.text})),
+    rows.filter(row => row.source === source).map(row => ({id: row.id, label: _creativeMenuText(row)})),
   ]);
   const isolated = _creativeFocusField === 'audience_notes';
   const composer = _creativeAvatarComposer
@@ -1051,7 +1059,7 @@ function _creativeAudienceControl(){
       ariaLabel: 'Audience avatar',
       placeholder: 'Choose an avatar',
       selectedId: _creativeAvatarComposer ? '__new__' : (selected ? selected.id : ''),
-      selectedLabel: _creativeAvatarComposer ? '+ New Avatar' : (selected ? (selected.label || selected.text) : 'Choose an avatar'),
+      selectedLabel: _creativeAvatarComposer ? '+ New Avatar' : (selected ? _creativeMenuText(selected) : 'Choose an avatar'),
       groups: menuGroups,
       leading: `<button type="button" role="option" class="creative-picker-option" data-value="" aria-selected="${!selected && !_creativeAvatarComposer ? 'true' : 'false'}" onclick="creativePickerChoose(this)"><span>Choose an avatar</span></button>`,
       extras: [{id: '__new__', label: '+ New Avatar'}],
