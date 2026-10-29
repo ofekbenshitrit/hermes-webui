@@ -5347,6 +5347,12 @@ main.main > #mainPlugin{display:none;}
 #mainCreative .creative-fields .creative-isolate:hover,
 #mainCreative .creative-fields .creative-isolate.on{background:var(--accent-bg);color:var(--text);border:none;}
 .creative-field textarea,.creative-field input,.creative-field select{width:100%;box-sizing:border-box;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px 10px;font:inherit;font-size:14px;text-align:start;}
+.creative-field select,.creative-block-picker{
+  -webkit-appearance:none;appearance:none;cursor:pointer;padding-inline-end:32px;
+  background-color:var(--bg);
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%238888aa' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 10px center;background-size:10px 6px;
+}
 .creative-field input[type="radio"],.creative-field input[type="checkbox"]{width:auto;padding:0;border:none;border-radius:0;background:transparent;}
 #mainCreative .creative-strategy-section{margin:0 0 16px;}
 #mainCreative .creative-strategy-section h3,
