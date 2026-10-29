@@ -414,6 +414,18 @@ def test_static_panel_wires_stage_switch_proposals_and_export():
     assert "/api/creative-studio/chat" not in script
     assert "Suggest directions" not in script
     assert "function creativeExport" in script
+    assert "function creativeOpenExport" in script
+    assert "function creativeCloseExport" in script
+    assert "function _creativePaintExportPreview" in script
+    assert "renderMd(text)" in script
+    assert "creative-export-note" in script
+    assert '<pre id="creativeExportPreview"' not in script
+    assert 'id="creativeExportPreview"' in script
+    assert 'id="creativeExportLayer"' not in script
+    assert "creativeExportLayer" in script
+    assert 'role="dialog"' in script
+    assert "_creativeStage === 'copy' || _creativeExportOpen" not in script
+    assert 'id="creativeExportCard"' not in script
     assert "function creativeCopyExport" in script
     assert "function creativeMoveStage" in script
     assert ">Back</button>" in script

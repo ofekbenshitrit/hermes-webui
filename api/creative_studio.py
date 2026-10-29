@@ -273,7 +273,7 @@ WIZARD_STEP_LABELS = {
     "what": "Core idea",
     "hook": "Hook",
     "casts": "Execution",
-    "copy": "Copy & export",
+    "copy": "Copy",
     "review": "Review",
 }
 EXPORT_MODES = frozenset({"handoff", "full"})

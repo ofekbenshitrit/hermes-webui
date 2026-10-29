@@ -5,7 +5,7 @@ const CREATIVE_STEPS = [
   {id:'what', label:'Idea', title:'Core idea', purpose:'One idea, then the problem and how the product fixes it.'},
   {id:'hook', label:'Hook', title:'Hook', purpose:'One line, and the picture that opens the ad.'},
   {id:'casts', label:'Execution', title:'Execution', purpose:'How that idea shows up in the ad.'},
-  {id:'copy', label:'Copy', title:'Copy & export', purpose:'The lines to hand off, in the order they should run.'},
+  {id:'copy', label:'Copy', title:'Copy', purpose:'The lines to hand off, in the order they should run.'},
 ];
 const CREATIVE_STAGES = CREATIVE_STEPS;
 const CREATIVE_STATUS = {
@@ -161,6 +161,7 @@ let _creativeChatOpen = true;
 let _creativeFocusField = '';
 let _creativeChatWidth = 340;
 let _creativeExportOpen = false;
+let _creativeExportReturn = null;
 let _creativeExportMode = 'handoff';
 let _creativeHookPrompt = '';
 let _creativeSaveState = 'Saved';
@@ -425,7 +426,7 @@ function creativeRenderWorkspace(){
         <div class="creative-menu" id="creativeProjectMenu" hidden>
           <button type="button" onclick="creativeRenameProject('${project.id}')">Rename</button>
           <button type="button" onclick="creativeDuplicateProject('${project.id}')">Duplicate</button>
-          <button type="button" onclick="creativeToggleExport()">Export</button>
+          <button type="button" onclick="creativeOpenExport()">Export</button>
           ${_creativeSaveState === 'Save failed' ? '<button type="button" onclick="creativeRetrySave()">Retry save</button>' : ''}
           <button type="button" class="creative-menu-danger" onclick="creativeDeleteProject('${project.id}')">Delete</button>
         </div>
@@ -507,9 +508,8 @@ function _creativeStageMarkup(stage){
   const meta = CREATIVE_STEPS.find(item => item.id === _creativeStage);
   const index = CREATIVE_STEPS.findIndex(item => item.id === _creativeStage);
   const nav = `<div class="creative-step-nav"><button type="button" class="creative-ghost" onclick="creativeMoveStage(-1)" ${index <= 0 ? 'disabled' : ''}>Back</button><button type="button" class="creative-primary" onclick="creativeMoveStage(1)" ${index >= CREATIVE_STEPS.length - 1 ? 'disabled' : ''}>Continue</button></div>`;
-  const exportBox = (_creativeStage === 'copy' || _creativeExportOpen) ? _creativeExportCard() : '';
   const purpose = meta && meta.purpose ? `<p class="creative-help">${_creativeEsc(meta.purpose)}</p>` : '';
-  return `<div class="creative-stage"><header class="creative-stage-head"><div><h2>${_creativeEsc(meta ? meta.title : '')}</h2>${purpose}</div></header>${_creativePrereqMarkup()}<div class="creative-stage-body">${_creativeStepBody(stage)}</div>${exportBox}${nav}</div>`;
+  return `<div class="creative-stage"><header class="creative-stage-head"><div><h2>${_creativeEsc(meta ? meta.title : '')}</h2>${purpose}</div></header>${_creativePrereqMarkup()}<div class="creative-stage-body">${_creativeStepBody(stage)}</div>${nav}</div>`;
 }
 
 function _creativeStepBody(stage){
@@ -1131,10 +1131,43 @@ async function creativeAcceptFinal(sourceField){
   await creativeReloadQuiet();
 }
 
-function _creativeExportCard(){
+function _creativeExportCopy(){
   const full = _creativeExportMode === 'full';
-  const alts = full ? '<label class="creative-inline-tools"><input id="creativeIncludeAlts" type="checkbox" onchange="creativeExport()"> Include saved alternatives</label>' : '';
-  return `<div class="creative-card" id="creativeExportCard"><strong>Export</strong><p class="creative-help">Creative handoff is the selected final material. Full working document keeps statuses, notes, and intermediate fields.</p><div class="creative-actions"><button type="button" class="${full ? 'creative-ghost' : 'creative-primary'}" data-export-mode="handoff" aria-pressed="${full ? 'false' : 'true'}" onclick="creativeSetExportMode('handoff')">Creative handoff</button><button type="button" class="${full ? 'creative-primary' : 'creative-ghost'}" data-export-mode="full" aria-pressed="${full ? 'true' : 'false'}" onclick="creativeSetExportMode('full')">Full working document</button></div>${alts}<pre id="creativeExportPreview"></pre><button type="button" class="creative-inline-btn" onclick="creativeCopyExport()">Copy Markdown</button></div>`;
+  return {
+    full,
+    blurb: full
+      ? 'Statuses, notes, intermediate fields, and sources stay in. Saved alternatives stay out until you include them.'
+      : 'The selected final material: goal, audience, idea, hook, execution, and the copy you included.',
+  };
+}
+
+function _creativeExportDialogMarkup(){
+  const copy = _creativeExportCopy();
+  const name = (_creativeProject && _creativeProject.name) || 'Creative';
+  const pressed = mode => copy.full === (mode === 'full') ? 'true' : 'false';
+  return `<div class="creative-export-dialog" role="dialog" aria-modal="true" aria-labelledby="creativeExportTitle" tabindex="-1">
+    <header class="creative-export-head">
+      <div>
+        <p class="creative-export-kicker">${_creativeEsc(name)}</p>
+        <h2 id="creativeExportTitle">Export</h2>
+      </div>
+      <button type="button" class="creative-export-close" aria-label="Close" onclick="creativeCloseExport()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </header>
+    <div class="creative-export-toolbar">
+      <div class="creative-export-modes" role="group" aria-label="Export format">
+        <button type="button" data-export-mode="handoff" aria-pressed="${pressed('handoff')}" onclick="creativeSetExportMode('handoff')">Creative handoff</button>
+        <button type="button" data-export-mode="full" aria-pressed="${pressed('full')}" onclick="creativeSetExportMode('full')">Full working document</button>
+      </div>
+      <p class="creative-export-blurb" id="creativeExportBlurb">${_creativeEsc(copy.blurb)}</p>
+      <label class="creative-export-alts" id="creativeExportAlts"${copy.full ? '' : ' hidden'}><input id="creativeIncludeAlts" type="checkbox" onchange="creativeExport()"> Include saved alternatives</label>
+    </div>
+    <div id="creativeExportPreview" class="preview-md"></div>
+    <footer class="creative-export-foot">
+      <button type="button" class="creative-primary" onclick="creativeCopyExport()">Copy Markdown</button>
+    </footer>
+  </div>`;
 }
 
 function creativeIsolateField(field){
@@ -1529,8 +1562,6 @@ function _creativeFieldSignature(stage){
   const pairs = _creativeVisiblePairs();
   return JSON.stringify({
     checks: _creativeProject.concept_checks || {},
-    export: _creativeExportOpen,
-    mode: _creativeExportMode,
     focus: _creativeFocusField,
     prompt: _creativeHookPrompt,
     concept: String(((((_creativeProject.stages || {}).hook || {}).fields || {}).core_trigger || {}).text || ''),
@@ -1823,10 +1854,64 @@ async function creativeMarkVerification(field){
   await creativeReloadQuiet();
 }
 
-function creativeToggleExport(){
-  _creativeExportOpen = !_creativeExportOpen;
-  creativeRenderWorkspace();
-  if(_creativeExportOpen) creativeExport();
+function _creativeExportOnKey(event){
+  if(event.key !== 'Escape' || !_creativeExportOpen) return;
+  event.preventDefault();
+  event.stopPropagation();
+  creativeCloseExport();
+}
+
+function _creativeMountExport(){
+  const host = document.getElementById('mainCreative') || document.body;
+  let layer = document.getElementById('creativeExportLayer');
+  if(!layer){
+    layer = document.createElement('div');
+    layer.id = 'creativeExportLayer';
+    layer.className = 'creative-export-layer';
+    layer.addEventListener('click', event => {
+      if(event.target === layer) creativeCloseExport();
+    });
+    host.appendChild(layer);
+  }
+  layer.innerHTML = _creativeExportDialogMarkup();
+  document.removeEventListener('keydown', _creativeExportOnKey);
+  document.addEventListener('keydown', _creativeExportOnKey);
+  const dialog = layer.querySelector('.creative-export-dialog');
+  if(dialog) dialog.focus();
+}
+
+function _creativeSyncExportChrome(){
+  const copy = _creativeExportCopy();
+  document.querySelectorAll('#creativeExportLayer [data-export-mode]').forEach(button => {
+    const on = button.getAttribute('data-export-mode') === (copy.full ? 'full' : 'handoff');
+    button.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
+  const blurb = document.getElementById('creativeExportBlurb');
+  if(blurb) blurb.textContent = copy.blurb;
+  const alts = document.getElementById('creativeExportAlts');
+  if(alts) alts.hidden = !copy.full;
+}
+
+function creativeOpenExport(){
+  if(!_creativeProject) return;
+  const menu = document.getElementById('creativeProjectMenu');
+  const trigger = document.querySelector('#creativeWorkspace .creative-project-chip .creative-icon-btn');
+  if(menu) menu.hidden = true;
+  if(trigger) trigger.setAttribute('aria-expanded', 'false');
+  _creativeExportReturn = trigger || document.activeElement;
+  _creativeExportOpen = true;
+  _creativeMountExport();
+  void creativeExport();
+}
+
+function creativeCloseExport(){
+  _creativeExportOpen = false;
+  const layer = document.getElementById('creativeExportLayer');
+  if(layer) layer.remove();
+  document.removeEventListener('keydown', _creativeExportOnKey);
+  const back = _creativeExportReturn;
+  _creativeExportReturn = null;
+  if(back && typeof back.focus === 'function') back.focus();
 }
 
 async function creativeSetExportFlag(include){
@@ -1849,7 +1934,10 @@ async function creativeSetExportMode(mode){
       _creativeProject.export_options = Object.assign({}, _creativeProject.export_options, {mode:_creativeExportMode});
     }catch(_){}
   }
-  creativeRenderWorkspace();
+  if(document.getElementById('creativeExportLayer')){
+    _creativeSyncExportChrome();
+    void creativeExport();
+  }
 }
 
 async function creativeExport(){
@@ -1863,15 +1951,45 @@ async function creativeExport(){
   }catch(_){
     return null;
   }
+  if(!_creativeExportOpen) return data;
   let preview = document.getElementById('creativeExportPreview');
   if(!preview){
-    _creativeExportOpen = true;
-    creativeRenderWorkspace();
+    _creativeMountExport();
     preview = document.getElementById('creativeExportPreview');
   }
-  if(preview) preview.textContent = data.markdown || '';
-  window._creativeLastExport = data.markdown || '';
+  _creativePaintExportPreview(preview, data.markdown || '');
   return data;
+}
+
+function _creativePaintExportPreview(preview, markdown){
+  const text = markdown || '';
+  window._creativeLastExport = text;
+  if(!preview) return;
+  if(typeof renderMd !== 'function'){
+    preview.textContent = text;
+    return;
+  }
+  try{
+    preview.innerHTML = renderMd(text);
+  }catch(_){
+    preview.textContent = text;
+    return;
+  }
+  [...preview.childNodes].forEach(node => {
+    if(node.nodeType !== 3 || !node.textContent.trim()) return;
+    const lines = node.textContent.split('\n').map(line => line.trim()).filter(Boolean);
+    const fragment = document.createDocumentFragment();
+    lines.forEach(line => {
+      const note = document.createElement('p');
+      note.className = 'creative-export-note';
+      note.textContent = line;
+      fragment.appendChild(note);
+    });
+    node.replaceWith(fragment);
+  });
+  const lead = preview.querySelector('p');
+  if(lead && !lead.classList.contains('creative-export-note')) lead.classList.add('creative-export-lead');
+  if(typeof applyBidiAutoDir === 'function') applyBidiAutoDir(preview);
 }
 
 async function creativeCopyExport(){
