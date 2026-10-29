@@ -562,24 +562,86 @@ function _creativeWhoParentsReady(useLive){
   });
 }
 
+function _creativePicker(options){
+  const selectedId = options.selectedId || '';
+  const groups = (options.groups || []).map(([label, items]) => {
+    if(!items.length) return '';
+    const choices = items.map(row => {
+      const on = row.id === selectedId;
+      return `<button type="button" role="option" class="creative-picker-option" data-value="${_creativeEsc(row.id)}" aria-selected="${on ? 'true' : 'false'}" onclick="creativePickerChoose(this)"><span dir="auto">${_creativeEsc(row.label)}</span></button>`;
+    }).join('');
+    return `<div class="creative-picker-group" role="group" aria-label="${_creativeEsc(label)}"><div class="creative-picker-label">${_creativeEsc(label)}</div>${choices}</div>`;
+  }).join('');
+  const extras = (options.extras || []).map(row => {
+    const on = row.id === selectedId;
+    return `<button type="button" role="option" class="creative-picker-option" data-value="${_creativeEsc(row.id)}" aria-selected="${on ? 'true' : 'false'}" onclick="creativePickerChoose(this)"><span dir="auto">${_creativeEsc(row.label)}</span></button>`;
+  }).join('');
+  const triggerId = options.triggerId ? ` id="${_creativeEsc(options.triggerId)}"` : '';
+  return `<div class="creative-picker${options.className ? ' ' + options.className : ''}" data-creative-picker="${_creativeEsc(options.kind)}"${options.field ? ` data-field="${_creativeEsc(options.field)}"` : ''}>
+    <button type="button" class="creative-picker-trigger"${triggerId} aria-haspopup="listbox" aria-expanded="false" aria-controls="${_creativeEsc(options.listId)}" aria-label="${_creativeEsc(options.ariaLabel)}" onclick="creativePickerToggle(this)">
+      <span class="creative-picker-value" dir="auto">${_creativeEsc(options.selectedLabel || options.placeholder)}</span>
+      <svg class="creative-picker-chevron" width="10" height="6" viewBox="0 0 10 6" aria-hidden="true"><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+    </button>
+    <div class="creative-picker-panel" id="${_creativeEsc(options.listId)}" role="listbox" hidden>
+      ${options.leading || ''}${groups}${extras}
+    </div>
+  </div>`;
+}
+
+function creativePickerToggle(button){
+  const picker = button.closest('.creative-picker');
+  const panel = picker && picker.querySelector('.creative-picker-panel');
+  if(!panel) return;
+  const willOpen = panel.hidden;
+  document.querySelectorAll('.creative-picker-panel').forEach(node => {
+    node.hidden = true;
+    const trigger = node.parentElement && node.parentElement.querySelector('.creative-picker-trigger');
+    if(trigger) trigger.setAttribute('aria-expanded', 'false');
+  });
+  if(!willOpen) return;
+  panel.hidden = false;
+  button.setAttribute('aria-expanded', 'true');
+  const close = (event) => {
+    if(event.type === 'keydown' && event.key !== 'Escape') return;
+    if(event.type === 'click' && picker.contains(event.target)) return;
+    panel.hidden = true;
+    button.setAttribute('aria-expanded', 'false');
+    document.removeEventListener('click', close);
+    document.removeEventListener('keydown', close);
+  };
+  setTimeout(() => {
+    document.addEventListener('click', close);
+    document.addEventListener('keydown', close);
+  }, 0);
+}
+
+function creativePickerChoose(button){
+  const picker = button.closest('.creative-picker');
+  if(!picker) return;
+  const value = button.getAttribute('data-value') || '';
+  if(picker.getAttribute('data-creative-picker') === 'avatar') creativePickAvatar(value);
+  else creativePickBlock(picker.getAttribute('data-field'), value);
+}
+
 function _creativeBlockPicker(field, label){
   const rows = (((_creativeProject || {}).audience_blocks || {})[field]) || [];
   const current = _creativeWhoText(field).trim();
   const selected = rows.find(row => String(row.text || '').trim() === current);
-  const groups = [['product', 'This product'], ['global', 'Other projects']];
-  const options = groups.map(([scope, groupLabel]) => {
-    const items = rows.filter(row => row.scope === scope);
-    if(!items.length) return '';
-    const choices = items.map(row => {
-      const on = selected && selected.id === row.id;
-      return `<option value="${_creativeEsc(row.id)}"${on ? ' selected' : ''}>${_creativeEsc(row.label || row.text)}</option>`;
-    }).join('');
-    return `<optgroup label="${_creativeEsc(groupLabel)}">${choices}</optgroup>`;
-  }).join('');
-  return `<select class="creative-block-picker" data-creative-block="${field}" aria-label="${_creativeEsc(label)}" onchange="creativePickBlock('${field}', this.value)">
-    <option value=""${selected ? '' : ' selected'}>${_creativeEsc(label)}</option>
-    ${options}
-  </select>`;
+  const groups = [['product', 'This product'], ['global', 'Other projects']].map(([scope, groupLabel]) => [
+    groupLabel,
+    rows.filter(row => row.scope === scope).map(row => ({id: row.id, label: row.label || row.text})),
+  ]);
+  return _creativePicker({
+    kind: 'block',
+    field,
+    className: 'creative-block-picker',
+    listId: 'creativeBlockList-' + field,
+    ariaLabel: label,
+    placeholder: label,
+    selectedId: selected ? selected.id : '',
+    selectedLabel: selected ? (selected.label || selected.text) : label,
+    groups,
+  });
 }
 
 function _creativeGenerateLead(){
@@ -605,14 +667,7 @@ function _creativeSyncSegmentButton(){
 }
 
 async function creativePickBlock(field, id){
-  if(!id){
-    const select = document.querySelector('[data-creative-block="' + field + '"]');
-    const rows = (((_creativeProject || {}).audience_blocks || {})[field]) || [];
-    const current = _creativeWhoText(field).trim();
-    const match = rows.find(row => String(row.text || '').trim() === current);
-    if(select) select.value = match ? match.id : '';
-    return;
-  }
+  if(!id) return;
   const row = ((((_creativeProject || {}).audience_blocks || {})[field]) || []).find(item => item.id === id);
   if(!row) return;
   await creativePutField('who', field, row.text);
@@ -968,15 +1023,10 @@ function _creativeAudienceControl(){
     ['history', 'Used on recent ads'],
     ['current', 'This ad'],
   ];
-  const options = groups.map(([source, label]) => {
-    const items = rows.filter(row => row.source === source);
-    if(!items.length) return '';
-    const choices = items.map(row => {
-      const on = selected && selected.id === row.id;
-      return `<option value="${_creativeEsc(row.id)}"${on ? ' selected' : ''}>${_creativeEsc(row.label || row.text)}</option>`;
-    }).join('');
-    return `<optgroup label="${_creativeEsc(label)}">${choices}</optgroup>`;
-  }).join('');
+  const menuGroups = groups.map(([source, label]) => [
+    label,
+    rows.filter(row => row.source === source).map(row => ({id: row.id, label: row.label || row.text})),
+  ]);
   const isolated = _creativeFocusField === 'audience_notes';
   const composer = _creativeAvatarComposer
     ? `<div class="creative-avatar-create">
@@ -994,11 +1044,18 @@ function _creativeAudienceControl(){
       ${_creativeIsolateButton('audience_notes')}
     </div>
     <p class="creative-help">Saved for this product, including audiences from recent ads.</p>
-    <select id="creativeAvatarSelect" aria-label="Audience avatar" onchange="creativePickAvatar(this.value)">
-      <option value=""${!selected && !_creativeAvatarComposer ? ' selected' : ''}>Choose an avatar</option>
-      ${options}
-      <option value="__new__"${_creativeAvatarComposer ? ' selected' : ''}>+ New Avatar</option>
-    </select>
+    ${_creativePicker({
+      kind: 'avatar',
+      triggerId: 'creativeAvatarSelect',
+      listId: 'creativeAvatarList',
+      ariaLabel: 'Audience avatar',
+      placeholder: 'Choose an avatar',
+      selectedId: _creativeAvatarComposer ? '__new__' : (selected ? selected.id : ''),
+      selectedLabel: _creativeAvatarComposer ? '+ New Avatar' : (selected ? (selected.label || selected.text) : 'Choose an avatar'),
+      groups: menuGroups,
+      leading: `<button type="button" role="option" class="creative-picker-option" data-value="" aria-selected="${!selected && !_creativeAvatarComposer ? 'true' : 'false'}" onclick="creativePickerChoose(this)"><span>Choose an avatar</span></button>`,
+      extras: [{id: '__new__', label: '+ New Avatar'}],
+    })}
     ${composer}
     ${_creativeProposalMarkup(slot)}
   </div>`;
