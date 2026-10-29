@@ -810,6 +810,10 @@ def test_brief_step_drops_the_facts_box_and_exploratory_warning():
     assert "_creativeChoiceGroup('awareness', 'Awareness'" in script
     assert 'role="radiogroup"' in script
     assert "Unknown / Help me infer" in script
+    assert "Project evidence" not in script
+    assert "A suggestion can use only this" not in script
+    assert "Use only this project evidence" not in script
+    assert "Use the product profile, this creative, and the conversation." in script
     assert "creative-choice-group" in script
     assert "creative-pills" not in script
     assert "Cold Acquisition (Direct Sale)" not in script
@@ -1108,6 +1112,8 @@ def test_suggestions_keep_unknown_and_defaults_unconfirmed(studio):
     assert "brief.awareness" in view["unresolved"]
     assert "brief.campaign_goal" in view["unresolved"]
     assert "not a confirmed fact" in view["guidance"]
+    assert "Use the product profile, the creative, and the conversation." in view["guidance"]
+    assert "ask one focused question" not in view["guidance"]
     saved = studio.save_proposal(
         project["id"], "brief", "awareness", "Problem aware",
         discussion="The audience line names a situation, not a confirmed level.",

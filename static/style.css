@@ -5313,9 +5313,6 @@ main.main > #mainPlugin{display:none;}
 #mainCreative .creative-choice input{margin-top:3px;}
 #mainCreative .creative-unknown{margin:0 0 8px;}
 #mainCreative .creative-unknown.on{background:var(--text);color:var(--bg);}
-#mainCreative .creative-evidence{margin:0;padding-left:18px;}
-#mainCreative .creative-evidence li{margin:0 0 8px;}
-#mainCreative .creative-evidence p{margin:2px 0 0;}
 #mainCreative .creative-strategy-section details{margin-top:12px;}
 #mainCreative .creative-pills{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 8px;}
 #mainCreative .creative-fields button.creative-pill{border-radius:999px;background:transparent;color:var(--text);padding:6px 12px;}

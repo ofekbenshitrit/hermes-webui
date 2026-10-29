@@ -1248,11 +1248,10 @@ def get_project(project_id: str | None = None, name: str | None = None, stage: s
                     "and message_approach are separate fields. brief.objective is an earlier "
                     "free-text value, not a campaign goal or an awareness level. "
                     "confirmation default or unknown is not a confirmed fact. "
-                    "strategy_sources lists evidence already on the project and does not "
-                    "choose a level. If product_note, audience_notes, and outcome are all "
-                    "absent, ask one focused question or mark the proposal exploratory. "
-                    "Do not invent market research, product claims, mechanisms, or audience "
-                    "facts. Pending proposals are not selected values. "
+                    "strategy_sources lists lines already stored on the project. "
+                    "Use the product profile, the creative, and the conversation. "
+                    "Say what is uncertain. Do not invent proof, numbers, testimonials, "
+                    "or product claims. Pending proposals are not selected values. "
                     "Save at most three proposals. Do not change the selected value."
                 ),
             }

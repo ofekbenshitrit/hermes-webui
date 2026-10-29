@@ -31,7 +31,7 @@ const CREATIVE_HELP = {
   segment:'Outcome, demographic, and facet written as one audience.',
   campaign_goal:'The business result for this creative. A studio default is not a fact inferred from the product.',
   awareness:'How aware this selected audience is. Unknown is not a confirmed level, and it does not choose the angle.',
-  mass_desire:'The desire this audience already has. Apply a known source, or leave it blank until you accept a suggestion.',
+  mass_desire:'The desire this audience already has.',
   sophistication:'How exposed this market is to similar claims. This is not awareness.',
   campaign_context:'Whether this creative speaks to people who have not seen the product, or to people who have.',
   message_approach:'Optional attributes of the idea. These are not the campaign goal or the awareness level.',
@@ -720,16 +720,6 @@ function _creativeEvidenceRows(){
   ];
 }
 
-function _creativeEvidenceMarkup(){
-  const rows = _creativeEvidenceRows().map(row => {
-    const body = row.text
-      ? `<p dir="auto">${_creativeEsc(row.text)}</p>`
-      : '<p class="creative-help">Not on file.</p>';
-    return `<li><strong>${_creativeEsc(row.label)}</strong>${body}</li>`;
-  }).join('');
-  return `<div class="creative-evidence-block"><strong>Project evidence</strong><p class="creative-help">A suggestion can use only this. It is not an inferred awareness level, desire, or sophistication stage.</p><ul class="creative-evidence">${rows}</ul></div>`;
-}
-
 function _creativeUnknownButton(field, current){
   const on = current === 'unknown';
   return `<button type="button" class="creative-unknown${on ? ' on' : ''}" aria-pressed="${on ? 'true' : 'false'}" onclick="creativeInfer('${field}')">Unknown / Help me infer</button>`;
@@ -764,7 +754,6 @@ function _creativeDiagnosisControl(){
       <div class="creative-actions">${sources}<button type="button" onclick="creativeInfer('mass_desire')">Help me infer</button></div>
       ${_creativeProposalMarkup(desire, 'mass_desire')}
     </div>
-    ${_creativeEvidenceMarkup()}
     <details data-field="sophistication">
       <summary>Market sophistication (optional)</summary>
       <p class="creative-help">${_creativeEsc(CREATIVE_HELP.sophistication)}</p>
@@ -806,8 +795,7 @@ function _creativeMessageApproachControl(){
 
 function _creativeInferPrompt(field){
   const label = CREATIVE_LABELS[field] || field;
-  const evidence = _creativeEvidenceRows().map(row => row.label + ': ' + (row.text || 'not on file')).join('\n');
-  return 'Propose ' + label + ' for brief.' + field + '. Use only this project evidence:\n' + evidence + '\nSay what is uncertain. Save one proposal with save_creative_proposal. Do not update the selected field. If the evidence is missing, ask one focused question instead of inventing a level.';
+  return 'Propose ' + label + ' for brief.' + field + '. Use the product profile, this creative, and the conversation. Say what is uncertain. Save one proposal with save_creative_proposal. Do not update the selected field.';
 }
 
 async function creativePickStrategy(field, value){
