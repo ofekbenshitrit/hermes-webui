@@ -12,7 +12,6 @@ const CREATIVE_STATUS = {
   not_started:'Empty',
   draft:'Draft',
   approved:'Approved',
-  review_recommended:'Needs review',
   not_applicable:'Skipped',
 };
 const CREATIVE_FIELDS = {
@@ -320,8 +319,13 @@ function _creativeCreateMarkup(){
   </form>`;
 }
 
+function _creativeShownStatus(status){
+  if(status === 'review_recommended') return 'draft';
+  return status || 'not_started';
+}
+
 function _creativeStatusLabel(status){
-  return CREATIVE_STATUS[status] || 'Draft';
+  return CREATIVE_STATUS[_creativeShownStatus(status)] || 'Draft';
 }
 
 function creativeSetStage(stage, opts){
@@ -433,7 +437,7 @@ function creativeRenderWorkspace(){
       </div>
     </div>
     <div class="creative-stagebar" role="tablist" aria-label="Creative steps" onkeydown="creativeStageKey(event)">${CREATIVE_STEPS.map(item => {
-      const status = (project.stages[item.id] && project.stages[item.id].status) || 'not_started';
+      const status = _creativeShownStatus((project.stages[item.id] && project.stages[item.id].status) || 'not_started');
       const statusLabel = _creativeStatusLabel(status);
       const selected = item.id === _creativeStage;
       return `<button type="button" role="tab" id="creativeTab-${item.id}" class="creative-stage-tab${selected ? ' active' : ''}" aria-selected="${selected ? 'true' : 'false'}" aria-label="${_creativeEsc(item.label + ', ' + statusLabel)}" tabindex="${selected ? '0' : '-1'}" title="${_creativeEsc(statusLabel)}" onclick="creativeSetStage('${item.id}')"><span>${item.label}</span><i class="creative-dot creative-dot-${_creativeEsc(status)}"></i></button>`;
@@ -501,15 +505,11 @@ function creativeChatResizeStart(event){
 
 function _creativeStageMarkup(stage){
   const meta = CREATIVE_STEPS.find(item => item.id === _creativeStage);
-  const status = stage.status || 'not_started';
-  const options = Object.keys(CREATIVE_STATUS).map(key =>
-    `<option value="${key}" ${key === status ? 'selected' : ''}>${CREATIVE_STATUS[key]}</option>`
-  ).join('');
   const index = CREATIVE_STEPS.findIndex(item => item.id === _creativeStage);
   const nav = `<div class="creative-step-nav"><button type="button" class="creative-ghost" onclick="creativeMoveStage(-1)" ${index <= 0 ? 'disabled' : ''}>Back</button><button type="button" class="creative-primary" onclick="creativeMoveStage(1)" ${index >= CREATIVE_STEPS.length - 1 ? 'disabled' : ''}>Continue</button></div>`;
   const exportBox = (_creativeStage === 'copy' || _creativeExportOpen) ? _creativeExportCard() : '';
   const purpose = meta && meta.purpose ? `<p class="creative-help">${_creativeEsc(meta.purpose)}</p>` : '';
-  return `<div class="creative-stage"><header class="creative-stage-head"><div><h2>${_creativeEsc(meta ? meta.title : '')}</h2>${purpose}</div><label class="creative-status-select"><span>Status</span><select aria-label="Step status" onchange="creativeMarkStage(this.value)">${options}</select></label></header>${_creativeReviewNotice()}${_creativePrereqMarkup()}<div class="creative-stage-body">${_creativeStepBody(stage)}</div>${exportBox}${nav}</div>`;
+  return `<div class="creative-stage"><header class="creative-stage-head"><div><h2>${_creativeEsc(meta ? meta.title : '')}</h2>${purpose}</div></header>${_creativePrereqMarkup()}<div class="creative-stage-body">${_creativeStepBody(stage)}</div>${exportBox}${nav}</div>`;
 }
 
 function _creativeStepBody(stage){
@@ -975,17 +975,13 @@ async function creativePutField(stage, field, text){
   const state = document.getElementById('creativeSaveState');
   if(state){ state.textContent = 'Saving…'; state.classList.remove('failed'); }
   try{
-    const result = await api('/api/creative-studio/projects/' + _creativeProject.id + '/fields', {
+    await api('/api/creative-studio/projects/' + _creativeProject.id + '/fields', {
       method:'PUT',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({stage, field, text, author:'user'}),
     });
     _creativeDirty = Object.keys(_creativeTimers).length > 0;
     _creativeSaveState = _creativeDirty ? 'Saving…' : 'Saved';
-    if(result.review_fields && result.review_fields.length && typeof showToast === 'function'){
-      const names = result.review_fields.map(item => CREATIVE_LABELS[item.field] || _creativeLabel(item.field || '')).join(', ');
-      showToast('Needs review: ' + names, 2800);
-    }
     const fresh = await api('/api/creative-studio/projects/' + _creativeProject.id);
     _creativeApplyProject(fresh);
     if(!_creativeDirty) _creativeSyncLive();
@@ -1112,36 +1108,6 @@ function _creativePrereqMarkup(){
     : '';
   const open = missingRequired ? ' open' : '';
   return `<details class="creative-prereq" data-field="earlier"${open}><summary>${summary}</summary>${explore}<ul>${[...required].map(([key, ok]) => row(key, ok, 'required')).join('')}${[...helpful].map(([key, ok]) => row(key, ok, 'helpful')).join('')}</ul></details>`;
-}
-
-function _creativeReviewNotice(){
-  if(!_creativeProject || !_creativeProject.stages) return '';
-  const items = [];
-  CREATIVE_STEPS.forEach(step => {
-    const row = _creativeProject.stages[step.id];
-    if(!row || !row.fields) return;
-    const flagged = Object.keys(row.fields).filter(name => row.fields[name] && row.fields[name].needs_review);
-    if(flagged.length){
-      flagged.forEach(name => items.push({stage:step.id, field:name}));
-      return;
-    }
-    const hasKeys = Object.values(row.fields).some(slot => slot && Object.prototype.hasOwnProperty.call(slot, 'needs_review'));
-    if(row.status === 'review_recommended' && !hasKeys){
-      const filled = Object.keys(row.fields).filter(name => String((row.fields[name] && row.fields[name].text) || '').trim());
-      (filled.length ? filled : ['']).forEach(name => items.push({stage:step.id, field:name}));
-    }
-  });
-  if(!items.length) return '';
-  const buttons = items.map(item => {
-    const label = item.field ? (CREATIVE_LABELS[item.field] || _creativeLabel(item.field)) : (CREATIVE_STEPS.find(step => step.id === item.stage) || {}).label;
-    return `<button type="button" onclick="creativeJumpReview('${item.stage}','${item.field}')">${_creativeEsc(label)}</button>`;
-  }).join('');
-  return `<div class="creative-review-notice" role="status"><strong>Needs review.</strong> <span>Upstream work changed. The text is still here.</span><div class="creative-actions">${buttons}</div></div>`;
-}
-
-function creativeJumpReview(stage, field){
-  _creativeFocusField = field || '';
-  creativeSetStage(stage, {keepFocus:true});
 }
 
 function creativeHookAction(field, prompt){
@@ -1562,7 +1528,6 @@ function _creativeVisiblePairs(){
 function _creativeFieldSignature(stage){
   const pairs = _creativeVisiblePairs();
   return JSON.stringify({
-    status: stage && stage.status,
     checks: _creativeProject.concept_checks || {},
     export: _creativeExportOpen,
     mode: _creativeExportMode,
@@ -1576,7 +1541,7 @@ function _creativeFieldSignature(stage){
     strategy: ['campaign_goal','awareness','mass_desire','sophistication','campaign_context','objective'].map(name => {
       const slot = (((_creativeProject.stages.brief || {}).fields || {})[name]) || {};
       const pending = (slot.proposals || []).filter(item => item.status === 'proposed' || item.status === 'in_discussion').length;
-      return [name, slot.text || '', slot.origin || '', pending, !!slot.needs_review];
+      return [name, slot.text || '', slot.origin || '', pending];
     }),
     approach: String(((((_creativeProject.stages || {}).what || {}).fields || {}).message_approach || {}).text || ''),
     legacy: _creativeProject.legacy_objective || null,
@@ -1586,16 +1551,11 @@ function _creativeFieldSignature(stage){
       const rows = ((_creativeProject.audience_blocks || {})[item.field]) || [];
       return rows.map(row => row.scope + ':' + row.id + ':' + row.text).join('|');
     }),
-    review: CREATIVE_STEPS.map(step => {
-      const row = (_creativeProject.stages || {})[step.id] || {};
-      const fields = row.fields || {};
-      return [step.id, row.status || '', Object.keys(fields).filter(name => fields[name] && fields[name].needs_review).join(',')];
-    }),
     note: !!(_creativeProject.product_note && _creativeProject.product_note.available),
     fields: pairs.map(([owner, name]) => {
       const slot = (((_creativeProject.stages || {})[owner] || {}).fields || {})[name] || {};
       const pending = (slot.proposals || []).filter(item => item.status === 'proposed' || item.status === 'in_discussion').length;
-      return [owner, name, slot.claim || '', !!slot.include, slot.order || 0, !!slot.regulated, !!slot.needs_review, pending];
+      return [owner, name, slot.claim || '', !!slot.include, slot.order || 0, !!slot.regulated, pending];
     }),
   });
 }
@@ -1619,7 +1579,7 @@ function _creativeSyncLive(){
   CREATIVE_STAGES.forEach(item => {
     const dot = document.querySelector(`#creativeTab-${item.id} .creative-dot`);
     if(!dot) return;
-    const status = (project.stages[item.id] && project.stages[item.id].status) || 'not_started';
+    const status = _creativeShownStatus((project.stages[item.id] && project.stages[item.id].status) || 'not_started');
     dot.className = `creative-dot creative-dot-${status}`;
     dot.title = _creativeStatusLabel(status);
   });
@@ -1632,8 +1592,6 @@ function _creativeSyncLive(){
     fieldsRoot.dataset.signature = fieldSig;
     _creativeRestoreOpenDetails();
   }else if(!_creativeDirty){
-    const statusSelect = document.querySelector('#creativeFields .creative-status-select select');
-    if(statusSelect && statusSelect !== active) statusSelect.value = stage.status || 'not_started';
     _creativeVisiblePairs().forEach(([owner, field]) => {
       const node = document.querySelector(`[data-creative-field="${field}"]`);
       if(!node || node === active || _creativeTimers[field]) return;
@@ -1671,7 +1629,6 @@ function _creativeFieldCard(stageId, name, options){
   const slot = (stage.fields && stage.fields[name]) || {text:'', proposals:[], include:true, order:0};
   const help = CREATIVE_HELP[name] ? `<p class="creative-help">${_creativeEsc(CREATIVE_HELP[name])}</p>` : '';
   const claim = (slot.claim === 'needs_verification' || slot.regulated) ? '<span class="creative-claim needs">Needs source</span>' : '';
-  const review = slot.needs_review ? '<span class="creative-claim needs">Needs review</span>' : '';
   const optional = options.optional ? '<span class="creative-claim">Optional</span>' : '';
   const copyTools = stageId === 'copy' ? `<span class="creative-inline-tools"><label><input type="checkbox" ${slot.include !== false ? 'checked' : ''} onchange="creativeToggleInclude('${name}', this.checked)"> Include</label><button type="button" onclick="creativeNudgeOrder('${name}', -1)">Up</button><button type="button" onclick="creativeNudgeOrder('${name}', 1)">Down</button></span>` : '';
   const accept = options.accept ? `<button type="button" class="creative-inline-btn" onclick="creativeAcceptFinal('${name}')">${_creativeEsc(options.acceptLabel || 'Accept as final')}</button>` : '';
@@ -1683,7 +1640,7 @@ function _creativeFieldCard(stageId, name, options){
   const label = CREATIVE_LABELS[name] || _creativeLabel(name);
   return `<div class="creative-field${isolated ? ' isolated' : ''}" data-field="${name}">
     <div class="creative-field-label">
-      <label>${_creativeEsc(label)} ${optional}${claim}${review}</label>
+      <label>${_creativeEsc(label)} ${optional}${claim}</label>
       <span class="creative-field-tools">${copyTools}${_creativeIsolateButton(name)}</span>
     </div>
     ${help}
@@ -1723,7 +1680,7 @@ async function creativeSaveField(field){
   if(!input) return;
   try{
     const stage = input.getAttribute('data-creative-stage') || _creativeOwnerStage(field);
-    const result = await api('/api/creative-studio/projects/' + _creativeProject.id + '/fields', {
+    await api('/api/creative-studio/projects/' + _creativeProject.id + '/fields', {
       method:'PUT',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({stage, field, text:input.value, author:'user'}),
@@ -1733,10 +1690,6 @@ async function creativeSaveField(field){
     _creativeSaveState = _creativeDirty ? 'Saving…' : 'Saved';
     const label = document.getElementById('creativeSaveState');
     if(label) label.textContent = _creativeSaveState === 'Saved' ? '' : _creativeSaveState;
-    if(result.review_fields && result.review_fields.length && typeof showToast === 'function'){
-      const names = result.review_fields.map(item => CREATIVE_LABELS[item.field] || _creativeLabel(item.field || '')).join(', ');
-      showToast('Needs review: ' + names, 2800);
-    }
     const fresh = await api('/api/creative-studio/projects/' + _creativeProject.id);
     _creativeApplyProject(fresh);
     if(!_creativeDirty) _creativeSyncLive();
@@ -1866,20 +1819,6 @@ async function creativeMarkVerification(field){
   await api('/api/creative-studio/projects/' + _creativeProject.id + '/fields', {
     method:'PUT', headers:{'Content-Type':'application/json'},
     body:JSON.stringify({stage:_creativeStage, field, text:slot.text || '', claim:'needs_verification'}),
-  });
-  await creativeReloadQuiet();
-}
-
-async function creativeMarkStage(status){
-  if(!status) return;
-  let reason = '';
-  if(status === 'not_applicable'){
-    reason = window.prompt('Short reason for skipping this stage') || '';
-    if(!reason.trim()) return;
-  }
-  await api('/api/creative-studio/projects/' + _creativeProject.id + '/stage', {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({stage:_creativeStage, status, reason}),
   });
   await creativeReloadQuiet();
 }

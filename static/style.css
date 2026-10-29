@@ -5241,7 +5241,6 @@ main.main > #mainPlugin{display:none;}
 .creative-dot{width:7px;height:7px;border-radius:50%;background:var(--border);display:inline-block;}
 .creative-dot-draft{background:#7d8ea3;}
 .creative-dot-approved{background:#3d8f6a;}
-.creative-dot-review_recommended{background:#c47b2b;}
 .creative-dot-not_applicable{background:transparent;box-shadow:inset 0 0 0 1px var(--muted);}
 .creative-fields{grid-column:1;grid-row:3;min-width:0;min-height:0;}
 .creative-chat{grid-column:2;grid-row:2 / span 2;}
@@ -5311,10 +5310,8 @@ main.main > #mainPlugin{display:none;}
 #mainCreative .creative-section h3,
 #mainCreative .creative-section legend{margin:0;font-size:15px;font-weight:600;letter-spacing:-.01em;}
 #mainCreative fieldset.creative-section{min-inline-size:0;border:none;padding:0;}
-.creative-stage-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:22px;}
+.creative-stage-head{margin-bottom:22px;}
 .creative-stage-head h2{margin:0 0 6px;font-size:22px;font-weight:650;letter-spacing:-.02em;}
-.creative-status-select{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:8px;flex-shrink:0;padding-top:4px;}
-.creative-status-select select{font:inherit;font-size:12px;background:transparent;color:var(--text);border:none;border-radius:8px;padding:4px 2px;cursor:pointer;}
 .creative-field{margin:0;}
 .creative-field-label{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px;}
 .creative-field-label label{font-size:13px;font-weight:600;}
@@ -5482,8 +5479,6 @@ main.main > #mainPlugin{display:none;}
 #mainCreative .creative-suggest .creative-suggest-apply:hover{filter:brightness(1.12);}
 .creative-actions{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 12px;}
 .creative-step-nav{position:sticky;bottom:0;display:flex;justify-content:space-between;gap:12px;margin-top:8px;padding:12px 0 8px;background:var(--bg);border-top:1px solid var(--border);}
-.creative-review-notice{margin:0 0 16px;padding:10px 12px;border:1px solid #c47b2b;border-radius:10px;background:color-mix(in srgb, #c47b2b 12%, transparent);font-size:13px;line-height:1.45;}
-.creative-review-notice strong{margin-right:6px;}
 .creative-prereq{margin:0 0 18px;}
 .creative-prereq summary,.creative-fold summary{cursor:pointer;font-size:13px;font-weight:600;color:var(--muted);}
 .creative-prereq summary:hover,.creative-fold summary:hover{color:var(--text);}
