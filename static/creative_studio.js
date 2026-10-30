@@ -509,6 +509,7 @@ function creativeRenderWorkspace(){
     paintedFields.dataset.signature = _creativeFieldSignature(_creativeProject.stages[_creativeStage] || {fields:{}});
   }
   _creativeRestoreOpenDetails();
+  _creativeFitTextareas(paintedFields);
   if(_creativeChatOpen) void _creativeShowBoundChat();
   const fields = document.getElementById('creativeFields');
   if(fields && !fields.dataset.detailsBound){
@@ -592,9 +593,13 @@ function creativeChatResizeStart(event){
 function _creativeStageMarkup(stage){
   const meta = CREATIVE_STEPS.find(item => item.id === _creativeStage);
   const index = CREATIVE_STEPS.findIndex(item => item.id === _creativeStage);
-  const nav = `<div class="creative-step-nav"><button type="button" class="creative-ghost" onclick="creativeMoveStage(-1)" ${index <= 0 ? 'disabled' : ''}>Back</button><button type="button" class="creative-primary" onclick="creativeMoveStage(1)" ${index >= CREATIVE_STEPS.length - 1 ? 'disabled' : ''}>Continue</button></div>`;
+  const prev = index > 0 ? CREATIVE_STEPS[index - 1] : null;
+  const next = index < CREATIVE_STEPS.length - 1 ? CREATIVE_STEPS[index + 1] : null;
+  const backIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>';
+  const nextIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>';
+  const nav = `<div class="creative-step-nav"><button type="button" class="creative-ghost" onclick="creativeMoveStage(-1)" ${prev ? '' : 'disabled'}><span class="creative-step-icon">${backIcon}</span><span>${prev ? _creativeEsc(prev.label) : 'Back'}</span></button><button type="button" class="creative-primary" onclick="creativeMoveStage(1)" ${next ? '' : 'disabled'}><span>${next ? _creativeEsc(next.label) : 'Continue'}</span><span class="creative-step-icon">${nextIcon}</span></button></div>`;
   const purpose = meta && meta.purpose ? `<p class="creative-help">${_creativeEsc(meta.purpose)}</p>` : '';
-  return `<div class="creative-stage"><header class="creative-stage-head"><div><h2>${_creativeEsc(meta ? meta.title : '')}</h2>${purpose}</div></header>${_creativePrereqMarkup()}<div class="creative-stage-body">${_creativeStepBody(stage)}</div>${nav}</div>`;
+  return `<div class="creative-stage"><div class="creative-stage-scroll"><header class="creative-stage-head"><div><h2>${_creativeEsc(meta ? meta.title : '')}</h2>${purpose}</div></header>${_creativePrereqMarkup()}<div class="creative-stage-body">${_creativeStepBody(stage)}</div></div>${nav}</div>`;
 }
 
 function _creativeStepBody(stage){
@@ -1069,7 +1074,7 @@ function _creativeDiagnosisControl(){
     <div class="creative-field" data-field="mass_desire">
       <div class="creative-field-label"><label for="creativeMassDesire">Core desire</label>${_creativeIsolateButton('mass_desire')}</div>
       <p class="creative-help">${_creativeEsc(CREATIVE_HELP.mass_desire)}</p>
-      <textarea id="creativeMassDesire" data-creative-stage="brief" data-creative-field="mass_desire" dir="auto" rows="2" oninput="creativeScheduleSave('mass_desire')">${_creativeEsc(desire.text || '')}</textarea>
+      <textarea id="creativeMassDesire" data-creative-stage="brief" data-creative-field="mass_desire" dir="auto" rows="1" oninput="creativeScheduleSave('mass_desire')">${_creativeEsc(desire.text || '')}</textarea>
       <div class="creative-actions creative-quiet-row">${sources}<button type="button" class="creative-quiet" onclick="creativeInfer('mass_desire')">Help me infer</button></div>
       ${_creativeProposalMarkup(desire, 'mass_desire')}
     </div>
@@ -1181,7 +1186,7 @@ function _creativeAudienceControl(){
         <label for="creativeAvatarLabel">Avatar name</label>
         <input id="creativeAvatarLabel" dir="auto" maxlength="80" autocomplete="off" placeholder="Night bakers">
         <label for="creativeAvatarText">Who they are</label>
-        <textarea id="creativeAvatarText" dir="auto" rows="3" maxlength="2000" placeholder="People who bake after a night shift"></textarea>
+        <textarea id="creativeAvatarText" dir="auto" rows="1" maxlength="2000" placeholder="People who bake after a night shift"></textarea>
         <p class="creative-help" id="creativeAvatarError"></p>
         <button type="button" class="creative-primary" onclick="creativeSaveAvatar()">Save avatar</button>
       </div>`
@@ -1196,7 +1201,7 @@ function _creativeAudienceControl(){
     groups: menuGroups,
     extras: [{id: '__new__', label: '+ New Avatar'}],
   });
-  const control = `<textarea id="creativeAudienceNotes" data-creative-stage="brief" data-creative-field="audience_notes" dir="${boxDir}" rows="2" oninput="creativeScheduleSave('audience_notes')">${_creativeEsc(slot.text || '')}</textarea>`;
+  const control = `<textarea id="creativeAudienceNotes" data-creative-stage="brief" data-creative-field="audience_notes" dir="${boxDir}" rows="1" oninput="creativeScheduleSave('audience_notes')">${_creativeEsc(slot.text || '')}</textarea>`;
   return `<div class="creative-field${isolated ? ' isolated' : ''}" data-field="audience_notes">
     <div class="creative-field-label">
       <label for="creativeAudienceNotes">Audience</label>
@@ -1300,6 +1305,7 @@ function _creativeRepaintFields(){
   fieldsRoot.innerHTML = _creativeStageMarkup(stage);
   fieldsRoot.dataset.signature = _creativeFieldSignature(stage);
   _creativeRestoreOpenDetails();
+  _creativeFitTextareas(fieldsRoot);
 }
 
 function _creativeHookSlot(name){
@@ -1918,6 +1924,7 @@ function _creativeSyncLive(){
     fieldsRoot.innerHTML = _creativeStageMarkup(stage);
     fieldsRoot.dataset.signature = fieldSig;
     _creativeRestoreOpenDetails();
+    _creativeFitTextareas(fieldsRoot);
   }else if(!_creativeDirty){
     _creativeVisiblePairs().forEach(([owner, field]) => {
       const node = document.querySelector(`[data-creative-field="${field}"]`);
@@ -1925,6 +1932,7 @@ function _creativeSyncLive(){
       const slot = (((project.stages || {})[owner] || {}).fields || {})[field] || {};
       if(node.value !== (slot.text || '')) node.value = slot.text || '';
       _creativeSyncBoxDir(field);
+      _creativeFitTextarea(node);
     });
   }
 }
@@ -1958,19 +1966,20 @@ function _creativeFieldCard(stageId, name, options){
   const help = CREATIVE_HELP[name] ? `<p class="creative-help">${_creativeEsc(CREATIVE_HELP[name])}</p>` : '';
   const claim = (slot.claim === 'needs_verification' || slot.regulated) ? '<span class="creative-claim needs">Needs source</span>' : '';
   const optional = options.optional ? '<span class="creative-claim">Optional</span>' : '';
-  const copyTools = stageId === 'copy' ? `<span class="creative-inline-tools"><label><input type="checkbox" ${slot.include !== false ? 'checked' : ''} onchange="creativeToggleInclude('${name}', this.checked)"> Include</label><button type="button" onclick="creativeNudgeOrder('${name}', -1)">Up</button><button type="button" onclick="creativeNudgeOrder('${name}', 1)">Down</button></span>` : '';
+  const shut = stageId === 'copy' && slot.include === false;
+  const copyTools = stageId === 'copy' ? `<span class="creative-inline-tools"><label class="creative-include"><input type="checkbox" aria-label="Include" ${slot.include !== false ? 'checked' : ''} onchange="creativeToggleInclude('${name}', this.checked)"></label><span class="creative-order"><button type="button" aria-label="Move up" onclick="creativeNudgeOrder('${name}', -1)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 14l6-6 6 6"/></svg></button><button type="button" aria-label="Move down" onclick="creativeNudgeOrder('${name}', 1)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 10l6 6 6-6"/></svg></button></span></span>` : '';
   const accept = options.accept ? `<button type="button" class="creative-inline-btn" onclick="creativeAcceptFinal('${name}')">${_creativeEsc(options.acceptLabel || 'Accept as final')}</button>` : '';
   const picker = options.picker || '';
   const lead = options.lead || '';
   const boxDir = _creativeBoxDir(slot.text || '');
-  const control = `<textarea data-creative-stage="${stageId}" data-creative-field="${name}" dir="${boxDir}" rows="2" oninput="creativeScheduleSave('${name}')">${_creativeEsc(slot.text || '')}</textarea>`;
+  const control = `<textarea data-creative-stage="${stageId}" data-creative-field="${name}" dir="${boxDir}" rows="1" oninput="creativeScheduleSave('${name}')">${_creativeEsc(slot.text || '')}</textarea>`;
   const editor = picker
     ? `<div class="creative-input-combo" dir="${boxDir}">${control}${picker}</div>`
     : control;
   const proposals = _creativeProposalMarkup(slot);
   const isolated = _creativeFocusField === name;
   const label = CREATIVE_LABELS[name] || _creativeLabel(name);
-  return `<div class="creative-field${isolated ? ' isolated' : ''}" data-field="${name}">
+  return `<div class="creative-field${isolated ? ' isolated' : ''}${shut ? ' shut' : ''}" data-field="${name}">
     <div class="creative-field-label">
       <label>${_creativeEsc(label)} ${optional}${claim}</label>
       <span class="creative-field-tools">${_creativeGuideButton(name)}${copyTools}${_creativeIsolateButton(name)}</span>
@@ -1981,6 +1990,26 @@ function _creativeFieldCard(stageId, name, options){
     ${editor}
     ${proposals}
   </div>`;
+}
+
+function _creativeTextareaSizesToContent(){
+  return typeof CSS !== 'undefined' && typeof CSS.supports === 'function' && CSS.supports('field-sizing', 'content');
+}
+
+function _creativeFitTextarea(node){
+  if(!node || node.tagName !== 'TEXTAREA') return;
+  if(_creativeTextareaSizesToContent()){
+    if(node.style.height) node.style.height = '';
+    return;
+  }
+  node.style.height = 'auto';
+  node.style.height = node.scrollHeight + 'px';
+}
+
+function _creativeFitTextareas(root){
+  const scope = root && root.querySelectorAll ? root : document.getElementById('creativeFields');
+  if(!scope || !scope.querySelectorAll) return;
+  scope.querySelectorAll('textarea').forEach(_creativeFitTextarea);
 }
 
 function _creativeSyncBoxDir(field){
@@ -1994,6 +2023,7 @@ function _creativeSyncBoxDir(field){
 
 function creativeScheduleSave(field){
   _creativeSyncBoxDir(field);
+  _creativeFitTextarea(document.querySelector(`[data-creative-field="${field}"]`));
   if(field === 'core_trigger'){
     const input = document.querySelector('[data-creative-field="core_trigger"]');
     const note = document.getElementById('creativeConceptBlock');
@@ -2139,6 +2169,9 @@ async function creativeToggleCheck(key, value){
 
 async function creativeToggleInclude(field, include){
   const slot = _creativeProject.stages.copy.fields[field];
+  if(slot) slot.include = include;
+  const card = document.querySelector('.creative-field[data-field="' + field + '"]');
+  if(card) card.classList.toggle('shut', !include);
   await api('/api/creative-studio/projects/' + _creativeProject.id + '/fields', {
     method:'PUT', headers:{'Content-Type':'application/json'},
     body:JSON.stringify({stage:'copy', field, text:slot.text || '', include}),
@@ -2320,3 +2353,10 @@ function _creativeStartPoll(){
     }
   }, 1000);
 }
+
+document.addEventListener('input', event => {
+  const node = event.target;
+  if(!node || node.tagName !== 'TEXTAREA' || !node.closest || !node.closest('#mainCreative')) return;
+  _creativeFitTextarea(node);
+});
+window.addEventListener('resize', () => _creativeFitTextareas());

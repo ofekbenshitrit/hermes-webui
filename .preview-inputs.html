@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Creative field preview</title>
+<link rel="stylesheet" href="static/style.css?v=13">
+<style>
+  html,body{height:100%;}
+  body{margin:0;}
+  .layout{height:100%;display:flex;}
+  main.main{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;}
+  #mainCreative{height:100%;}
+</style>
+</head>
+<body>
+<div class="layout">
+  <main class="main showing-creative">
+    <div id="mainChat" hidden></div>
+    <div id="mainCreative" class="main-view">
+      <div id="creativeWorkspace" class="creative-workspace"></div>
+    </div>
+  </main>
+</div>
+<script>
+function emptyField(){
+  return {text:'', proposals:[], claim:'', author:'user', include:true, order:0, origin:''};
+}
+function stage(names){
+  const fields = {};
+  names.forEach(name => { fields[name] = emptyField(); });
+  return {status:'draft', fields};
+}
+const project = {
+  id:'preview',
+  name:'Field preview',
+  updated_at:'2026-10-30T00:00:00+00:00',
+  exploratory_product:false,
+  product_note:{name:'', available:false, excerpt:''},
+  audience_avatars:[],
+  audience_blocks:{outcome:[], demographic:[], facet:[]},
+  field_context:{},
+  concept_checks:{},
+  threads:[],
+  active_thread:'',
+  chat_session_id:'',
+  stages:{
+    brief: stage(['product_offer','product_facts','audience_notes','objective','campaign_goal','awareness','mass_desire','sophistication','campaign_context','channel','format_length','assets','sources','summary_provided','summary_assumptions','summary_missing']),
+    who: stage(['outcome','demographic','facet','segment']),
+    what: stage(['concept','angle','ump','ums','mechanism','message_approach']),
+    hook: stage(['hook_type','visual_hook','verbal_hook','core_trigger','caveman_simple','deep_fry','walk_it_back','make_it_bang','final_hook','format']),
+    casts: stage(['conceit','format','actors','style','terrain','setup']),
+    copy: stage(['pain','promise','proof','curiosity','constraints','conditions']),
+    review: stage([])
+  }
+};
+project.stages.casts.fields.conceit.text = 'שיחת חברות וגילוי סוד: "ראיתי את רחל בגינה מרימה את הנכד שלה לספסל".';
+project.stages.casts.fields.actors.text = 'שורה ראשונה של הרעיון.\nשורה שנייה שממשיכה את אותו משפט.\nשורה שלישית שסוגרת.';
+project.stages.casts.fields.style.text = '';
+async function api(url, opts){
+  opts = opts || {};
+  const body = opts.body ? JSON.parse(opts.body) : null;
+  if(String(url).endsWith('/fields') && opts.method === 'PUT' && body){
+    const slot = project.stages[body.stage].fields[body.field];
+    if(slot){
+      slot.text = body.text;
+      if(Object.prototype.hasOwnProperty.call(body, 'include')) slot.include = body.include;
+      if(Object.prototype.hasOwnProperty.call(body, 'order')) slot.order = body.order;
+    }
+    return {review_fields:[]};
+  }
+  return JSON.parse(JSON.stringify(project));
+}
+window.api = api;
+window.showToast = function(){};
+</script>
+<script src="static/creative_studio.js?v=13"></script>
+<script>
+_creativeChatOpen = false;
+_creativeBrowsing = false;
+_creativeProject = project;
+_creativeStage = 'copy';
+creativeRenderWorkspace();
+</script>
+</body>
+</html>
