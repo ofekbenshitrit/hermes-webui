@@ -1030,6 +1030,70 @@ def test_audience_step_wires_reuse_and_generation():
     assert "Generate segment" in script
     assert "Add an outcome, demographic, and facet first." in script
     assert "/segment" in script
+    assert "creative-input-combo" in script
+    assert "creative-history-trigger" in script
+    assert "variant: 'history'" in script
+
+
+def test_audience_blocks_open_from_inside_the_text_box():
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is required to render the audience fields")
+    script = Path(__file__).resolve().parents[1].joinpath("static", "creative_studio.js")
+    payload = json.dumps({
+        "stages": {"who": {"fields": {
+            "outcome": {"text": "Fewer blisters", "proposals": []},
+            "demographic": {"text": "Weekend runners", "proposals": []},
+            "facet": {"text": "Cold pavement", "proposals": []},
+            "segment": {"text": "", "proposals": []},
+        }}},
+        "audience_blocks": {
+            "outcome": [
+                {"id": "o1", "scope": "product", "text": "Fewer blisters", "label": "Fewer blisters"},
+                {"id": "o2", "scope": "global", "text": "Hot coffee", "label": "Hot coffee"},
+            ],
+            "demographic": [
+                {"id": "d1", "scope": "product", "text": "Weekend runners", "label": "Weekend runners"},
+            ],
+            "facet": [],
+        },
+    })
+    rendered = subprocess.run(
+        [node, "-e", (
+            "const fs=require('fs');"
+            "const input=JSON.parse(fs.readFileSync(0,'utf8'));"
+            "eval(fs.readFileSync(process.argv[1],'utf8')+"
+            "'\\n_creativeProject=input;"
+            "process.stdout.write(_creativeWhoBody());');"
+        ), str(script)],
+        input=payload,
+        text=True,
+        check=True,
+        capture_output=True,
+    ).stdout
+    assert "creative-picker-value" not in rendered
+    assert rendered.count("<textarea") == 4
+    for field, saved, history in (
+        ("outcome", "Fewer blisters", True),
+        ("demographic", "Weekend runners", True),
+        ("facet", "Cold pavement", False),
+    ):
+        card = rendered.split(f'data-field="{field}"', 1)[1].split('<div class="creative-field"', 1)[0]
+        assert card.count("<textarea") == 1
+        assert f">{saved}</textarea>" in card
+        assert ("creative-history-trigger" in card) is history
+        if history:
+            combo = card.split("creative-input-combo", 1)[1]
+            assert "<textarea" in combo and "creative-history-trigger" in combo
+            assert "creative-picker-panel" in combo
+    assert "Hot coffee" in rendered
+    assert "This product" in rendered
+    assert "Other projects" in rendered
+    assert 'aria-label="Reuse a saved outcome"' in rendered
+    assert "creative-history-trigger" not in rendered.split('data-field="segment"', 1)[1]
 
 
 _COLD = (

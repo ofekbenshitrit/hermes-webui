@@ -570,6 +570,13 @@ function _creativeMenuText(row){
   return label + '\n' + text;
 }
 
+function _creativeBoxDir(text){
+  if(typeof bidiDirForText === 'function') return bidiDirForText(text) || 'auto';
+  return 'auto';
+}
+
+const CREATIVE_HISTORY_ICON = '<svg class="creative-history-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>';
+
 function _creativePicker(options){
   const selectedId = options.selectedId || '';
   const groups = (options.groups || []).map(([label, items]) => {
@@ -585,13 +592,18 @@ function _creativePicker(options){
     return `<button type="button" role="option" class="creative-picker-option" data-value="${_creativeEsc(row.id)}" aria-selected="${on ? 'true' : 'false'}" onclick="creativePickerChoose(this)"><span dir="auto">${_creativeEsc(row.label)}</span></button>`;
   }).join('');
   const triggerId = options.triggerId ? ` id="${_creativeEsc(options.triggerId)}"` : '';
-  return `<div class="creative-picker${options.className ? ' ' + options.className : ''}" data-creative-picker="${_creativeEsc(options.kind)}"${options.field ? ` data-field="${_creativeEsc(options.field)}"` : ''}>
-    <button type="button" class="creative-picker-trigger"${triggerId} aria-haspopup="listbox" aria-expanded="false" aria-controls="${_creativeEsc(options.listId)}" aria-label="${_creativeEsc(options.ariaLabel)}" onclick="creativePickerToggle(this)">
+  const menu = `${options.leading || ''}${groups}${extras}`;
+  const history = options.variant === 'history';
+  const trigger = history
+    ? `<button type="button" class="creative-history-trigger"${triggerId} aria-haspopup="listbox" aria-expanded="false" aria-controls="${_creativeEsc(options.listId)}" aria-label="${_creativeEsc(options.ariaLabel)}" title="${_creativeEsc(options.ariaLabel)}" onclick="creativePickerToggle(this)">${CREATIVE_HISTORY_ICON}</button>`
+    : `<button type="button" class="creative-picker-trigger"${triggerId} aria-haspopup="listbox" aria-expanded="false" aria-controls="${_creativeEsc(options.listId)}" aria-label="${_creativeEsc(options.ariaLabel)}" onclick="creativePickerToggle(this)">
       <span class="creative-picker-value" dir="auto">${_creativeEsc(options.selectedLabel || options.placeholder)}</span>
       <svg class="creative-picker-chevron" width="10" height="6" viewBox="0 0 10 6" aria-hidden="true"><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-    </button>
+    </button>`;
+  return `<div class="creative-picker${history ? ' creative-history-picker' : ''}${options.className ? ' ' + options.className : ''}" data-creative-picker="${_creativeEsc(options.kind)}"${options.field ? ` data-field="${_creativeEsc(options.field)}"` : ''}>
+    ${trigger}
     <div class="creative-picker-panel" id="${_creativeEsc(options.listId)}" role="listbox" hidden>
-      ${options.leading || ''}${groups}${extras}
+      ${menu}
     </div>
   </div>`;
 }
@@ -603,7 +615,7 @@ function creativePickerToggle(button){
   const willOpen = panel.hidden;
   document.querySelectorAll('.creative-picker-panel').forEach(node => {
     node.hidden = true;
-    const trigger = node.parentElement && node.parentElement.querySelector('.creative-picker-trigger');
+    const trigger = node.parentElement && node.parentElement.querySelector('.creative-picker-trigger, .creative-history-trigger');
     if(trigger) trigger.setAttribute('aria-expanded', 'false');
   });
   if(!willOpen) return;
@@ -626,6 +638,10 @@ function creativePickerToggle(button){
 function creativePickerChoose(button){
   const picker = button.closest('.creative-picker');
   if(!picker) return;
+  const panel = picker.querySelector('.creative-picker-panel');
+  const trigger = picker.querySelector('.creative-picker-trigger, .creative-history-trigger');
+  if(panel) panel.hidden = true;
+  if(trigger) trigger.setAttribute('aria-expanded', 'false');
   const value = button.getAttribute('data-value') || '';
   if(picker.getAttribute('data-creative-picker') === 'avatar') creativePickAvatar(value);
   else creativePickBlock(picker.getAttribute('data-field'), value);
@@ -633,6 +649,7 @@ function creativePickerChoose(button){
 
 function _creativeBlockPicker(field, label){
   const rows = (((_creativeProject || {}).audience_blocks || {})[field]) || [];
+  if(!rows.length) return '';
   const current = _creativeWhoText(field).trim();
   const selected = rows.find(row => String(row.text || '').trim() === current);
   const groups = [['product', 'This product'], ['global', 'Other projects']].map(([scope, groupLabel]) => [
@@ -641,13 +658,13 @@ function _creativeBlockPicker(field, label){
   ]);
   return _creativePicker({
     kind: 'block',
+    variant: 'history',
     field,
     className: 'creative-block-picker',
     listId: 'creativeBlockList-' + field,
     ariaLabel: label,
     placeholder: label,
     selectedId: selected ? selected.id : '',
-    selectedLabel: selected ? _creativeMenuText(selected) : label,
     groups,
   });
 }
@@ -679,6 +696,12 @@ async function creativePickBlock(field, id){
   const row = ((((_creativeProject || {}).audience_blocks || {})[field]) || []).find(item => item.id === id);
   if(!row) return;
   await creativePutField('who', field, row.text);
+  const input = document.querySelector(`[data-creative-field="${field}"]`);
+  if(!input) return;
+  _creativeSyncBoxDir(field);
+  input.focus();
+  const end = input.value.length;
+  if(typeof input.setSelectionRange === 'function') input.setSelectionRange(end, end);
 }
 
 async function _creativeFlushFields(names){
@@ -1134,6 +1157,7 @@ async function creativePutField(stage, field, text){
     const fresh = await api('/api/creative-studio/projects/' + _creativeProject.id);
     _creativeApplyProject(fresh);
     if(!_creativeDirty) _creativeSyncLive();
+    _creativeSyncSegmentButton();
   }catch(err){
     _creativeDirty = false;
     _creativeSaveState = 'Save failed';
@@ -1777,6 +1801,7 @@ function _creativeSyncLive(){
       if(!node || node === active || _creativeTimers[field]) return;
       const slot = (((project.stages || {})[owner] || {}).fields || {})[field] || {};
       if(node.value !== (slot.text || '')) node.value = slot.text || '';
+      _creativeSyncBoxDir(field);
     });
   }
 }
@@ -1814,7 +1839,11 @@ function _creativeFieldCard(stageId, name, options){
   const accept = options.accept ? `<button type="button" class="creative-inline-btn" onclick="creativeAcceptFinal('${name}')">${_creativeEsc(options.acceptLabel || 'Accept as final')}</button>` : '';
   const picker = options.picker || '';
   const lead = options.lead || '';
-  const control = `<textarea data-creative-stage="${stageId}" data-creative-field="${name}" dir="auto" rows="2" oninput="creativeScheduleSave('${name}')">${_creativeEsc(slot.text || '')}</textarea>`;
+  const boxDir = _creativeBoxDir(slot.text || '');
+  const control = `<textarea data-creative-stage="${stageId}" data-creative-field="${name}" dir="${boxDir}" rows="2" oninput="creativeScheduleSave('${name}')">${_creativeEsc(slot.text || '')}</textarea>`;
+  const editor = picker
+    ? `<div class="creative-input-combo" dir="${boxDir}">${control}${picker}</div>`
+    : control;
   const proposals = _creativeProposalMarkup(slot);
   const isolated = _creativeFocusField === name;
   const label = CREATIVE_LABELS[name] || _creativeLabel(name);
@@ -1824,15 +1853,24 @@ function _creativeFieldCard(stageId, name, options){
       <span class="creative-field-tools">${_creativeGuideButton(name)}${copyTools}${_creativeIsolateButton(name)}</span>
     </div>
     ${help}
-    ${picker}
     ${lead}
     ${accept}
-    ${control}
+    ${editor}
     ${proposals}
   </div>`;
 }
 
+function _creativeSyncBoxDir(field){
+  const input = document.querySelector(`[data-creative-field="${field}"]`);
+  if(!input) return;
+  const dir = _creativeBoxDir(input.value);
+  if(input.getAttribute('dir') !== dir) input.setAttribute('dir', dir);
+  const combo = input.closest('.creative-input-combo');
+  if(combo && combo.getAttribute('dir') !== dir) combo.setAttribute('dir', dir);
+}
+
 function creativeScheduleSave(field){
+  _creativeSyncBoxDir(field);
   if(field === 'core_trigger'){
     const input = document.querySelector('[data-creative-field="core_trigger"]');
     const note = document.getElementById('creativeConceptBlock');
