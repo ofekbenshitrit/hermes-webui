@@ -159,7 +159,7 @@ let _creativeProject = null;
 let _creativeStage = 'brief';
 let _creativeChatOpen = true;
 let _creativeFocusField = '';
-let _creativeChatWidth = 340;
+let _creativeChatWidth = 480;
 let _creativeExportOpen = false;
 let _creativeExportReturn = null;
 let _creativeExportMode = 'handoff';
@@ -577,7 +577,7 @@ function creativeChatResizeStart(event){
   const startX = event.clientX;
   const startW = _creativeChatWidth;
   function move(ev){
-    _creativeChatWidth = Math.max(260, Math.min(560, startW + (startX - ev.clientX)));
+    _creativeChatWidth = Math.max(260, Math.min(720, startW + (startX - ev.clientX)));
     const body = document.querySelector('#creativeWorkspace .creative-frame');
     if(body) body.style.setProperty('--creative-chat-width', _creativeChatWidth + 'px');
   }
