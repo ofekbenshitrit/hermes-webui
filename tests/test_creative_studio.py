@@ -894,6 +894,48 @@ def test_brief_step_drops_the_facts_box_and_exploratory_warning():
     assert "+ New Avatar" in script
     assert "function creativeSaveAvatar" in script
     assert "/avatars" in script
+    assert 'ariaLabel: \'Reuse a saved audience\'' in script
+
+
+def test_audience_field_is_a_text_box_with_saved_history():
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is required to render the audience field")
+    script = Path(__file__).resolve().parents[1].joinpath("static", "creative_studio.js")
+    payload = json.dumps({
+        "stages": {"brief": {"fields": {
+            "audience_notes": {"text": "Night-shift bakers", "proposals": []},
+        }}},
+        "audience_avatars": [
+            {"id": "a1", "source": "saved", "label": "Night bakers", "text": "People who bake after a night shift"},
+            {"id": "a2", "source": "history", "label": "Recent", "text": "Night-shift bakers"},
+        ],
+    })
+    rendered = subprocess.run(
+        [node, "-e", (
+            "const fs=require('fs');"
+            "const input=JSON.parse(fs.readFileSync(0,'utf8'));"
+            "eval(fs.readFileSync(process.argv[1],'utf8')+"
+            "'\\n_creativeProject=input;"
+            "process.stdout.write(_creativeAudienceControl());');"
+        ), str(script)],
+        input=payload,
+        text=True,
+        check=True,
+        capture_output=True,
+    ).stdout
+    assert "creative-picker-value" not in rendered
+    assert 'data-creative-field="audience_notes"' in rendered
+    assert ">Night-shift bakers</textarea>" in rendered
+    combo = rendered.split("creative-input-combo", 1)[1]
+    assert "<textarea" in combo and "creative-history-trigger" in combo
+    assert "People who bake after a night shift" in rendered
+    assert "+ New Avatar" in rendered
+    assert 'aria-label="Reuse a saved audience"' in rendered
+    assert "Choose an avatar" not in rendered
 
 
 def test_audience_blocks_are_reusable_across_products(studio):

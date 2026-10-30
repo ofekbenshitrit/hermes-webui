@@ -1131,19 +1131,19 @@ function _creativeAudienceRows(){
 function _creativeAudienceControl(){
   const slot = (((_creativeProject.stages.brief || {}).fields || {}).audience_notes) || {text:'', proposals:[]};
   const current = String(slot.text || '').trim();
-  const rows = _creativeAudienceRows();
+  const rows = _creativeAudienceRows().filter(row => row.source !== 'current');
   const selected = rows.find(row => String(row.text || '').trim() === current);
   const groups = [
     ['preset', 'Product avatars'],
     ['saved', 'Saved for this product'],
     ['history', 'Used on recent ads'],
-    ['current', 'This ad'],
   ];
   const menuGroups = groups.map(([source, label]) => [
     label,
     rows.filter(row => row.source === source).map(row => ({id: row.id, label: _creativeMenuText(row)})),
   ]);
   const isolated = _creativeFocusField === 'audience_notes';
+  const boxDir = _creativeBoxDir(slot.text || '');
   const composer = _creativeAvatarComposer
     ? `<div class="creative-avatar-create">
         <label for="creativeAvatarLabel">Avatar name</label>
@@ -1154,24 +1154,24 @@ function _creativeAudienceControl(){
         <button type="button" class="creative-primary" onclick="creativeSaveAvatar()">Save avatar</button>
       </div>`
     : '';
+  const picker = _creativePicker({
+    kind: 'avatar',
+    variant: 'history',
+    triggerId: 'creativeAvatarSelect',
+    listId: 'creativeAvatarList',
+    ariaLabel: 'Reuse a saved audience',
+    selectedId: _creativeAvatarComposer ? '__new__' : (selected ? selected.id : ''),
+    groups: menuGroups,
+    extras: [{id: '__new__', label: '+ New Avatar'}],
+  });
+  const control = `<textarea id="creativeAudienceNotes" data-creative-stage="brief" data-creative-field="audience_notes" dir="${boxDir}" rows="2" oninput="creativeScheduleSave('audience_notes')">${_creativeEsc(slot.text || '')}</textarea>`;
   return `<div class="creative-field${isolated ? ' isolated' : ''}" data-field="audience_notes">
     <div class="creative-field-label">
-      <label for="creativeAvatarSelect">Audience</label>
+      <label for="creativeAudienceNotes">Audience</label>
       ${_creativeIsolateButton('audience_notes')}
     </div>
     <p class="creative-help">Saved for this product, including audiences from recent ads.</p>
-    ${_creativePicker({
-      kind: 'avatar',
-      triggerId: 'creativeAvatarSelect',
-      listId: 'creativeAvatarList',
-      ariaLabel: 'Audience avatar',
-      placeholder: 'Choose an avatar',
-      selectedId: _creativeAvatarComposer ? '__new__' : (selected ? selected.id : ''),
-      selectedLabel: _creativeAvatarComposer ? '+ New Avatar' : (selected ? _creativeMenuText(selected) : 'Choose an avatar'),
-      groups: menuGroups,
-      leading: `<button type="button" role="option" class="creative-picker-option" data-value="" aria-selected="${!selected && !_creativeAvatarComposer ? 'true' : 'false'}" onclick="creativePickerChoose(this)"><span>Choose an avatar</span></button>`,
-      extras: [{id: '__new__', label: '+ New Avatar'}],
-    })}
+    <div class="creative-input-combo" dir="${boxDir}">${control}${picker}</div>
     ${composer}
     ${_creativeProposalMarkup(slot)}
   </div>`;
@@ -1188,11 +1188,17 @@ async function creativePickAvatar(id){
   _creativeAvatarComposer = false;
   if(!id){
     await creativePutField('brief', 'audience_notes', '');
-    return;
+  }else{
+    const avatar = _creativeAudienceRows().find(item => item.id === id);
+    if(!avatar) return;
+    await creativePutField('brief', 'audience_notes', avatar.text);
   }
-  const avatar = _creativeAudienceRows().find(item => item.id === id);
-  if(!avatar) return;
-  await creativePutField('brief', 'audience_notes', avatar.text);
+  const input = document.querySelector('[data-creative-field="audience_notes"]');
+  if(!input) return;
+  _creativeSyncBoxDir('audience_notes');
+  input.focus();
+  const end = input.value.length;
+  if(typeof input.setSelectionRange === 'function') input.setSelectionRange(end, end);
 }
 
 async function creativeSaveAvatar(){
