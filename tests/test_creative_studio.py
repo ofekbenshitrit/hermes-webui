@@ -155,15 +155,51 @@ def test_legacy_review_survives_a_missing_field(studio):
     studio.set_stage_status(project["id"], "hook", "review_recommended")
     path = studio._store_path()
     payload = json.loads(path.read_text(encoding="utf-8"))
-    del payload["projects"][project["id"]]["stages"]["hook"]["fields"]["format"]
+    del payload["projects"][project["id"]]["stages"]["casts"]["fields"]["format"]
     path.write_text(json.dumps(payload), encoding="utf-8")
     loaded = studio.get_project(project["id"])
     hook = loaded["stages"]["hook"]
     assert hook["status"] == "review_recommended"
     assert hook["fields"]["final_hook"]["text"] == "Keep"
     assert "needs_review" not in hook["fields"]["final_hook"]
-    assert hook["fields"]["format"]["text"] == ""
-    assert "format" in studio.FIELDS["hook"] and "hook_type" in studio.FIELDS["hook"]
+    assert "format" not in hook["fields"]
+    assert loaded["stages"]["casts"]["fields"]["format"]["text"] == ""
+    assert "format" in studio.FIELDS["casts"] and "format" not in studio.FIELDS["hook"]
+
+
+def test_format_saved_on_the_hook_moves_to_execution(studio):
+    project = studio.create_project("Move format")
+    path = studio._store_path()
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    row = payload["projects"][project["id"]]
+    row["stages"]["hook"]["fields"]["format"] = {
+        "text": "UGC, 15s feed",
+        "author": "user",
+        "claim": "user_approved",
+        "proposals": [{"id": "p_abc", "text": "Founder reel"}],
+        "order": 9,
+    }
+    row["stages"]["casts"]["fields"]["format"]["text"] = ""
+    row["stages"]["casts"]["fields"]["format"]["proposals"] = []
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    loaded = studio.get_project(project["id"])
+    assert "format" not in loaded["stages"]["hook"]["fields"]
+    names = list(loaded["stages"]["casts"]["fields"])
+    assert names.index("conceit") < names.index("format") < names.index("actors")
+    moved = loaded["stages"]["casts"]["fields"]["format"]
+    assert moved["text"] == "UGC, 15s feed"
+    assert moved["proposals"][0]["text"] == "Founder reel"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    row = payload["projects"][project["id"]]
+    row["stages"]["hook"]["fields"]["format"] = {
+        "text": "Static",
+        "author": "user",
+        "proposals": [],
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    kept = studio.get_project(project["id"])
+    assert "format" not in kept["stages"]["hook"]["fields"]
+    assert kept["stages"]["casts"]["fields"]["format"]["text"] == "UGC, 15s feed"
 
 
 def test_core_trigger_does_not_require_a_hook_type(studio):
@@ -173,6 +209,7 @@ def test_core_trigger_does_not_require_a_hook_type(studio):
     assert "hook.hook_type" not in view["helpful_missing"]
     assert "what.concept" in view["missing"]
     assert "hook.format" not in view["missing"]
+    assert "casts.format" not in view["missing"]
 
 
 def test_core_concept_rejects_a_second_idea(studio):
@@ -217,12 +254,15 @@ def test_fried_angle_does_not_wait_for_format(studio):
     project = studio.create_project("Fry")
     view = studio.get_project(project["id"], field="deep_fry", for_suggestion=True)
     assert "hook.format" not in view["missing"]
+    assert "casts.format" not in view["missing"]
     assert "brief.channel" not in view["missing"]
     assert "brief.format_length" not in view["missing"]
     final = studio.get_project(project["id"], field="final_hook", for_suggestion=True)
     assert "hook.verbal_hook" in final["missing"]
     assert "hook.visual_hook" in final["missing"]
     assert "hook.format" not in final["missing"]
+    assert "casts.format" not in final["missing"]
+    assert "casts.format" not in final["helpful_missing"]
 
 
 def test_ambiguous_name_does_not_write(studio):
@@ -395,7 +435,7 @@ def test_static_panel_wires_stage_switch_proposals_and_export():
     assert "creative-crumb-link" in script
     assert "creative-crumb-chevron" in script
     assert "creative-project-grid" in script
-    assert 'creativeShowProjects()">Projects</button>' in script
+    assert 'creativeShowProjects()">Creatives</button>' in script
     assert "function creativeSubmitCreate" in script
     assert "Creative name" in script
     assert "creativeCreateProduct" in script
@@ -1074,7 +1114,7 @@ def test_audience_step_wires_reuse_and_generation():
     assert "Reuse a saved demographic" in script
     assert "Reuse a saved facet" in script
     assert "This product" in script
-    assert "Other projects" in script
+    assert "Other creatives" in script
     assert "Generate segment" in script
     assert "Add an outcome, demographic, and facet first." in script
     assert "/segment" in script
@@ -1139,7 +1179,7 @@ def test_audience_blocks_open_from_inside_the_text_box():
             assert "creative-picker-panel" in combo
     assert "Hot coffee" in rendered
     assert "This product" in rendered
-    assert "Other projects" in rendered
+    assert "Other creatives" in rendered
     assert 'aria-label="Reuse a saved outcome"' in rendered
     assert "creative-history-trigger" not in rendered.split('data-field="segment"', 1)[1]
 
@@ -1382,7 +1422,6 @@ def test_hook_step_leads_with_one_concept():
                 "walk_it_back": {"text": ""},
                 "verbal_hook": {"text": ""},
                 "visual_hook": {"text": ""},
-                "format": {"text": ""},
                 "final_hook": {"text": ""},
             }},
         },
@@ -1403,12 +1442,50 @@ def test_hook_step_leads_with_one_concept():
     order = ["isolate", "fry", "ground", "bang"]
     positions = [rendered.index(f'data-hook-group="{name}"') for name in order]
     assert positions == sorted(positions)
-    for label in ("Core concept", "Deep-fry move", "Good thing is bad", "Deep-fried angle", "Grounded claim", "Verbal hook", "Visual hook", "Format and placement", "Final hook pair", "Fry", "Walk it back", "Make it bang"):
+    for label in ("Core concept", "Deep-fry move", "Good thing is bad", "Deep-fried angle", "Grounded claim", "Verbal hook", "Visual hook", "Final hook pair", "Fry", "Walk it back", "Make it bang"):
         assert label in rendered
-    for label in ("Channel", "Length and placement", "Caveman-simple", "One central idea", "Hook approach", "Exploratory draft", "Polish notes"):
+    for label in ("Channel", "Length and placement", "Caveman-simple", "One central idea", "Hook approach", "Exploratory draft", "Polish notes", "Format and placement"):
         assert label not in rendered
-    assert rendered.index("Format and placement") > rendered.index('data-hook-group="bang"')
     assert "creative-pair" in rendered
+
+
+def test_execution_step_includes_format_and_placement():
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is required to render the execution step")
+    script = Path(__file__).resolve().parents[1].joinpath("static", "creative_studio.js")
+    payload = json.dumps({
+        "stages": {
+            "casts": {"fields": {
+                "conceit": {"text": ""},
+                "format": {"text": "UGC, 15s feed"},
+                "actors": {"text": ""},
+                "style": {"text": ""},
+                "terrain": {"text": ""},
+                "setup": {"text": ""},
+            }},
+        },
+        "field_context": {"conceit": {"required": [], "helpful": [["casts", "format"]]}},
+    })
+    rendered = subprocess.run(
+        [node, "-e", (
+            "const fs=require('fs');"
+            "const input=JSON.parse(fs.readFileSync(0,'utf8'));"
+            "eval(fs.readFileSync(process.argv[1],'utf8')+"
+            "'\\n_creativeStage=\"casts\";_creativeProject=input;"
+            "process.stdout.write(_creativeStepBody(input.stages.casts));');"
+        ), str(script)],
+        input=payload,
+        text=True,
+        check=True,
+        capture_output=True,
+    ).stdout
+    assert "Format and placement" in rendered
+    assert 'data-creative-field="format"' in rendered
+    assert rendered.index("Conceit") < rendered.index("Format and placement") < rendered.index("Actors")
 
 
 def test_strategy_controls_are_separated_in_the_script_and_contract():
@@ -1486,6 +1563,13 @@ Object.entries(phrases).forEach(([field, phrase]) => {
   if(!markup.includes(phrase)) throw new Error(field + ' missing phrase');
 });
 if(_creativeGuideMarkup('campaign_goal')) throw new Error('strategy field has no framework note');
+const concept = _creativeGuideMarkup('concept');
+if(!concept.includes('dir="rtl"')) throw new Error('hebrew concept guide should be rtl');
+if(concept.includes('dir="auto"')) throw new Error('guide lines should follow the dialog direction');
+const mechanism = _creativeGuideMarkup('mechanism');
+if(!mechanism.includes('dir="ltr"')) throw new Error('english mechanism guide should be ltr');
+const format = _creativeGuideMarkup('format');
+if(!format.includes('dir="rtl"')) throw new Error('hebrew format guide should be rtl despite the english title');
 process.stdout.write('ok');
 """
     rendered = subprocess.run(

@@ -594,8 +594,8 @@ _CREATIVE_FIELD_INDEX = (
     "who: outcome, demographic, facet, segment. "
     "what: concept, angle, ump, ums, mechanism, message_approach. "
     "hook: hook_type, visual_hook, verbal_hook, core_trigger, caveman_simple, "
-    "deep_fry, walk_it_back, make_it_bang, final_hook, format. "
-    "casts: conceit, actors, style, terrain, setup. "
+    "deep_fry, walk_it_back, make_it_bang, final_hook. "
+    "casts: conceit, format, actors, style, terrain, setup. "
     "copy: pain, promise, proof, curiosity, constraints, conditions."
 )
 
@@ -622,7 +622,7 @@ _CREATIVE_CONTRACT = (
     "hook.hook_type is the deep-fry move, not the format: good_is_bad, bad_is_good, ineffective_harmful, identity_contrast, reverse_causation, or rename. "
     "hook.deep_fry is the fried angle. hook.walk_it_back is that angle walked back to the mechanism. "
     "hook.verbal_hook and hook.visual_hook are the pair. hook.final_hook is the pair you will ship. "
-    "hook.format is the asset, placement, and length in one field, after the idea. "
+    "casts.format is the asset, placement, and length in one field on the execution step. "
     "caveman_simple and make_it_bang are earlier notes. "
     "If required context is missing, ask or mark the proposal exploratory. Do not present a guess as grounded. "
     "After a write, the result includes project, field, and saved text. If a write fails, say so."

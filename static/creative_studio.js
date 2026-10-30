@@ -18,8 +18,8 @@ const CREATIVE_FIELDS = {
   brief:['product_offer','product_facts','audience_notes','objective','campaign_goal','awareness','mass_desire','sophistication','campaign_context','channel','format_length','assets','sources','summary_provided','summary_assumptions','summary_missing'],
   who:['outcome','demographic','facet','segment'],
   what:['concept','angle','ump','ums','mechanism','message_approach'],
-  hook:['hook_type','visual_hook','verbal_hook','core_trigger','caveman_simple','deep_fry','walk_it_back','make_it_bang','final_hook','format'],
-  casts:['conceit','actors','style','terrain','setup'],
+  hook:['hook_type','visual_hook','verbal_hook','core_trigger','caveman_simple','deep_fry','walk_it_back','make_it_bang','final_hook'],
+  casts:['conceit','format','actors','style','terrain','setup'],
   copy:['pain','promise','proof','curiosity','constraints','conditions'],
   review:[],
 };
@@ -40,7 +40,7 @@ const CREATIVE_HELP = {
   ums:'How this product physically fixes that fault. Keep this separate from the problem.',
   mechanism:'UMP plus UMS: how the product produces the outcome. Unsupported claims stay labeled Needs source/verification.',
   hook_type:'The move that fries the concept. It is not the format, and it comes after the one idea.',
-  format:'The asset and its constraint together: UGC, founder, static, reel, or feed, plus length or placement.',
+  format:'The asset and its constraint together: UGC, founder, static, reel, or feed, plus length or placement. This belongs on Execution.',
   channel:'Where the ad will run, if you know it.',
   format_length:'Length or placement limits the hook has to fit.',
   caveman_simple:'An earlier plain note. The committed idea is the core concept.',
@@ -140,9 +140,9 @@ const CREATIVE_STEP_FIELDS = {
   what:[['what','concept'],['what','angle'],['what','ump'],['what','ums'],['what','mechanism']],
   hook:[
     ['hook','core_trigger'],['hook','hook_type'],['hook','deep_fry'],['hook','walk_it_back'],
-    ['hook','format'],['hook','verbal_hook'],['hook','visual_hook'],['hook','final_hook'],
+    ['hook','verbal_hook'],['hook','visual_hook'],['hook','final_hook'],
   ],
-  casts:[['casts','conceit'],['casts','actors'],['casts','style'],['casts','terrain'],['casts','setup']],
+  casts:[['casts','conceit'],['casts','format'],['casts','actors'],['casts','style'],['casts','terrain'],['casts','setup']],
   copy:[['copy','pain'],['copy','promise'],['copy','proof'],['copy','curiosity'],['copy','constraints'],['copy','conditions']],
 };
 const CREATIVE_STORED_BRIEF = ['summary_provided','summary_assumptions','summary_missing','assets','sources'];
@@ -220,7 +220,7 @@ function _creativeWhen(value){
 }
 
 function _creativeNewButton(){
-  return `<button type="button" class="creative-icon-btn" aria-label="New project" title="New project" onclick="creativeNewProject()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>`;
+  return `<button type="button" class="creative-icon-btn" aria-label="New creative" title="New creative" onclick="creativeNewProject()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>`;
 }
 
 function _creativeRecentMenu(){
@@ -231,25 +231,25 @@ function _creativeRecentMenu(){
         const product = (row.product || '').trim();
         return `<button type="button" onclick="creativeOpenProject('${row.id}')"${current ? ' aria-current="true"' : ''}><span>${_creativeEsc(row.name)}</span>${product ? `<small>${_creativeEsc(product)}</small>` : ''}</button>`;
       }).join('')
-    : '<p class="creative-recent-empty">No projects yet</p>';
-  const all = _creativeBrowsing ? '' : '<button type="button" class="creative-recent-all" onclick="creativeShowProjects()">All projects</button>';
+    : '<p class="creative-recent-empty">No creatives yet</p>';
+  const all = _creativeBrowsing ? '' : '<button type="button" class="creative-recent-all" onclick="creativeShowProjects()">All creatives</button>';
   return `<div class="creative-menu creative-recent" id="creativeRecentMenu" role="menu" hidden>${items}${all}</div>`;
 }
 
 function _creativeProjectsCluster(label){
-  return `<span class="creative-crumb-projects">${label}<button type="button" class="creative-crumb-chevron" aria-label="Recent projects" aria-haspopup="menu" aria-expanded="false" aria-controls="creativeRecentMenu" onclick="creativeToggleRecent(event)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg></button>${_creativeRecentMenu()}</span>`;
+  return `<span class="creative-crumb-projects">${label}<button type="button" class="creative-crumb-chevron" aria-label="Recent creatives" aria-haspopup="menu" aria-expanded="false" aria-controls="creativeRecentMenu" onclick="creativeToggleRecent(event)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg></button>${_creativeRecentMenu()}</span>`;
 }
 
 function _creativeCrumb(current){
   const projects = _creativeProjectsCluster(current
-    ? '<button type="button" class="creative-crumb-link" onclick="creativeShowProjects()">Projects</button>'
-    : '<span class="creative-crumb-current">Projects</span>');
+    ? '<button type="button" class="creative-crumb-link" onclick="creativeShowProjects()">Creatives</button>'
+    : '<span class="creative-crumb-current">Creatives</span>');
   if(!current) return projects;
   return `${projects}<span class="creative-crumb-sep" aria-hidden="true">/</span><span class="creative-crumb-current">${_creativeEsc(current)}</span>`;
 }
 
 function _creativePageHeader(current, tools){
-  return `<header class="creative-header"><nav class="creative-crumb" aria-label="Projects">${_creativeCrumb(current)}</nav><div class="creative-header-tools">${tools || ''}</div></header>`;
+  return `<header class="creative-header"><nav class="creative-crumb" aria-label="Creatives">${_creativeCrumb(current)}</nav><div class="creative-header-tools">${tools || ''}</div></header>`;
 }
 
 function _creativeIndexMarkup(){
@@ -263,7 +263,7 @@ function _creativeIndexMarkup(){
   }).join('');
   const body = cards
     ? `<div class="creative-project-grid">${cards}</div>`
-    : '<div class="main-view-empty"><div class="main-view-empty-title">No projects yet</div><div class="main-view-empty-sub">Name a creative and the product. Hermes looks the product up from the notes it already has.</div><button type="button" class="creative-primary" onclick="creativeNewProject()">New project</button></div>';
+    : '<div class="main-view-empty"><div class="main-view-empty-title">No creatives yet</div><div class="main-view-empty-sub">Name a creative and the product. Hermes looks the product up from the notes it already has.</div><button type="button" class="creative-primary" onclick="creativeNewProject()">New creative</button></div>';
   return `<div class="creative-index">${_creativePageHeader('', _creativeNewButton())}${body}</div>`;
 }
 
@@ -337,7 +337,7 @@ async function creativeOpenProject(id, opts){
 }
 
 async function creativeRenameProject(id){
-  const name = window.prompt('Rename project', _creativeProject && _creativeProject.name || '');
+  const name = window.prompt('Rename creative', _creativeProject && _creativeProject.name || '');
   if(!name) return;
   await api('/api/creative-studio/projects/' + id + '/rename', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name})});
   await creativeOpenProject(id, {keepStage:true});
@@ -349,7 +349,7 @@ async function creativeDuplicateProject(id){
 }
 
 async function creativeDeleteProject(id){
-  if(!window.confirm('Delete this creative project?')) return;
+  if(!window.confirm('Delete this creative?')) return;
   await api('/api/creative-studio/projects/' + id, {method:'DELETE'});
   if(_creativeProject && _creativeProject.id === id) _creativeProject = null;
   _creativeCreating = false;
@@ -359,7 +359,7 @@ async function creativeDeleteProject(id){
 }
 
 function _creativeCreateMarkup(){
-  return `<div class="creative-index">${_creativePageHeader('New project')}<form id="creativeCreateForm" class="creative-wizard" onsubmit="creativeSubmitCreate(); return false;">
+  return `<div class="creative-index">${_creativePageHeader('New creative')}<form id="creativeCreateForm" class="creative-wizard" onsubmit="creativeSubmitCreate(); return false;">
     <div class="creative-wizard-body">
       <p class="creative-wizard-kicker">New creative</p>
       <h2>Name it and name the product</h2>
@@ -476,7 +476,7 @@ function creativeRenderWorkspace(){
     <div class="creative-frame${_creativeChatOpen ? '' : ' chat-closed'}" style="--creative-chat-width:${_creativeChatWidth}px">
     <div class="creative-header">
       <div class="creative-project-chip">
-        <nav class="creative-crumb" aria-label="Projects">${_creativeCrumb(project.name)}</nav>
+        <nav class="creative-crumb" aria-label="Creatives">${_creativeCrumb(project.name)}</nav>
         <span class="creative-save ${_creativeSaveState === 'Save failed' ? 'failed' : ''}" id="creativeSaveState">${_creativeEsc(saveText)}</span>
         <button type="button" class="creative-icon-btn" aria-label="Project actions" aria-expanded="false" onclick="creativeToggleMenu(event)">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
@@ -737,7 +737,7 @@ function _creativeBlockPicker(field, label){
   if(!rows.length) return '';
   const current = _creativeWhoText(field).trim();
   const selected = rows.find(row => String(row.text || '').trim() === current);
-  const groups = [['product', 'This product'], ['global', 'Other projects']].map(([scope, groupLabel]) => [
+  const groups = [['product', 'This product'], ['global', 'Other creatives']].map(([scope, groupLabel]) => [
     groupLabel,
     rows.filter(row => row.scope === scope).map(row => ({id: row.id, label: _creativeMenuText(row)})),
   ]);
@@ -878,20 +878,51 @@ function _creativeGuideButton(field){
   return `<button type="button" class="creative-guide" data-creative-guide="${field}" aria-haspopup="dialog" aria-label="${_creativeEsc(text)}" title="${_creativeEsc(text)}" onclick="creativeOpenGuide('${field}')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6"/><path d="M12 7.5h.01"/></svg></button>`;
 }
 
+function _creativeStrongKind(cp){
+  if((cp>=0x0590&&cp<=0x05FF)||(cp>=0x0600&&cp<=0x06FF)||(cp>=0x0750&&cp<=0x077F)||
+     (cp>=0x08A0&&cp<=0x08FF)||(cp>=0xFB50&&cp<=0xFDFF)||(cp>=0xFE70&&cp<=0xFEFF)) return 'r';
+  if((cp>=0x0041&&cp<=0x005A)||(cp>=0x0061&&cp<=0x007A)||
+     (cp>=0x00C0&&cp<=0x024F)||(cp>=0x0370&&cp<=0x03FF)) return 'l';
+  return '';
+}
+
+function _creativeGuidePlain(value){
+  if(value == null) return '';
+  if(typeof value === 'string') return value;
+  if(Array.isArray(value)) return value.map(_creativeGuidePlain).join('\n');
+  if(typeof value !== 'object') return '';
+  return ['lead','text','h2','h3','p','em','ul','ol','sub'].map(key => _creativeGuidePlain(value[key])).join('\n');
+}
+
+// One direction for the whole note. Body language wins over the English
+// field title, using the same Hebrew/Arabic share as chat bidi.
+function _creativeGuideDir(text){
+  text = String(text || '');
+  let r = 0, l = 0;
+  for(let i = 0; i < text.length; i++){
+    const kind = _creativeStrongKind(text.charCodeAt(i));
+    if(kind === 'r') r++;
+    else if(kind === 'l') l++;
+  }
+  if(!r) return 'ltr';
+  if(!l) return 'rtl';
+  return (r / (r + l) >= 0.35) ? 'rtl' : 'ltr';
+}
+
 function _creativeGuideItem(item){
-  if(typeof item === 'string') return `<li dir="auto">${_creativeEsc(item)}</li>`;
+  if(typeof item === 'string') return `<li>${_creativeEsc(item)}</li>`;
   const lead = item.lead ? `<strong>${_creativeEsc(item.lead)}</strong>` : '';
   const text = item.text ? `${lead ? ' ' : ''}${_creativeEsc(item.text)}` : '';
   const sub = item.sub ? `<ul>${item.sub.map(_creativeGuideItem).join('')}</ul>` : '';
-  return `<li dir="auto">${lead}${text}${sub}</li>`;
+  return `<li>${lead}${text}${sub}</li>`;
 }
 
 function _creativeGuideBlocks(blocks){
   return (blocks || []).map(block => {
-    if(block.h2) return `<h3 dir="auto">${_creativeEsc(block.h2)}</h3>`;
-    if(block.h3) return `<h4 dir="auto">${_creativeEsc(block.h3)}</h4>`;
-    if(block.p) return `<p dir="auto">${_creativeEsc(block.p)}</p>`;
-    if(block.em) return `<p dir="auto"><em>${_creativeEsc(block.em)}</em></p>`;
+    if(block.h2) return `<h3>${_creativeEsc(block.h2)}</h3>`;
+    if(block.h3) return `<h4>${_creativeEsc(block.h3)}</h4>`;
+    if(block.p) return `<p>${_creativeEsc(block.p)}</p>`;
+    if(block.em) return `<p><em>${_creativeEsc(block.em)}</em></p>`;
     if(block.ul) return `<ul>${block.ul.map(_creativeGuideItem).join('')}</ul>`;
     if(block.ol) return `<ol>${block.ol.map(_creativeGuideItem).join('')}</ol>`;
     return '';
@@ -901,11 +932,12 @@ function _creativeGuideBlocks(blocks){
 function _creativeGuideMarkup(field){
   const guide = (typeof CREATIVE_GUIDE !== 'undefined' && CREATIVE_GUIDE[field]) || null;
   if(!guide) return '';
-  return `<div class="creative-guide-dialog" role="dialog" aria-modal="true" aria-labelledby="creativeGuideTitle" tabindex="-1">
+  const dir = _creativeGuideDir(_creativeGuidePlain(guide.blocks));
+  return `<div class="creative-guide-dialog" dir="${dir}" role="dialog" aria-modal="true" aria-labelledby="creativeGuideTitle" tabindex="-1">
     <div class="creative-guide-head">
       <div>
-        <p class="creative-guide-kicker" dir="auto">${_creativeEsc(guide.kicker || '')}</p>
-        <h2 id="creativeGuideTitle" dir="auto">${_creativeEsc(guide.title || '')}</h2>
+        <p class="creative-guide-kicker">${_creativeEsc(guide.kicker || '')}</p>
+        <h2 id="creativeGuideTitle">${_creativeEsc(guide.title || '')}</h2>
       </div>
       <button type="button" class="creative-guide-close" aria-label="Close" onclick="creativeCloseGuide()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
     </div>
@@ -1317,7 +1349,7 @@ function _creativeHookBody(){
     <section class="creative-section" data-hook-group="isolate"><strong>Isolate and commit</strong><p class="creative-help">One short sentence. Core idea: ${_creativeEsc(anchor || 'Not chosen yet.')}</p>${_creativeFieldCard('hook','core_trigger')}${block}</section>
     <section class="creative-section" data-hook-group="fry"><strong>Deep fry</strong><p class="creative-help">Push that idea through one move.</p>${_creativeMoveControl()}<div class="creative-actions"><button type="button" onclick="creativeHookAction('deep_fry',${JSON.stringify(fryPrompt).replace(/"/g, '&quot;')})">Fry</button></div>${_creativeFieldCard('hook','deep_fry')}</section>
     <section class="creative-section" data-hook-group="ground"><strong>Walk it back</strong><p class="creative-help">Keep the fried angle. Bring the claim back to what the mechanism supports.</p><div class="creative-actions"><button type="button" onclick="creativeHookAction('walk_it_back',${JSON.stringify(groundPrompt).replace(/"/g, '&quot;')})">Walk it back</button></div><div class="creative-pair">${_creativeHookQuote('deep_fry','Deep-fried angle')}${_creativeFieldCard('hook','walk_it_back', {accept:true, acceptLabel:'Use as the line'})}</div></section>
-    <section class="creative-section" data-hook-group="bang"><strong>Make it bang</strong><p class="creative-help">The first line and the opening picture. Format comes after the idea.</p>${_creativeFieldCard('hook','format')}<div class="creative-pair">${_creativeFieldCard('hook','verbal_hook')}${_creativeFieldCard('hook','visual_hook')}</div><div class="creative-actions"><button type="button" onclick="creativeHookAction('final_hook',${JSON.stringify(bangPrompt).replace(/"/g, '&quot;')})">Make it bang</button></div>${_creativeFieldCard('hook','final_hook')}</section>`;
+    <section class="creative-section" data-hook-group="bang"><strong>Make it bang</strong><p class="creative-help">The first line and the opening picture.</p><div class="creative-pair">${_creativeFieldCard('hook','verbal_hook')}${_creativeFieldCard('hook','visual_hook')}</div><div class="creative-actions"><button type="button" onclick="creativeHookAction('final_hook',${JSON.stringify(bangPrompt).replace(/"/g, '&quot;')})">Make it bang</button></div>${_creativeFieldCard('hook','final_hook')}</section>`;
 }
 
 function _creativeManyIdeas(text){

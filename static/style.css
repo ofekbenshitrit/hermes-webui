@@ -5425,7 +5425,7 @@ main.main > #mainPlugin{display:none;}
 #mainCreative .creative-fields button.creative-guide:hover{background:var(--accent-bg);color:var(--text);border:none;}
 #mainCreative .creative-fields button.creative-guide:focus-visible{outline:2px solid var(--text);outline-offset:1px;opacity:1;}
 .creative-guide-layer{position:fixed;inset:0;z-index:1200;display:flex;align-items:center;justify-content:center;padding:28px;background:rgba(0,0,0,.62);backdrop-filter:blur(8px);}
-.creative-guide-dialog{width:min(840px,100%);max-height:min(900px,calc(100vh - 48px));display:flex;flex-direction:column;background:var(--kx-base,#1f1f1f);color:var(--kx-text,#fff);border:1px solid var(--kx-border,#414141);border-radius:20px;box-shadow:0 24px 80px rgba(0,0,0,.45);outline:none;}
+.creative-guide-dialog{width:min(840px,100%);max-height:min(900px,calc(100vh - 48px));display:flex;flex-direction:column;background:var(--kx-base,#1f1f1f);color:var(--kx-text,#fff);border:1px solid var(--kx-border,#414141);border-radius:20px;box-shadow:0 24px 80px rgba(0,0,0,.45);outline:none;text-align:start;}
 .creative-guide-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:22px 24px 0;}
 .creative-guide-kicker{margin:0 0 4px;font-size:12px;font-weight:600;letter-spacing:.04em;color:var(--kx-muted,#717171);}
 .creative-guide-head h2{margin:0;font-size:28px;font-weight:650;letter-spacing:-.03em;line-height:1.15;}

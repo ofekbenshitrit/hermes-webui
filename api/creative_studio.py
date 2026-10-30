@@ -75,9 +75,8 @@ FIELDS: dict[str, tuple[str, ...]] = {
         "walk_it_back",
         "make_it_bang",
         "final_hook",
-        "format",
     ),
-    "casts": ("conceit", "actors", "style", "terrain", "setup"),
+    "casts": ("conceit", "format", "actors", "style", "terrain", "setup"),
     "copy": ("pain", "promise", "proof", "curiosity", "constraints", "conditions"),
     "review": (),
 }
@@ -170,7 +169,7 @@ FIELD_CONTEXT: dict[str, dict[str, tuple[tuple[str, str], ...]]] = {
     },
     "verbal_hook": {
         "required": (("hook", "walk_it_back"),),
-        "helpful": (("hook", "format"), ("what", "concept"), ("who", "segment")),
+        "helpful": (("what", "concept"), ("who", "segment")),
     },
     "core_trigger": {
         "required": (("what", "concept"), ("who", "segment")),
@@ -190,13 +189,12 @@ FIELD_CONTEXT: dict[str, dict[str, tuple[tuple[str, str], ...]]] = {
     },
     "make_it_bang": {
         "required": (("what", "concept"),),
-        "helpful": (("hook", "verbal_hook"), ("hook", "format"), ("hook", "final_hook")),
+        "helpful": (("hook", "verbal_hook"), ("hook", "final_hook")),
     },
     "final_hook": {
         "required": (("hook", "verbal_hook"), ("hook", "visual_hook")),
         "helpful": (
             ("hook", "walk_it_back"),
-            ("hook", "format"),
             ("what", "concept"),
             ("who", "segment"),
             ("what", "mechanism"),
@@ -204,7 +202,7 @@ FIELD_CONTEXT: dict[str, dict[str, tuple[tuple[str, str], ...]]] = {
     },
     "conceit": {
         "required": (("hook", "final_hook"), ("what", "concept")),
-        "helpful": (("hook", "format"),),
+        "helpful": (("casts", "format"),),
     },
     "actors": {
         "required": (("casts", "conceit"),),
@@ -220,7 +218,7 @@ FIELD_CONTEXT: dict[str, dict[str, tuple[tuple[str, str], ...]]] = {
     },
     "setup": {
         "required": (("casts", "conceit"), ("hook", "final_hook")),
-        "helpful": (("hook", "format"),),
+        "helpful": (("casts", "format"),),
     },
     "pain": {
         "required": (("who", "segment"), ("what", "concept"), ("hook", "final_hook")),
@@ -499,7 +497,7 @@ FIELD_HELP = {
     "walk_it_back": "The fried angle walked back to the strongest claim the mechanism supports. Keep the fried draft. If support is missing, leave the claim needing a source.",
     "make_it_bang": "Earlier polish notes. The line lives in verbal_hook and the picture in visual_hook. Not a score.",
     "final_hook": "The pair you will ship: the verbal line and the visual opening together. One idea, and a claim that is supported or still needs a source. It is not a score.",
-    "format": "The asset and its constraint, together: UGC, founder, static, reel, or feed, plus length or placement. One field. It does not come before the idea.",
+    "format": "The asset and its constraint, together: UGC, founder, static, reel, or feed, plus length or placement. One field on the execution step.",
     "conceit": "The central execution idea for the creative.",
     "actors": "Who or what is on camera.",
     "style": "The visual style.",
@@ -795,6 +793,42 @@ def _ensure_fields(project: dict) -> bool:
     return changed
 
 
+def _slot_has_content(slot: dict) -> bool:
+    if (slot.get("text") or "").strip():
+        return True
+    return bool(slot.get("proposals"))
+
+
+def _migrate_format_to_execution(project: dict) -> bool:
+    """Format and placement lives on execution. Keep text that was saved on the hook."""
+    stages = project.get("stages") or {}
+    hook_fields = (stages.get("hook") or {}).get("fields")
+    casts_fields = (stages.get("casts") or {}).get("fields")
+    if not isinstance(hook_fields, dict) or "format" not in hook_fields:
+        return False
+    if not isinstance(casts_fields, dict) or not isinstance(casts_fields.get("format"), dict):
+        return False
+    old = hook_fields.pop("format")
+    current = casts_fields["format"]
+    if not isinstance(old, dict):
+        return True
+    if not _slot_has_content(current) and _slot_has_content(old):
+        order = current.get("order", 0)
+        casts_fields["format"] = copy.deepcopy(old)
+        casts_fields["format"]["order"] = order
+    ordered = {}
+    for name in FIELDS["casts"]:
+        if name in casts_fields:
+            ordered[name] = casts_fields[name]
+    for name, slot in casts_fields.items():
+        if name not in ordered:
+            ordered[name] = slot
+    if list(casts_fields) != list(ordered):
+        casts_fields.clear()
+        casts_fields.update(ordered)
+    return True
+
+
 def _migrate_hook_concept(project: dict) -> bool:
     """Move an older caveman note into the one concept field when that field is empty."""
     hook = ((project.get("stages") or {}).get("hook") or {}).get("fields") or {}
@@ -816,6 +850,7 @@ def _prepare_project(project: dict) -> bool:
         project["chat"] = []
     changed = _ensure_fields(project)
     changed = _migrate_hook_concept(project) or changed
+    changed = _migrate_format_to_execution(project) or changed
     changed = _ensure_threads(project) or changed
     changed = _migrate_chat_session(project) or changed
     return _ensure_tab_for_bound_session(project) or changed
@@ -2096,10 +2131,10 @@ def _render_handoff(project: dict, options: dict) -> str:
         ("Final hook pair", hook["final_hook"]),
         ("Verbal hook", hook["verbal_hook"]),
         ("Visual hook", hook["visual_hook"]),
-        ("Format and placement", hook["format"]),
     ])
     _append_handoff_section(lines, "Execution", [
         ("Conceit", casts["conceit"]),
+        ("Format and placement", casts["format"]),
         ("Actors", casts["actors"]),
         ("Style", casts["style"]),
         ("Terrain", casts["terrain"]),
@@ -3380,7 +3415,7 @@ def _wizard_guide() -> str:
         "hook.deep_fry is that move pushed past the facts, and it is not a verified claim. "
         "hook.walk_it_back walks that angle back to the mechanism and keeps the fried draft. "
         "hook.verbal_hook and hook.visual_hook are one pair. hook.final_hook is the pair you will ship. "
-        "hook.format is the asset, placement, and length in one field, after the idea. "
+        "casts.format is the asset, placement, and length in one field on the execution step. "
         "caveman_simple and make_it_bang are earlier notes. Do not invent product facts, proof, numbers, or testimonials."
     )
 
