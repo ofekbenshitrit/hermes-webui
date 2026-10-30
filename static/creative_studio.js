@@ -170,6 +170,7 @@ let _creativePoll = null;
 let _creativeSeenProposals = new Set();
 let _creativeDirty = false;
 let _creativeCreating = false;
+let _creativeBrowsing = true;
 let _creativeOpenDetails = [];
 let _creativeHomeSession = '';
 let _creativeChatHosted = false;
@@ -197,9 +198,10 @@ function _creativeLabel(field){
 
 async function loadCreativeStudio(){
   await creativeRefreshList();
-  if(_creativeProject && _creativeProject.id){
+  if(_creativeProject && _creativeProject.id && !_creativeBrowsing){
     await creativeOpenProject(_creativeProject.id, {keepStage:true});
   } else {
+    _creativeBrowsing = true;
     creativeRenderWorkspace();
   }
   _creativeStartPoll();
@@ -208,24 +210,73 @@ async function loadCreativeStudio(){
 async function creativeRefreshList(){
   const data = await api('/api/creative-studio/projects');
   _creativeProjects = data.projects || [];
-  const root = document.getElementById('creativeProjectList');
-  if(!root) return;
-  if(!_creativeProjects.length){
-    root.innerHTML = '<div class="creative-list-empty">No creatives yet. <button type="button" class="creative-inline-btn" onclick="creativeNewProject()">New creative</button></div>';
-    return;
-  }
-  root.innerHTML = _creativeProjects.map(row => {
-    const progress = row.progress ? `${row.progress.done}/${row.progress.total}` : '';
-    const active = _creativeProject && _creativeProject.id === row.id ? ' active' : '';
-    return `<button type="button" class="creative-row${active}" onclick="creativeOpenProject('${row.id}')">
-      <strong>${_creativeEsc(row.name)}</strong>
-      <small>${_creativeEsc(row.product || 'No product')} · ${_creativeEsc(row.updated_at || '')} · ${progress}</small>
-    </button>`;
+}
+
+function _creativeWhen(value){
+  if(!value) return '';
+  const date = new Date(value);
+  if(Number.isNaN(date.getTime())) return '';
+  return date.toLocaleDateString(undefined, {month:'short', day:'numeric'});
+}
+
+function _creativeNewButton(){
+  return `<button type="button" class="creative-icon-btn" aria-label="New project" title="New project" onclick="creativeNewProject()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>`;
+}
+
+function _creativeRecentMenu(){
+  const rows = _creativeProjects.slice(0, 8);
+  const items = rows.length
+    ? rows.map(row => {
+        const current = _creativeProject && _creativeProject.id === row.id;
+        const product = (row.product || '').trim();
+        return `<button type="button" onclick="creativeOpenProject('${row.id}')"${current ? ' aria-current="true"' : ''}><span>${_creativeEsc(row.name)}</span>${product ? `<small>${_creativeEsc(product)}</small>` : ''}</button>`;
+      }).join('')
+    : '<p class="creative-recent-empty">No projects yet</p>';
+  const all = _creativeBrowsing ? '' : '<button type="button" class="creative-recent-all" onclick="creativeShowProjects()">All projects</button>';
+  return `<div class="creative-menu creative-recent" id="creativeRecentMenu" role="menu" hidden>${items}${all}</div>`;
+}
+
+function _creativeProjectsCluster(label){
+  return `<span class="creative-crumb-projects">${label}<button type="button" class="creative-crumb-chevron" aria-label="Recent projects" aria-haspopup="menu" aria-expanded="false" aria-controls="creativeRecentMenu" onclick="creativeToggleRecent(event)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg></button>${_creativeRecentMenu()}</span>`;
+}
+
+function _creativeCrumb(current){
+  const projects = _creativeProjectsCluster(current
+    ? '<button type="button" class="creative-crumb-link" onclick="creativeShowProjects()">Projects</button>'
+    : '<span class="creative-crumb-current">Projects</span>');
+  if(!current) return projects;
+  return `${projects}<span class="creative-crumb-sep" aria-hidden="true">/</span><span class="creative-crumb-current">${_creativeEsc(current)}</span>`;
+}
+
+function _creativePageHeader(current, tools){
+  return `<header class="creative-header"><nav class="creative-crumb" aria-label="Projects">${_creativeCrumb(current)}</nav><div class="creative-header-tools">${tools || ''}</div></header>`;
+}
+
+function _creativeIndexMarkup(){
+  const cards = _creativeProjects.map(row => {
+    const open = _creativeProject && _creativeProject.id === row.id ? ' is-open' : '';
+    const product = (row.product || '').trim();
+    const when = _creativeWhen(row.updated_at);
+    const progress = row.progress ? `${row.progress.done} of ${row.progress.total} steps` : '';
+    const meta = [product || 'No product', progress, when].filter(Boolean).join(' · ');
+    return `<button type="button" class="creative-project-card${open}" onclick="creativeOpenProject('${row.id}')"><strong>${_creativeEsc(row.name)}</strong><small>${_creativeEsc(meta)}</small></button>`;
   }).join('');
+  const body = cards
+    ? `<div class="creative-project-grid">${cards}</div>`
+    : '<div class="main-view-empty"><div class="main-view-empty-title">No projects yet</div><div class="main-view-empty-sub">Name a creative and the product. Hermes looks the product up from the notes it already has.</div><button type="button" class="creative-primary" onclick="creativeNewProject()">New project</button></div>';
+  return `<div class="creative-index">${_creativePageHeader('', _creativeNewButton())}${body}</div>`;
+}
+
+async function creativeShowProjects(){
+  _creativeCreating = false;
+  _creativeBrowsing = true;
+  try{ await creativeRefreshList(); }catch(_){}
+  creativeRenderWorkspace();
 }
 
 async function creativeNewProject(){
   _creativeCreating = true;
+  _creativeBrowsing = false;
   _creativeProject = null;
   creativeRenderWorkspace();
   const name = document.getElementById('creativeCreateName');
@@ -234,6 +285,7 @@ async function creativeNewProject(){
 
 function creativeCancelCreate(){
   _creativeCreating = false;
+  _creativeBrowsing = true;
   creativeRenderWorkspace();
 }
 
@@ -257,6 +309,7 @@ async function creativeSubmitCreate(){
       body:JSON.stringify({name, product}),
     });
     _creativeCreating = false;
+    _creativeBrowsing = false;
     _creativeStage = 'brief';
     _creativeExportMode = 'handoff';
     _creativeSaveState = 'Saved';
@@ -274,6 +327,8 @@ async function creativeOpenProject(id, opts){
   const storedMode = project.export_options && project.export_options.mode;
   if(storedMode === 'full' || storedMode === 'handoff') _creativeExportMode = storedMode;
   if(!(opts && opts.keepStage) || !CREATIVE_STEPS.some(stage => stage.id === _creativeStage)) _creativeStage = 'brief';
+  _creativeCreating = false;
+  _creativeBrowsing = false;
   _creativeStrategyPrompt = '';
   _creativeAvatarComposer = false;
   await api('/api/creative-studio/active', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({project_id:id})});
@@ -297,12 +352,14 @@ async function creativeDeleteProject(id){
   if(!window.confirm('Delete this creative project?')) return;
   await api('/api/creative-studio/projects/' + id, {method:'DELETE'});
   if(_creativeProject && _creativeProject.id === id) _creativeProject = null;
+  _creativeCreating = false;
+  _creativeBrowsing = true;
   await creativeRefreshList();
   creativeRenderWorkspace();
 }
 
 function _creativeCreateMarkup(){
-  return `<form id="creativeCreateForm" class="creative-wizard" onsubmit="creativeSubmitCreate(); return false;">
+  return `<div class="creative-index">${_creativePageHeader('New project')}<form id="creativeCreateForm" class="creative-wizard" onsubmit="creativeSubmitCreate(); return false;">
     <div class="creative-wizard-body">
       <p class="creative-wizard-kicker">New creative</p>
       <h2>Name it and name the product</h2>
@@ -317,7 +374,7 @@ function _creativeCreateMarkup(){
       <button type="button" class="creative-ghost" onclick="creativeCancelCreate()">Back</button>
       <button type="submit" class="creative-primary">Continue</button>
     </div>
-  </form>`;
+  </form></div>`;
 }
 
 function _creativeShownStatus(status){
@@ -401,8 +458,9 @@ function creativeRenderWorkspace(){
     void creativeReleaseChat();
     return;
   }
-  if(!_creativeProject){
-    root.innerHTML = '<div class="main-view-empty"><div class="main-view-empty-title">Creative Studio</div><div class="main-view-empty-sub">Start with a name and a product. Hermes already has the product notes.</div><button type="button" class="creative-inline-btn" onclick="creativeNewProject()">New creative</button></div>';
+  if(_creativeBrowsing || !_creativeProject){
+    _creativeBrowsing = true;
+    root.innerHTML = _creativeIndexMarkup();
     void creativeReleaseChat();
     return;
   }
@@ -418,7 +476,7 @@ function creativeRenderWorkspace(){
     <div class="creative-frame${_creativeChatOpen ? '' : ' chat-closed'}" style="--creative-chat-width:${_creativeChatWidth}px">
     <div class="creative-header">
       <div class="creative-project-chip">
-        <span class="creative-project-name">${_creativeEsc(project.name)}</span>
+        <nav class="creative-crumb" aria-label="Projects">${_creativeCrumb(project.name)}</nav>
         <span class="creative-save ${_creativeSaveState === 'Save failed' ? 'failed' : ''}" id="creativeSaveState">${_creativeEsc(saveText)}</span>
         <button type="button" class="creative-icon-btn" aria-label="Project actions" aria-expanded="false" onclick="creativeToggleMenu(event)">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
@@ -462,11 +520,38 @@ function creativeRenderWorkspace(){
   if(document.getElementById('creativeExportPreview')) void creativeExport();
 }
 
+function creativeToggleRecent(event){
+  if(event) event.stopPropagation();
+  const menu = document.getElementById('creativeRecentMenu');
+  const button = event && event.currentTarget;
+  if(!menu) return;
+  const projectMenu = document.getElementById('creativeProjectMenu');
+  if(projectMenu) projectMenu.hidden = true;
+  const open = menu.hidden;
+  menu.hidden = !open;
+  if(button) button.setAttribute('aria-expanded', open ? 'true' : 'false');
+  if(open){
+    const close = (ev) => {
+      if(menu.contains(ev.target) || (button && button.contains(ev.target))) return;
+      menu.hidden = true;
+      if(button) button.setAttribute('aria-expanded', 'false');
+      document.removeEventListener('click', close);
+    };
+    setTimeout(() => document.addEventListener('click', close), 0);
+  }
+}
+
 function creativeToggleMenu(event){
   if(event) event.stopPropagation();
   const menu = document.getElementById('creativeProjectMenu');
   const button = event && event.currentTarget;
   if(!menu) return;
+  const recent = document.getElementById('creativeRecentMenu');
+  if(recent){
+    recent.hidden = true;
+    const chevron = document.querySelector('.creative-crumb-chevron');
+    if(chevron) chevron.setAttribute('aria-expanded', 'false');
+  }
   const open = menu.hidden;
   menu.hidden = !open;
   if(button) button.setAttribute('aria-expanded', open ? 'true' : 'false');
@@ -1956,6 +2041,7 @@ async function creativeReloadQuiet(){
   const unseen = _creativeProposalIds(fresh).find(id => !_creativeSeenProposals.has(id));
   _creativeSeenProposals = new Set(_creativeProposalIds(fresh));
   _creativeApplyProject(fresh);
+  if(_creativeBrowsing) return;
   if(unseen && !_creativeDirty){
     const stage = _creativeStageForProposal(fresh, unseen);
     if(stage && stage !== _creativeStage){
@@ -2191,7 +2277,7 @@ async function creativeCopyExport(){
 function _creativeStartPoll(){
   if(_creativePoll) return;
   _creativePoll = setInterval(() => {
-    if(typeof _currentPanel !== 'undefined' && _currentPanel === 'creative' && _creativeProject && !_creativeDirty){
+    if(typeof _currentPanel !== 'undefined' && _currentPanel === 'creative' && _creativeProject && !_creativeBrowsing && !_creativeDirty){
       creativeReloadQuiet().catch(() => {});
     }
   }, 1000);

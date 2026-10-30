@@ -390,6 +390,12 @@ def test_static_panel_wires_stage_switch_proposals_and_export():
     assert "'creative'" in panels.split("const MAIN_VIEW_PANELS =", 1)[1].split("];", 1)[0]
     assert "loadCreativeStudio" in panels
     assert "function creativeNewProject" in script
+    assert "function creativeShowProjects" in script
+    assert "function creativeToggleRecent" in script
+    assert "creative-crumb-link" in script
+    assert "creative-crumb-chevron" in script
+    assert "creative-project-grid" in script
+    assert 'creativeShowProjects()">Projects</button>' in script
     assert "function creativeSubmitCreate" in script
     assert "Creative name" in script
     assert "creativeCreateProduct" in script
