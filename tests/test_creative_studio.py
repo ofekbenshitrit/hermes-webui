@@ -1497,6 +1497,9 @@ def test_strategy_scroll_does_not_latch_onto_fields():
     assert "overflow:hidden" not in field
     stage = style.split(".creative-stage-scroll{", 1)[1].split("}", 1)[0]
     assert "overflow-anchor:none" in stage
+    live = script.split("function _creativeWorkspaceLive", 1)[1].split("function _creativeVisiblePairs", 1)[0]
+    assert "_creativeChatOpen" in live
+    assert "creativeChatMount" in live
     sync = script.split("function _creativeSyncLive", 1)[1].split("function _creativeProposalMarkup", 1)[0]
     assert "_creativeRestoreStageScroll" in sync
     assert "if(node.value !== next)" in sync

@@ -1853,12 +1853,12 @@ async function _creativeShowBoundChat(){
 }
 
 function _creativeWorkspaceLive(){
-  return !!(
-    _creativeProject
-    && !_creativeCreating
-    && document.getElementById('creativeFields')
-    && document.getElementById('creativeChatMount')
-  );
+  const fields = document.getElementById('creativeFields');
+  if(!_creativeProject || _creativeCreating || _creativeBrowsing || !fields) return false;
+  // A closed chat has no mount on purpose. Requiring it rebuilt the workspace
+  // on every quiet reload and snapped the stage scroll back to the top.
+  if(_creativeChatOpen && !document.getElementById('creativeChatMount')) return false;
+  return true;
 }
 
 function _creativeVisiblePairs(){
