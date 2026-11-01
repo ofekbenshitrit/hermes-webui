@@ -1294,6 +1294,16 @@ async function creativePutField(stage, field, text){
   }
 }
 
+function _creativeStageScrollTop(root){
+  const scroller = root && root.querySelector && root.querySelector('.creative-stage-scroll');
+  return scroller ? scroller.scrollTop : 0;
+}
+
+function _creativeRestoreStageScroll(root, top){
+  const scroller = root && root.querySelector && root.querySelector('.creative-stage-scroll');
+  if(scroller) scroller.scrollTop = top || 0;
+}
+
 function _creativeRepaintFields(){
   const fieldsRoot = document.getElementById('creativeFields');
   const stage = _creativeProject && _creativeProject.stages && _creativeProject.stages[_creativeStage];
@@ -1301,11 +1311,13 @@ function _creativeRepaintFields(){
     creativeRenderWorkspace();
     return;
   }
+  const scrollTop = _creativeStageScrollTop(fieldsRoot);
   _creativeRememberOpenDetails();
   fieldsRoot.innerHTML = _creativeStageMarkup(stage);
   fieldsRoot.dataset.signature = _creativeFieldSignature(stage);
   _creativeRestoreOpenDetails();
   _creativeFitTextareas(fieldsRoot);
+  _creativeRestoreStageScroll(fieldsRoot, scrollTop);
 }
 
 function _creativeHookSlot(name){
@@ -1920,19 +1932,24 @@ function _creativeSyncLive(){
   const fieldSig = _creativeFieldSignature(stage);
   const typing = _creativeDirty || (active && active.getAttribute && active.getAttribute('data-creative-field'));
   if(fieldsRoot && fieldSig !== fieldsRoot.dataset.signature && !typing){
+    const scrollTop = _creativeStageScrollTop(fieldsRoot);
     _creativeRememberOpenDetails();
     fieldsRoot.innerHTML = _creativeStageMarkup(stage);
     fieldsRoot.dataset.signature = fieldSig;
     _creativeRestoreOpenDetails();
     _creativeFitTextareas(fieldsRoot);
+    _creativeRestoreStageScroll(fieldsRoot, scrollTop);
   }else if(!_creativeDirty){
     _creativeVisiblePairs().forEach(([owner, field]) => {
       const node = document.querySelector(`[data-creative-field="${field}"]`);
       if(!node || node === active || _creativeTimers[field]) return;
       const slot = (((project.stages || {})[owner] || {}).fields || {})[field] || {};
-      if(node.value !== (slot.text || '')) node.value = slot.text || '';
+      const next = slot.text || '';
+      if(node.value !== next){
+        node.value = next;
+        _creativeFitTextarea(node);
+      }
       _creativeSyncBoxDir(field);
-      _creativeFitTextarea(node);
     });
   }
 }

@@ -5301,7 +5301,7 @@ main.main > #mainPlugin{display:none;}
 #mainCreative .creative-actions .creative-primary:hover{background:var(--kx-text, var(--text));color:var(--kx-base, var(--bg));filter:brightness(1.12);}
 .creative-fields{overflow:hidden;padding:0;display:flex;flex-direction:column;}
 .creative-stage{position:relative;flex:1;min-height:0;align-self:center;width:min(680px, 100%);margin:0 auto;padding:0;box-sizing:border-box;display:flex;flex-direction:column;}
-.creative-stage-scroll{flex:1;min-height:0;overflow:auto;padding:28px 28px 96px;box-sizing:border-box;}
+.creative-stage-scroll{flex:1;min-height:0;overflow:auto;overflow-anchor:none;padding:28px 28px 96px;box-sizing:border-box;}
 .creative-stage-body{display:flex;flex-direction:column;gap:18px;}
 .creative-section,
 .creative-stage-body > .creative-field,
@@ -5422,7 +5422,9 @@ main.main > #mainPlugin{display:none;}
 .creative-avatar-create{display:flex;flex-direction:column;gap:6px;margin-top:8px;}
 #mainCreative .creative-avatar-create .creative-primary{align-self:flex-start;}
 .creative-suggest-block p{text-align:start;}
-.creative-field textarea{display:block;min-height:calc(1.5em + 30px);height:auto;resize:none;overflow:hidden;field-sizing:content;white-space:pre-wrap;overflow-wrap:break-word;}
+/* clip, not hidden: hidden turns a grown textarea into a scroll container.
+   A trackpad gesture that starts on one latches there, then flings the stage upward. */
+.creative-field textarea{display:block;min-height:calc(1.5em + 30px);height:auto;resize:none;overflow:clip;field-sizing:content;white-space:pre-wrap;overflow-wrap:break-word;}
 .creative-field input:focus,.creative-field textarea:focus,.creative-field select:focus,.creative-composer textarea:focus{outline:2px solid var(--text);outline-offset:1px;}
 .creative-help{color:var(--muted);font-size:12px;margin:0 0 8px;line-height:1.45;}
 .creative-help-more{margin:0 0 6px;font-size:12px;color:var(--muted);}

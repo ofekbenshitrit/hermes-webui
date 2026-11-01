@@ -1488,6 +1488,21 @@ def test_execution_step_includes_format_and_placement():
     assert rendered.index("Conceit") < rendered.index("Format and placement") < rendered.index("Actors")
 
 
+def test_strategy_scroll_does_not_latch_onto_fields():
+    root = Path(__file__).resolve().parents[1]
+    style = (root / "static" / "style.css").read_text(encoding="utf-8")
+    script = (root / "static" / "creative_studio.js").read_text(encoding="utf-8")
+    field = style.split(".creative-field textarea{", 1)[1].split("}", 1)[0]
+    assert "overflow:clip" in field
+    assert "overflow:hidden" not in field
+    stage = style.split(".creative-stage-scroll{", 1)[1].split("}", 1)[0]
+    assert "overflow-anchor:none" in stage
+    sync = script.split("function _creativeSyncLive", 1)[1].split("function _creativeProposalMarkup", 1)[0]
+    assert "_creativeRestoreStageScroll" in sync
+    assert "if(node.value !== next)" in sync
+    assert sync.index("_creativeFitTextarea(node)") > sync.index("if(node.value !== next)")
+
+
 def test_strategy_controls_are_separated_in_the_script_and_contract():
     root = Path(__file__).resolve().parents[1]
     script = (root / "static" / "creative_studio.js").read_text(encoding="utf-8")
