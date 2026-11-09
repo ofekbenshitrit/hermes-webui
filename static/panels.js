@@ -13508,6 +13508,30 @@ function _mcpStatusLabel(status){
   }[status]||'mcp_status_unknown';
   return t(key);
 }
+async function authorizeMcpServer(encodedName, btn){
+  const name=decodeURIComponent(encodedName||'');
+  if(!name) return;
+  if(btn) btn.disabled=true;
+  showToast(t('mcp_auth_starting'));
+  try{
+    const resp=await api('/api/mcp/servers/'+encodeURIComponent(name)+'/auth',{method:'POST',body:'{}',timeoutMs:45000,timeoutToast:false,retries:0});
+    if(!resp||resp.ok===false||resp.error){
+      showToast((resp&&resp.error)||t('mcp_auth_failed'),'error');
+      return;
+    }
+    if(resp.status==='approved'&&!resp.authorization_url){
+      showToast(t('mcp_auth_ready'));
+      loadMcpServers();
+      return;
+    }
+    if(typeof showMcpAuthCard==='function') showMcpAuthCard(resp);
+    else showToast(t('mcp_auth_failed'),'error');
+  }catch(e){
+    showToast((e&&e.message)||t('mcp_auth_failed'),'error');
+  }finally{
+    if(btn) btn.disabled=false;
+  }
+}
 function toggleMcpServer(name, enabled){
   api('/api/mcp/servers/'+encodeURIComponent(name),{
     method:'PATCH',
@@ -13558,6 +13582,9 @@ function loadMcpServers(){
       const toggleBtn=r.toggle_supported
         ?`<button type="button" class="mcp-toggle-btn ${isEnabled?'mcp-toggle-enabled':'mcp-toggle-disabled'}" title="${esc(t(isEnabled?'mcp_disable_server':'mcp_enable_server'))}" onclick="toggleMcpServer('${encodedName}',${!isEnabled})">${esc(t(isEnabled?'mcp_enabled_yes':'mcp_enabled_no'))}</button>`
         :`<span>${esc(t(isEnabled?'mcp_enabled_yes':'mcp_enabled_no'))}</span>`;
+      const authBtn=s.transport==='http'&&s.auth!=='header'
+        ?`<button type="button" class="mcp-auth-btn" onclick="authorizeMcpServer('${encodedName}', this)">${esc(t('mcp_auth_button'))}</button>`
+        :'';
       return `<div class="mcp-server-row">
         <div class="mcp-server-row-head">
           <span class="mcp-server-name">${esc(s.name)}</span>
@@ -13565,7 +13592,7 @@ function loadMcpServers(){
           ${statusBadge}
         </div>
         <div class="mcp-server-detail">${esc(detail)}${secretInfo?' | '+esc(secretInfo):''}</div>
-        <div class="mcp-server-meta"><span class="mcp-tool-count">${esc(t('mcp_tool_count',toolCount))}</span>${toggleBtn}</div>
+        <div class="mcp-server-meta"><span class="mcp-tool-count">${esc(t('mcp_tool_count',toolCount))}</span>${authBtn}${toggleBtn}</div>
       </div>`;
     }).join('');
   }).catch(()=>{list.innerHTML=`<div class="mcp-error-state" style="color:#ef4444;font-size:12px;padding:6px 0">${esc(t('mcp_load_failed'))}</div>`});

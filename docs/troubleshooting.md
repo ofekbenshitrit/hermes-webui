@@ -518,6 +518,16 @@ Interpret the two together:
 
 ---
 
+## MCP sign-in has no link to open
+
+**Symptom.** Asking Hermes to connect an HTTP MCP server that uses OAuth ends with a message that authorization cannot be completed in this environment. No approval page was opened, and the server is still disconnected.
+
+**Why.** The agent login needs a browser. In the WebUI that browser is yours: while the turn is waiting, a sign-in card appears above the composer with **Open authentication link**. The same **Sign in** action is on each HTTP MCP server in Settings. The provider redirects back to this WebUI, which finishes the login. A header or API-key server does not get that button.
+
+**Fix.** Start the connection again and open the authentication link while the card is visible. Approve access in the new tab, then return here. If the card never appears, the installed Hermes Agent has no dashboard OAuth flow; upgrade the agent. A sign-in started from Settings still shows the same card once the authorization URL is ready.
+
+---
+
 ## MCP panel shows another profile's servers, or "Live status for this profile is unavailable"
 
 **Symptom.** With several profiles, the MCP settings panel of profile A shows a server as *Active* with a tool count while the tool inventory is empty (or lists profile B's tools); `/reload-mcp` on one profile stops the other profile's servers; or the MCP panel and the external Notes drawer show the notice *"Live status for this profile is unavailable right now"* and `/reload-mcp` answers *"MCP runtime scope could not be confirmed"*.

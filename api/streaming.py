@@ -11230,6 +11230,14 @@ def _refresh_cached_agent_primary_runtime_snapshot(agent) -> None:
             rt['is_anthropic_oauth'] = getattr(agent, '_is_anthropic_oauth')
 
 
+def _run_conversation_with_mcp_auth(session_id, put, invoke):
+    """Run one agent call where an MCP login can hand the user an openable link."""
+    from api.mcp_oauth_bridge import turn_oauth_bridge
+
+    with turn_oauth_bridge(session_id, put):
+        return invoke()
+
+
 def _run_agent_streaming(
     session_id,
     msg_text,
@@ -13636,7 +13644,9 @@ def _run_agent_streaming(
                     _finalize_cancelled_turn(s, ephemeral=ephemeral, message='Task cancelled before start.', stream_id=stream_id)
                 put('cancel', _cancel_event_payload('Cancelled by user'))
                 return
-            result = agent.run_conversation(**_run_conversation_kwargs)
+            result = _run_conversation_with_mcp_auth(
+                session_id, put, lambda: agent.run_conversation(**_run_conversation_kwargs),
+            )
             _remember_pending_steer_result(result)
             _active_turn_identity = _resolve_active_turn_authority(
                 _active_turn_identity,
@@ -14211,7 +14221,9 @@ def _run_agent_streaming(
                                     _finalize_cancelled_turn(s, ephemeral=ephemeral, message='Task cancelled before start.', stream_id=stream_id)
                                     put('cancel', _cancel_event_payload('Cancelled by user'))
                                     return
-                                _heal_result = agent.run_conversation(**_heal_kwargs)
+                                _heal_result = _run_conversation_with_mcp_auth(
+                                    session_id, put, lambda: agent.run_conversation(**_heal_kwargs),
+                                )
                                 _remember_pending_steer_result(_heal_result)
                                 _active_turn_identity = _resolve_active_turn_authority(
                                     _active_turn_identity,
@@ -15579,7 +15591,9 @@ def _run_agent_streaming(
                                 _finalize_cancelled_turn(s, ephemeral=ephemeral, message='Task cancelled before start.', stream_id=stream_id)
                             put('cancel', _cancel_event_payload('Cancelled by user'))
                             return
-                        _heal_result = _heal_agent.run_conversation(**_heal_kwargs2)
+                        _heal_result = _run_conversation_with_mcp_auth(
+                            session_id, put, lambda: _heal_agent.run_conversation(**_heal_kwargs2),
+                        )
                         _remember_pending_steer_result(_heal_result)
                         _active_turn_identity = _resolve_active_turn_authority(
                             _active_turn_identity,

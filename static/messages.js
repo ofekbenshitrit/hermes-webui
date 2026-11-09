@@ -1,3 +1,65 @@
+let _mcpAuthGeneration=0;
+function dismissMcpAuthCard(){
+  _mcpAuthGeneration++;
+  const card=$('mcpAuthCard');
+  if(!card) return;
+  card.hidden=true;
+  const link=$('mcpAuthLink');
+  if(link){ link.removeAttribute('href'); link.hidden=false; }
+}
+function showMcpAuthCard(data){
+  const card=$('mcpAuthCard');
+  const detail=$('mcpAuthDetail');
+  const link=$('mcpAuthLink');
+  if(!card||!detail||!link) return;
+  const payload=data||{};
+  const status=String(payload.status||'');
+  const url=String(payload.authorization_url||'');
+  const openable=/^https?:\/\//i.test(url);
+  if(status==='approved'){
+    detail.textContent=t('mcp_auth_done');
+    link.hidden=true;
+    card.hidden=false;
+    _mcpAuthGeneration++;
+    return;
+  }
+  if(status==='error'&&!openable){
+    detail.textContent=String(payload.error||t('mcp_auth_failed'));
+    link.hidden=true;
+    card.hidden=false;
+    _mcpAuthGeneration++;
+    return;
+  }
+  if(!openable) return;
+  const server=String(payload.server_name||'').trim();
+  detail.textContent=server
+    ? t('mcp_auth_detail')+' '+server
+    : t('mcp_auth_detail');
+  link.hidden=false;
+  link.href=url;
+  link.textContent=t('mcp_auth_open');
+  card.hidden=false;
+  const flowId=String(payload.flow_id||'');
+  const generation=++_mcpAuthGeneration;
+  let tries=0;
+  const tick=async()=>{
+    if(generation!==_mcpAuthGeneration||!flowId||++tries>360) return;
+    try{
+      const resp=await api('/api/mcp/oauth/flows/'+encodeURIComponent(flowId),{timeoutToast:false,retries:0});
+      if(generation!==_mcpAuthGeneration) return;
+      if(resp&&(resp.status==='approved'||resp.status==='error')){
+        showMcpAuthCard(resp);
+        return;
+      }
+    }catch(_){
+      if(generation!==_mcpAuthGeneration) return;
+      return;
+    }
+    if(generation===_mcpAuthGeneration) setTimeout(tick,1000);
+  };
+  setTimeout(tick,1000);
+}
+
 const _AGENT_COMMAND_ALIASES = {
   'reload_mcp': 'reload-mcp',
   'reload_skills': 'reload-skills',
@@ -6323,6 +6385,13 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
       // Browser notification is owned by showClarifyCard()/_notifyPromptCard().
     });
 
+    source.addEventListener('mcp_auth',e=>{
+      let d={};
+      try{ d=JSON.parse(e.data||'{}'); }catch(_){ return; }
+      if(d.session_id&&d.session_id!==activeSid) return;
+      showMcpAuthCard(d);
+    });
+
     source.addEventListener('state_saved',e=>{
       let d={};
       try{ d=JSON.parse(e.data||'{}'); }catch(_){}
@@ -7296,7 +7365,7 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
       })();
     });
 
-    for(const _runJournalEventName of ['token','interim_assistant','reasoning','tool','tool_complete','todo_state','approval','clarify','state_saved','title','title_status','context_status','goal','goal_continue','done','stream_end','pending_steer_leftover','compressing','compressed','metering','apperror','warning','error','cancel']){
+    for(const _runJournalEventName of ['token','interim_assistant','reasoning','tool','tool_complete','todo_state','approval','clarify','mcp_auth','state_saved','title','title_status','context_status','goal','goal_continue','done','stream_end','pending_steer_leftover','compressing','compressed','metering','apperror','warning','error','cancel']){
       source.addEventListener(_runJournalEventName,_rememberRunJournalCursor);
     }
   }

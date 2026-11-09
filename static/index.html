@@ -538,6 +538,14 @@
       </div>
     </div>
     <div class="composer-wrap" id="composerWrap">
+      <div class="mcp-auth-card" id="mcpAuthCard" role="region" aria-labelledby="mcpAuthHeading" hidden>
+        <strong id="mcpAuthHeading" data-i18n="mcp_auth_heading">Sign in to connect</strong>
+        <p id="mcpAuthDetail" data-i18n="mcp_auth_detail">Open the authentication page and approve access. This chat continues when you finish.</p>
+        <div class="mcp-auth-actions">
+          <a id="mcpAuthLink" class="mcp-auth-open" target="_blank" rel="noopener noreferrer" data-i18n="mcp_auth_open">Open authentication link</a>
+          <button type="button" class="mcp-auth-dismiss" id="mcpAuthDismiss" onclick="dismissMcpAuthCard()" data-i18n="mcp_auth_dismiss">Dismiss</button>
+        </div>
+      </div>
       <div class="composer-flyout">
       <!-- Queue flyout: slides up from behind composer, same pattern as approval-card -->
       <div id="queueCard" class="queue-card" role="region" aria-label="Queued messages" aria-live="polite">

@@ -1092,6 +1092,15 @@ def _safe_login_inner_next(query: str | None) -> str:
     return path
 
 
+def _mcp_oauth_callback_is_public(path: str) -> bool:
+    """The provider's browser redirect cannot carry the WebUI session cookie."""
+    prefix = "/api/mcp/oauth/callback/"
+    if not str(path or "").startswith(prefix):
+        return False
+    flow_id = path[len(prefix):]
+    return bool(re.fullmatch(r"[A-Za-z0-9_-]{16,128}", flow_id))
+
+
 def check_auth(handler, parsed) -> bool:
     """Check if request is authorized. Returns True if OK.
     If not authorized, sends 401 (API) or 302 redirect (page) and returns False."""
@@ -1107,6 +1116,7 @@ def check_auth(handler, parsed) -> bool:
         )
         or parsed.path.startswith('/static/')
         or parsed.path.startswith('/session/static/')
+        or _mcp_oauth_callback_is_public(parsed.path)
     ):
         return True
     cookie_val = parse_cookie(handler)

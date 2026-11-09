@@ -300,6 +300,25 @@ class QuietHTTPServer(ThreadingHTTPServer):
         super().handle_error(request, client_address)
 
 
+def _push_mcp_oauth_public_base(handler):
+    """Remember this request's browser origin for MCP sign-in links."""
+    try:
+        from api.mcp_oauth_bridge import push_request_public_base
+        return push_request_public_base(handler)
+    except Exception:
+        return None
+
+
+def _pop_mcp_oauth_public_base(token) -> None:
+    if token is None:
+        return
+    try:
+        from api.mcp_oauth_bridge import pop_request_public_base
+        pop_request_public_base(token)
+    except Exception:
+        return
+
+
 class Handler(BaseHTTPRequestHandler):
     # HTTP/1.1 keep-alive stays on, so every response must declare framing.
     protocol_version = "HTTP/1.1"
@@ -385,6 +404,7 @@ class Handler(BaseHTTPRequestHandler):
         cookie_profile = get_profile_cookie(self)
         if cookie_profile:
             set_request_profile(cookie_profile)
+        oauth_base_token = _push_mcp_oauth_public_base(self)
         try:
             parsed = urlparse(self.path)
             # Body-pending-aware: a body-bearing GET failing auth would poison reuse (#7550).
@@ -405,12 +425,14 @@ class Handler(BaseHTTPRequestHandler):
                 self._safe_webui_print(traceback.format_exc())
         finally:
             clear_request_profile()
+            _pop_mcp_oauth_public_base(oauth_base_token)
 
     def _handle_write(self, route_func) -> None:
         self._req_t0 = time.time(); reset_trusted_auth_request_state(self)
         cookie_profile = get_profile_cookie(self)
         if cookie_profile:
             set_request_profile(cookie_profile)
+        oauth_base_token = _push_mcp_oauth_public_base(self)
         try:
             parsed = urlparse(self.path)
             _is_csp_report_post = parsed.path == "/api/csp-report" and self.command == "POST"
@@ -431,6 +453,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._safe_webui_print(traceback.format_exc())
         finally:
             clear_request_profile()
+            _pop_mcp_oauth_public_base(oauth_base_token)
 
     def do_POST(self) -> None:
         self._handle_write(handle_post)

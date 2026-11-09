@@ -6036,6 +6036,15 @@ main.main > #mainPlugin{display:none;}
 .mcp-tool-count{color:var(--text);}
 .mcp-toggle-btn{font-size:10px;font-weight:600;padding:2px 8px;border-radius:999px;border:1px solid transparent;cursor:pointer;transition:opacity .15s;}
 .mcp-toggle-btn:hover{opacity:.8;}
+.mcp-auth-card{margin:0 0 8px;border:1px solid var(--border);background:var(--surface);border-radius:12px;padding:12px 14px;}
+.mcp-auth-card[hidden]{display:none!important;}
+.mcp-auth-card p{margin:6px 0 10px;color:var(--muted);font-size:13px;line-height:1.45;}
+.mcp-auth-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
+.mcp-auth-open{display:inline-flex;align-items:center;background:var(--accent);color:#fff;text-decoration:none;border-radius:999px;padding:7px 12px;font-size:13px;font-weight:600;}
+.mcp-auth-open[hidden]{display:none!important;}
+.mcp-auth-dismiss{background:transparent;color:var(--muted);border:1px solid var(--border);border-radius:999px;padding:6px 10px;font-size:12px;cursor:pointer;}
+.mcp-auth-btn{font-size:10px;font-weight:600;padding:2px 8px;border-radius:999px;border:1px solid rgba(99,102,241,.35);background:rgba(99,102,241,.15);color:#a5b4fc;cursor:pointer;}
+.mcp-auth-btn:disabled{opacity:.55;cursor:progress;}
 .mcp-toggle-enabled{background:rgba(34,197,94,.15);color:#4ade80;border-color:rgba(34,197,94,.3);}
 .mcp-toggle-disabled{background:rgba(161,161,170,.12);color:#a1a1aa;border-color:rgba(161,161,170,.25);}
 .mcp-readonly-note,.mcp-restart-hint{margin-top:8px;color:var(--muted);font-size:11px;line-height:1.45;background:var(--code-bg);border:1px solid var(--border2);border-radius:6px;padding:8px 10px;}

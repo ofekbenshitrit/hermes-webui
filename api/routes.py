@@ -14539,6 +14539,11 @@ def handle_get(handler, parsed) -> bool:
     if proxy_result is not False:
         return proxy_result
 
+    if parsed.path.startswith("/api/mcp/oauth/callback/"):
+        return _handle_mcp_oauth_callback(handler, parsed)
+    if parsed.path.startswith("/api/mcp/oauth/flows/"):
+        return _handle_mcp_oauth_flow_status(handler, parsed)
+
     if parsed.path.startswith("/session/static/"):
         # Strip the leading "/session" so _serve_static() sees a path that
         # starts with "/static/" (its required prefix). _serve_static enforces
@@ -16298,6 +16303,11 @@ def handle_post(handler, parsed) -> bool:
         if diag:
             diag.finish()
         return True
+
+    if parsed.path.startswith("/api/mcp/servers/") and parsed.path.endswith("/auth"):
+        mcp_name = parsed.path[len("/api/mcp/servers/"):-len("/auth")]
+        if mcp_name and "/" not in mcp_name:
+            return _handle_mcp_server_auth(handler, mcp_name)
 
     if parsed.path == "/api/escape/authorize":
         return _handle_escape_authorize(handler, parsed, body)
@@ -31484,6 +31494,11 @@ def _server_summary(name, cfg, runtime_status=None):
     else:
         out["status"] = "configured"
     out["tool_count"] = runtime_status.get("tools") if runtime_status else None
+    auth_mode = str(cfg.get("auth") or "").strip().lower() if isinstance(cfg, dict) else ""
+    header_map = cfg.get("headers") if isinstance(cfg, dict) and isinstance(cfg.get("headers"), dict) else {}
+    if not auth_mode and any(str(key).lower() == "authorization" for key in header_map):
+        auth_mode = "header"
+    out["auth"] = auth_mode or "none"
     return out
 
 
@@ -32179,6 +32194,50 @@ def _handle_notes_item(handler, parsed):
         return j(handler, {"source": "joplin", "note": _joplin_get_note(note_id)})
     except ValueError as exc:
         return j(handler, {"source": "joplin", "error": str(exc)}, status=502)
+
+
+def _handle_mcp_oauth_callback(handler, parsed):
+    """Browser redirect from an MCP authorization server. The code stays on the server."""
+    from api.mcp_oauth_bridge import render_oauth_callback
+
+    flow_id = parsed.path[len("/api/mcp/oauth/callback/"):]
+    query = parse_qs(parsed.query or "")
+
+    def _one(key):
+        values = query.get(key) or []
+        return values[0] if values else None
+
+    status, page = render_oauth_callback(
+        flow_id,
+        code=_one("code"),
+        state=_one("state"),
+        error=_one("error"),
+        iss=_one("iss"),
+    )
+    return t(handler, page, status=status, content_type="text/html; charset=utf-8")
+
+
+def _handle_mcp_oauth_flow_status(handler, parsed):
+    from api.mcp_oauth_bridge import McpOAuthBridgeError, oauth_flow_status
+
+    flow_id = parsed.path[len("/api/mcp/oauth/flows/"):]
+    try:
+        return j(handler, oauth_flow_status(flow_id))
+    except McpOAuthBridgeError as exc:
+        return j(handler, {"ok": False, "error": str(exc)}, status=exc.status)
+
+
+def _handle_mcp_server_auth(handler, name):
+    """Start browser sign-in for a saved HTTP MCP server and return the link."""
+    from urllib.parse import unquote
+
+    from api.mcp_oauth_bridge import McpOAuthBridgeError, start_saved_server_oauth
+
+    try:
+        payload = start_saved_server_oauth(unquote(name))
+    except McpOAuthBridgeError as exc:
+        return j(handler, {"ok": False, "error": str(exc)}, status=exc.status)
+    return j(handler, payload)
 
 
 def _handle_mcp_servers_list(handler):
