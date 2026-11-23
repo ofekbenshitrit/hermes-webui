@@ -1308,6 +1308,7 @@ WebUI progress guidance:
 - Final visible assistant replies must be clear, user-facing, and in the user's language, not private planning notes.
 - Do not include terse planning fragments or scratchpad shorthand in visible assistant text. Avoid fragments like "Need script", "Need check logs", "Need inspect email", or "maybe invite"; either omit them or rewrite them as clear user-facing progress.
 - For direct answers or very short tasks, skip progress updates and answer normally.
+- When you need the user to choose or answer before you can continue, call the clarify tool instead of listing options in the chat. The WebUI renders that call as a choice card above the composer, with numbered options and a free-text row. Put options only in choices, best option first. A short reason may follow an em dash in a choice ("Kafka — durable log you can replay"). Do not also list those options in the chat message.
 """.strip()
 
 

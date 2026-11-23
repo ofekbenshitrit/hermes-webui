@@ -1356,6 +1356,65 @@ def get_project(project_id: str | None = None, name: str | None = None, stage: s
         return view
 
 
+def _copy_project(project_id: str, profile: str | None) -> tuple[str, dict]:
+    """Raw project from one profile store. The slug is the file that held it."""
+    if not re.fullmatch(r"[a-f0-9]{12}", project_id or ""):
+        raise StudioError("invalid project id")
+    slug = _profile_slug_for(profile)
+    with _studio_lock(slug):
+        store = _read_store(slug)
+        project = store["projects"].get(project_id)
+        if not isinstance(project, dict):
+            raise StudioError("project not found", status=404)
+        if _prepare_project(project):
+            _write_store(store, _store_path(slug))
+        return slug, copy.deepcopy(project)
+
+
+def locate_project(project_id: str, profile: str | None = None) -> tuple[str, dict]:
+    """Public creative plus the profile that owns it.
+
+    A chat worker does not inherit the browser profile. Try the requested
+    profile first, then the other Creative Studio stores. One match is used.
+    """
+    if not re.fullmatch(r"[a-f0-9]{12}", project_id or ""):
+        raise StudioError("invalid project id")
+    preferred = _profile_slug(profile) if profile else ""
+    found: list[tuple[str, dict]] = []
+    if preferred:
+        try:
+            found.append(_copy_project(project_id, preferred))
+        except StudioError as exc:
+            if exc.status != 404:
+                raise
+    if not found:
+        directory = _state_dir() / "creative_studio"
+        if directory.is_dir():
+            for path in sorted(directory.glob("*.json")):
+                if path.stem == preferred:
+                    continue
+                try:
+                    found.append(_copy_project(project_id, path.stem))
+                except StudioError:
+                    continue
+    if len(found) != 1:
+        if not found:
+            raise StudioError("project not found", status=404)
+        raise StudioError("project id is ambiguous", status=409)
+    slug, raw = found[0]
+    view = _public_project(raw)
+    note = _product_note(raw, profile=slug)
+    if note:
+        excerpt = note if len(note) <= 1500 else note[:1499].rstrip() + "…"
+        view["product_note"] = {
+            "name": _product_name(raw),
+            "available": True,
+            "excerpt": excerpt,
+            "product_id": _product_id(raw),
+        }
+    return slug, view
+
+
 def _field_context_view() -> dict:
     view = {}
     for field, spec in FIELD_CONTEXT.items():

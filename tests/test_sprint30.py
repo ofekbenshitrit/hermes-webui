@@ -262,7 +262,7 @@ class TestClarifyI18nKeys:
 
     def test_clarify_heading_english_value(self):
         src = read(REPO / "static/i18n.js")
-        assert "clarify_heading: 'Clarification needed'" in src, \
+        assert "clarify_heading: 'Needs you'" in src, \
             "English clarify_heading value incorrect"
 
 

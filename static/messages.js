@@ -6752,6 +6752,10 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
           // transcript frame on large sessions.
           clearLiveToolCards({preserveDom:true});
           S.busy=false;
+          if(typeof captureLongAssistantDocument==='function'){
+            const _written=[...S.messages].reverse().find(m=>m&&m.role==='assistant'&&!m._goalStatus&&!m._transient);
+            if(_written) void captureLongAssistantDocument(_written.content);
+          }
           // No-reply guard (#373): if agent returned nothing, show inline error
           if(!S.messages.some(m=>m.role==='assistant'&&String(m.content||'').trim())&&!assistantText){removeThinking();S.messages.push({role:'assistant',content:'**No response received.** Check your API key and model selection.'});}
           if(_markerOnlyAssistantError&&typeof showToast==='function') showToast('No response received after context compression. Please retry.',5000,'error');
@@ -9134,10 +9138,9 @@ function _ensureClarifyCardDom() {
   card.innerHTML = `
     <div class="clarify-inner">
       <div class="clarify-header">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 17h.01"/><path d="M9.09 9a3 3 0 1 1 5.82 1c0 2-3 2-3 4"/><circle cx="12" cy="12" r="10"/></svg>
-        <span id="clarifyHeading" data-i18n="clarify_heading">Clarification needed</span>
+        <span id="clarifyHeading" class="clarify-needs" data-i18n="clarify_heading">Needs you</span>
         <span class="clarify-countdown" id="clarifyCountdown"></span>
-        <button type="button" class="clarify-collapse" id="clarifyCollapse" aria-expanded="true" aria-label="Collapse clarification" aria-controls="clarifyQuestion clarifyChoices clarifyInput clarifyHint" onclick="toggleClarifyCardCollapsed()" title="Collapse clarification"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
+        <button type="button" class="clarify-collapse clarify-later" id="clarifyCollapse" aria-expanded="true" aria-label="Later" aria-controls="clarifyQuestion clarifyChoices clarifyInput clarifyHint" data-i18n="clarify_later" data-i18n-title="clarify_later" data-i18n-aria-label="clarify_later">Later</button>
       </div>
       <div class="clarify-question" id="clarifyQuestion"></div>
       <div class="clarify-choices" id="clarifyChoices"></div>
@@ -9162,12 +9165,15 @@ function _syncClarifyCollapseButton(card) {
   if (!collapse || !card) return;
   const collapsed = card.classList.contains("collapsed");
   collapse.setAttribute("aria-expanded", collapsed ? "false" : "true");
-  // Icon swap: chevron-down when expanded (click to collapse), chevron-up when collapsed (click to expand)
-  const polyline = collapse.querySelector("svg polyline");
-  if (polyline) polyline.setAttribute("points", collapsed ? "18 15 12 9 6 15" : "6 9 12 15 18 9");
-  const label = collapsed ? "Expand clarification" : "Collapse clarification";
-  collapse.setAttribute("aria-label", label);
-  collapse.title = label;
+  const key = collapsed ? "clarify_show" : "clarify_later";
+  const fallback = collapsed ? "Show" : "Later";
+  const label = (typeof t === "function" && t(key)) || fallback;
+  collapse.setAttribute("data-i18n", key);
+  collapse.setAttribute("data-i18n-title", key);
+  collapse.setAttribute("data-i18n-aria-label", key);
+  collapse.textContent = label && label !== key ? label : fallback;
+  collapse.setAttribute("aria-label", collapse.textContent);
+  collapse.title = collapse.textContent;
 }
 
 let _clarifyResizeListenerReady = false;
@@ -9209,9 +9215,95 @@ function _syncClarifyTranscriptSpace(card, opts) {
   setTimeout(measure, 420);
 }
 
+function _parseClarifyChoice(raw) {
+  const original = String(raw == null ? "" : raw).trim();
+  let text = original;
+  let recommended = false;
+  const recommendedMark = /\s*[(（]\s*recommended\s*[)）]\s*$/i;
+  if (recommendedMark.test(text)) {
+    recommended = true;
+    text = text.replace(recommendedMark, "").trim();
+  }
+  let title = text;
+  let description = "";
+  const dashed = text.match(/^(.{1,120}?)\s+[—–]\s+([\s\S]+)$/);
+  const hyphen = !dashed && text.match(/^(.{1,80}?)\s+-\s+([\s\S]+)$/);
+  const split = dashed || hyphen;
+  if (split && split[1].trim() && split[2].trim()) {
+    title = split[1].trim();
+    description = split[2].trim();
+  } else {
+    const paren = text.match(/^(.{1,80}?)\s+\(([^)]{8,})\)$/);
+    if (paren) {
+      title = paren[1].trim();
+      description = paren[2].trim();
+    }
+  }
+  return {
+    value: original,
+    answer: text || original,
+    title: title || original,
+    description,
+    recommended,
+  };
+}
+
+function _appendClarifyChoiceButton(parent, parsed, index, onClick) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "clarify-choice";
+  btn.dataset.choice = parsed.answer;
+  btn.onclick = onClick;
+  const badge = document.createElement("span");
+  badge.className = "clarify-choice-badge";
+  badge.textContent = String(index);
+  const body = document.createElement("span");
+  body.className = "clarify-choice-body";
+  // One direction for the label and its reason. A Hebrew reason under an
+  // English name stays with that name; a Hebrew label aligns the whole row.
+  body.dir = "auto";
+  const text = document.createElement("span");
+  text.className = "clarify-choice-text";
+  text.textContent = parsed.title;
+  body.appendChild(text);
+  if (parsed.description) {
+    const desc = document.createElement("span");
+    desc.className = "clarify-choice-desc";
+    desc.textContent = parsed.description;
+    body.appendChild(desc);
+  }
+  btn.appendChild(badge);
+  btn.appendChild(body);
+  if (parsed.recommended) {
+    const mark = document.createElement("span");
+    mark.className = "clarify-recommended";
+    mark.setAttribute("data-i18n", "clarify_recommended");
+    const label = (typeof t === "function" && t("clarify_recommended")) || "Recommended";
+    mark.textContent = label && label !== "clarify_recommended" ? label : "Recommended";
+    btn.appendChild(mark);
+  }
+  parent.appendChild(btn);
+  return btn;
+}
+
+function _onClarifyChoiceKeydown(event) {
+  if (!event || event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
+  if (!/^[1-9]$/.test(event.key)) return;
+  const card = $("clarifyCard");
+  if (!card || !card.classList.contains("visible") || card.classList.contains("collapsed") || card.hidden) return;
+  const active = document.activeElement;
+  if (active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.isContentEditable)) return;
+  const buttons = card.querySelectorAll("#clarifyChoices button.clarify-choice");
+  const button = buttons[Number(event.key) - 1];
+  if (!button || button.disabled) return;
+  event.preventDefault();
+  button.click();
+}
+
 function _ensureClarifyResizeListener() {
   if (_clarifyResizeListenerReady || typeof window === "undefined") return;
   _clarifyResizeListenerReady = true;
+  document.addEventListener("keydown", _onClarifyChoiceKeydown);
   window.addEventListener("resize", () => {
     const card = $("clarifyCard");
     if (card && card.classList.contains("visible")) {
@@ -9407,48 +9499,39 @@ function showClarifyCard(pending) {
     _clearClarifyHideTimer();
     card.classList.remove("collapsed");
   }
-  if (questionEl) questionEl.textContent = question;
+  if (questionEl) {
+    questionEl.textContent = question;
+    questionEl.setAttribute("dir", "auto");
+  }
+  card.classList.toggle("has-choices", choices.length > 0);
+  if (!sameClarify) card.classList.remove("is-custom");
   if (choicesEl) {
     choicesEl.innerHTML = '';
     choicesEl.style.display = choices.length ? '' : 'none';
     if (choices.length) {
       choices.forEach((choice, idx) => {
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'clarify-choice';
-        btn.dataset.choice = choice;
-        btn.onclick = () => respondClarify(choice);
-        const badge = document.createElement('span');
-        badge.className = 'clarify-choice-badge';
-        badge.textContent = String(idx + 1);
-        const text = document.createElement('span');
-        text.className = 'clarify-choice-text';
-        text.textContent = choice;
-        btn.appendChild(badge);
-        btn.appendChild(text);
-        choicesEl.appendChild(btn);
+        const parsed = _parseClarifyChoice(choice);
+        _appendClarifyChoiceButton(choicesEl, parsed, idx + 1, () => respondClarify(parsed.answer));
       });
-      const other = document.createElement('button');
-      other.type = 'button';
-      other.className = 'clarify-choice other';
-      other.dataset.choice = 'other';
-      other.setAttribute('data-i18n', 'clarify_other');
-      const otherBadge = document.createElement('span');
-      otherBadge.className = 'clarify-choice-badge other';
-      otherBadge.textContent = '•';
-      const otherText = document.createElement('span');
-      otherText.className = 'clarify-choice-text';
-      otherText.textContent = t('clarify_other') || 'Other';
-      other.appendChild(otherBadge);
-      other.appendChild(otherText);
-      other.onclick = () => {
-        const el = $("clarifyInput");
-        if (el) {
-          el.focus();
-          if (typeof el.select === 'function') el.select();
+      const otherLabel = (typeof t === "function" && t("clarify_other")) || "Something else…";
+      const other = _appendClarifyChoiceButton(
+        choicesEl,
+        { answer: "other", title: otherLabel && otherLabel !== "clarify_other" ? otherLabel : "Something else…", description: "", recommended: false },
+        choices.length + 1,
+        () => {
+          card.classList.add("is-custom");
+          const el = $("clarifyInput");
+          if (el) {
+            el.focus();
+            if (typeof el.select === "function") el.select();
+          }
+          _syncClarifyTranscriptSpace(card, {immediate: true});
         }
-      };
-      choicesEl.appendChild(other);
+      );
+      other.classList.add("other");
+      other.dataset.choice = "other";
+      const otherText = other.querySelector(".clarify-choice-text");
+      if (otherText) otherText.setAttribute("data-i18n", "clarify_other");
     }
   }
   if (input) {
@@ -9463,7 +9546,9 @@ function showClarifyCard(pending) {
     };
   }
   if (typeof lockComposerForClarify === "function") {
-    lockComposerForClarify(question ? `Clarification needed: ${question}` : "Clarification needed");
+    const clarifyHeading = (typeof t === "function" && t("clarify_heading")) || "Needs you";
+    const clarifyLockLabel = clarifyHeading && clarifyHeading !== "clarify_heading" ? clarifyHeading : "Needs you";
+    lockComposerForClarify(question ? `${clarifyLockLabel}: ${question}` : clarifyLockLabel);
   }
   _clarifySetControlsDisabled(false, false);
   _ensureClarifyResizeListener();
@@ -9472,10 +9557,16 @@ function showClarifyCard(pending) {
   _syncClarifyCollapseButton(card);
   _syncClarifyTranscriptSpace(card, {immediate: true});
   if (typeof applyLocaleToDOM === "function") applyLocaleToDOM();
-  // Move focus to clarify input synchronously (not in setTimeout) and
-  // only if the user wasn't mid-type in the composer textarea.
-  if (input && !sameClarify && document.activeElement !== $('msg')) {
-    input.focus({preventScroll: true});
+  // Move focus into the card synchronously, unless the user is mid-type
+  // in the composer. Choice questions land on the first option so number
+  // keys answer immediately; open questions land in the text field.
+  if (!sameClarify && document.activeElement !== $('msg')) {
+    if (choices.length && !card.classList.contains("is-custom")) {
+      const firstChoice = choicesEl && choicesEl.querySelector(".clarify-choice");
+      if (firstChoice) firstChoice.focus({preventScroll: true});
+    } else if (input) {
+      input.focus({preventScroll: true});
+    }
   }
   if (typeof syncTopbar === 'function') syncTopbar();
 }

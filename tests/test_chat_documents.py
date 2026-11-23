@@ -65,6 +65,37 @@ def test_attached_creative_is_prompt_context_and_not_a_field_write(docs):
     assert studio.get_project(project["id"])["stages"]["who"]["fields"]["segment"]["text"] == "Weekend runners"
 
 
+def test_attached_creative_is_read_from_its_own_profile(docs, monkeypatch):
+    documents, studio = docs
+    import api.profiles as profiles
+
+    project = studio.create_project("PA - 01", "Shoulder Sensiteq")
+    studio.update_field(project["id"], "who", "segment", "Weekend runners", author="user")
+    documents.attach_creative("sess_docs_profile", project["id"])
+    assert documents.attached_creative("sess_docs_profile") == (project["id"], "creative-test")
+    monkeypatch.setattr(profiles, "get_active_profile_name", lambda: "default")
+    prompt = documents.document_ephemeral_context("sess_docs_profile", profile="default")
+    assert "Shoulder Sensiteq" in prompt
+    assert "Weekend runners" in prompt
+    assert "Do not ask which product" in prompt
+    assert "Not selected yet" not in prompt
+
+
+def test_legacy_creative_binding_is_found_when_the_worker_profile_differs(docs, monkeypatch):
+    documents, studio = docs
+    import api.profiles as profiles
+
+    project = studio.create_project("PA - 01", "CraveShield")
+    with documents._LOCK:
+        store = documents._read()
+        store["session_creative"]["sess_docs_legacy"] = project["id"]
+        documents._write(store)
+    monkeypatch.setattr(profiles, "get_active_profile_name", lambda: "default")
+    prompt = documents.document_ephemeral_context("sess_docs_legacy", profile="default")
+    assert "CraveShield" in prompt
+    assert documents.attached_creative_id("sess_docs_legacy") == project["id"]
+
+
 def test_linking_a_document_shows_on_the_creative_without_changing_fields(docs):
     documents, studio = docs
     project = studio.create_project("Launch")
@@ -144,3 +175,25 @@ def test_document_http_round_trip(docs, monkeypatch):
     loaded = json.loads(bytes(reader.body).decode())
     assert loaded["text"] == "One"
     assert documents.get_document(created["id"])["title"] == "Draft"
+
+
+def test_long_prose_reply_is_a_document_and_a_short_reply_is_not():
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is required to check the document heuristic")
+    script = Path("static/chat_documents.js").read_text()
+    copy = "הנה מודעת לונג פורם.\n\n**רעיון לויזואל**\n\n" + ("משפט ארוך על המוצר. " * 40)
+    copy += "\n\n**טקסט המודעה**\n\n" + ("עוד משפט של הקופי. " * 40)
+    code = script + "\n" + (
+        "const copy = " + json.dumps(copy) + ";\n"
+        "if(!_looksLikeLongDocument(copy)) process.exit(2);\n"
+        "if(_documentTitleFromText(copy) !== 'רעיון לויזואל') process.exit(3);\n"
+        "if(_looksLikeLongDocument('איזה מוצר לכתוב?')) process.exit(4);\n"
+        "if(_looksLikeLongDocument('```\\n' + 'x'.repeat(2000) + '\\n```')) process.exit(5);\n"
+    )
+    result = subprocess.run([node, "-e", code], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr

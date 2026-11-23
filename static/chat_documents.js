@@ -31,13 +31,19 @@ async function refreshChatDocuments(){
     if(active) _chatDoc = await api('/api/chat-documents/' + active);
     else _chatDoc = null;
     if(_chatDocCreativeId){
-      const project = await api('/api/creative-studio/projects/' + _chatDocCreativeId);
-      _chatDocCreativeName = (project && project.name) || 'Creative';
+      try{
+        const project = await api('/api/creative-studio/projects/' + _chatDocCreativeId);
+        _chatDocCreativeName = (project && project.name) || 'Creative';
+      }catch(_){
+        _chatDocCreativeName = 'Creative';
+      }
     }else{
       _chatDocCreativeName = '';
     }
   }catch(_){
     _chatDoc = null;
+    _chatDocCreativeId = '';
+    _chatDocCreativeName = '';
   }
   _paintChatDocument();
 }
@@ -327,6 +333,63 @@ async function linkOpenDocument(){
     method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({project_id:projectId}),
   });
   _paintChatDocument();
+}
+
+function _assistantPlainText(content){
+  if(typeof content === 'string') return content;
+  if(!Array.isArray(content)) return '';
+  return content.map(part => {
+    if(typeof part === 'string') return part;
+    if(part && part.type === 'text') return part.text || '';
+    return '';
+  }).join('\n');
+}
+
+function _sameDocumentText(left, right){
+  return String(left || '').replace(/\s+/g, ' ').trim() === String(right || '').replace(/\s+/g, ' ').trim();
+}
+
+function _looksLikeLongDocument(text){
+  const raw = String(text || '').trim();
+  if(raw.length < 800) return false;
+  if(/^\*\*(Error|No response)/.test(raw)) return false;
+  const prose = raw.replace(/```[\s\S]*?```/g, '').trim();
+  if(prose.length < 700 || prose.length * 2 < raw.length) return false;
+  const paragraphs = prose.split(/\n{2,}/).filter(part => part.trim().length > 40);
+  const headings = (prose.match(/^#{1,3}\s+\S/gm) || []).length + (prose.match(/\*\*[^*]{3,80}\*\*/g) || []).length;
+  return paragraphs.length >= 3 || (headings >= 1 && prose.length >= 700);
+}
+
+function _documentTitleFromText(text){
+  const heading = String(text || '').match(/^#{1,3}\s+(.+)$/m);
+  if(heading) return heading[1].replace(/[*_#]/g, '').trim().slice(0, 80);
+  const bold = String(text || '').match(/\*\*([^*]{3,80})\*\*/);
+  if(bold) return bold[1].trim();
+  const line = String(text || '').split('\n').map(row => row.trim()).find(row => row && row !== '***');
+  return (line || 'Untitled').replace(/^#+\s*/, '').slice(0, 80);
+}
+
+async function captureLongAssistantDocument(content){
+  try{
+    const text = _assistantPlainText(content).trim();
+    if(!_looksLikeLongDocument(text)) return;
+    if(_chatDoc && _sameDocumentText(_chatDoc.text, text)){
+      _paintChatDocument();
+      return;
+    }
+    const title = _documentTitleFromText(text);
+    if(_chatDoc && !String(_chatDoc.text || '').trim()){
+      const saved = await api('/api/chat-documents/' + _chatDoc.id + '/text', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({text, title: _chatDoc.title || title}),
+      });
+      _chatDoc = saved;
+      _paintChatDocument();
+      return;
+    }
+    await createChatDocument({title, text});
+  }catch(_){}
 }
 
 function _documentIntent(text){

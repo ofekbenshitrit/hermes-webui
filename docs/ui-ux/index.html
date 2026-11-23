@@ -41,6 +41,8 @@
     /* Make the in-page demos of approval/clarify cards visible without JS */
     .approval-card.doc-visible,
     .clarify-card.doc-visible{display:block;}
+    .clarify-card.doc-visible{position:relative;bottom:auto;height:auto;max-height:none;overflow:visible;pointer-events:auto;}
+    .clarify-card.doc-visible .clarify-inner{transform:none;opacity:1;max-height:none;padding-bottom:14px;}
     .reconnect-banner.doc-visible{display:flex;align-items:center;justify-content:space-between;gap:12px;background:rgba(201,168,76,.12);border:1px solid rgba(201,168,76,.3);color:var(--gold);padding:8px 14px;border-radius:8px;font-size:12px;}
     .reconnect-banner.doc-visible .reconnect-btn{background:none;border:1px solid rgba(201,168,76,.35);color:var(--gold);padding:4px 10px;border-radius:6px;font-size:11px;cursor:pointer;}
     .bg-error-banner.doc-visible{border-radius:8px;}
@@ -746,22 +748,20 @@ Run typecheck to confirm, then patch.</pre></div>
     </div>
   </div>
 
-  <div class="doc-card"><span class="doc-label">.clarify-card — choice buttons + free-text fallback</span>
-    <div class="clarify-card doc-visible">
+  <div class="doc-card"><span class="doc-label">.clarify-card — numbered choices above the composer</span>
+    <div class="clarify-card doc-visible has-choices">
       <div class="clarify-inner">
-        <div class="clarify-header">? Clarification needed</div>
-        <div class="clarify-question">Which environment should I deploy this to?</div>
+        <div class="clarify-header">
+          <span class="clarify-needs">Needs you</span>
+          <button type="button" class="clarify-collapse">Later</button>
+        </div>
+        <div class="clarify-question">Which queue should the ingest service use?</div>
         <div class="clarify-choices">
-          <button class="clarify-choice"><span class="clarify-choice-badge">A</span><span class="clarify-choice-text">Staging — safe sandbox, auto-teardown nightly</span></button>
-          <button class="clarify-choice"><span class="clarify-choice-badge">B</span><span class="clarify-choice-text">Production EU — customer-facing, requires change ticket</span></button>
-          <button class="clarify-choice"><span class="clarify-choice-badge">C</span><span class="clarify-choice-text">Production US — same caveats as EU</span></button>
-          <button class="clarify-choice other"><span class="clarify-choice-badge other">✎</span><span class="clarify-choice-text">Other — I'll type it below</span></button>
+          <button class="clarify-choice"><span class="clarify-choice-badge">1</span><span class="clarify-choice-body"><span class="clarify-choice-text">Kafka</span><span class="clarify-choice-desc">A durable log — a day of events to replay after a bad deploy</span></span><span class="clarify-recommended">Recommended</span></button>
+          <button class="clarify-choice"><span class="clarify-choice-badge">2</span><span class="clarify-choice-body"><span class="clarify-choice-text">SQS</span><span class="clarify-choice-desc">Managed, nothing to run — but no replay</span></span></button>
+          <button class="clarify-choice"><span class="clarify-choice-badge">3</span><span class="clarify-choice-body"><span class="clarify-choice-text">Postgres queue</span><span class="clarify-choice-desc">The database you already have — won't keep up with the bursts</span></span></button>
+          <button class="clarify-choice other"><span class="clarify-choice-badge">4</span><span class="clarify-choice-body"><span class="clarify-choice-text">Something else…</span></span></button>
         </div>
-        <div class="clarify-response">
-          <input class="clarify-input" type="text" placeholder="Type your response…">
-          <button class="clarify-submit">Send</button>
-        </div>
-        <div class="clarify-hint">Pick a choice, or type your own answer below.</div>
       </div>
     </div>
   </div>

@@ -355,40 +355,65 @@ def clone_document(document_id: str, creative_id: str) -> dict | None:
     )
 
 
-def attach_creative(session_id: str, project_id: str) -> dict:
+def _binding(value) -> tuple[str, str]:
+    project_id = ""
+    profile = ""
+    if isinstance(value, str):
+        project_id = value.strip()
+    elif isinstance(value, dict):
+        project_id = str(value.get("project_id") or "").strip()
+        profile = str(value.get("profile") or "").strip()
+    if not re.fullmatch(r"[a-f0-9]{12}", project_id):
+        return "", ""
+    profile = re.sub(r"[^A-Za-z0-9._-]+", "_", profile).strip("._")[:80]
+    return project_id, profile
+
+
+def attach_creative(session_id: str, project_id: str, profile: str | None = None) -> dict:
     session_id = _session(session_id)
     project_id = (project_id or "").strip()
     if project_id and not re.fullmatch(r"[a-f0-9]{12}", project_id):
         raise DocumentError("invalid creative id")
+    bound_profile = ""
     if project_id:
-        from api.creative_studio import get_project
+        from api.creative_studio import locate_project
+        from api.profiles import get_active_profile_name
 
-        get_project(project_id)
+        bound_profile, _project = locate_project(project_id, profile or get_active_profile_name())
     with _LOCK:
         store = _read()
         if project_id:
-            store["session_creative"][session_id] = project_id
+            store["session_creative"][session_id] = {
+                "project_id": project_id,
+                "profile": bound_profile,
+            }
         else:
             store["session_creative"].pop(session_id, None)
         _write(store)
-    return {"session_id": session_id, "creative_id": project_id}
+    return {"session_id": session_id, "creative_id": project_id, "profile": bound_profile}
 
 
-def attached_creative_id(session_id: str) -> str:
+def attached_creative(session_id: str) -> tuple[str, str]:
     try:
         session_id = _session(session_id)
     except DocumentError:
-        return ""
+        return "", ""
     with _LOCK:
-        value = _read()["session_creative"].get(session_id) or ""
-    return value if re.fullmatch(r"[a-f0-9]{12}", value) else ""
+        value = _read()["session_creative"].get(session_id)
+    return _binding(value)
+
+
+def attached_creative_id(session_id: str) -> str:
+    return attached_creative(session_id)[0]
 
 
 def clear_creative_bindings(project_id: str) -> None:
     with _LOCK:
         store = _read()
         store["session_creative"] = {
-            key: value for key, value in store["session_creative"].items() if value != project_id
+            key: value
+            for key, value in store["session_creative"].items()
+            if _binding(value)[0] != project_id
         }
         for doc in store["documents"].values():
             if isinstance(doc, dict) and doc.get("creative_id") == project_id:
@@ -396,15 +421,36 @@ def clear_creative_bindings(project_id: str) -> None:
         _write(store)
 
 
-def _creative_lines(project_id: str) -> str:
-    from api.creative_studio import get_project
+def _fit_creative_prompt(header: list[str], body: list[str]) -> str:
+    head = "\n".join(line for line in header if line).strip()
+    rest = "\n".join(line for line in body if line).strip()
+    text = head if not rest else head + "\n" + rest
+    if len(text) <= _CREATIVE_CAP:
+        return text
+    room = _CREATIVE_CAP - len(head) - 2
+    if room < 80:
+        return head[: _CREATIVE_CAP - 1].rstrip() + "…"
+    return head + "\n" + rest[: room - 1].rstrip() + "…"
 
-    project = get_project(project_id)
-    lines = [f"Attached creative: {project.get('name') or 'Untitled'} ({project_id})."]
+
+def _creative_lines(project_id: str, profile: str | None = None) -> str:
+    from api.creative_studio import locate_project
+
+    _slug, project = locate_project(project_id, profile)
+    header = [
+        f"Attached creative: {project.get('name') or 'Untitled'} ({project_id}).",
+        "This attached creative is the product for this conversation. "
+        "Use its selected values. Do not ask which product to write about.",
+    ]
     product = ((project.get("stages") or {}).get("brief") or {}).get("fields", {}).get("product_offer", {})
     product_text = (product.get("text") or "").strip() if isinstance(product, dict) else ""
     if product_text:
-        lines.append(f"Product: {product_text}")
+        header.append(f"Product: {product_text}")
+    header.append(
+        "These are selected creative values. A document edit does not change them. "
+        "Use update_creative_field or save_creative_proposal only when the user asks to change a field."
+    )
+    body = []
     for stage, fields in (project.get("stages") or {}).items():
         slots = (fields or {}).get("fields") or {}
         if not isinstance(slots, dict):
@@ -414,15 +460,12 @@ def _creative_lines(project_id: str) -> str:
                 continue
             text = (slot.get("text") or "").strip()
             if text:
-                lines.append(f"{stage}.{name}: {text}")
-    lines.append(
-        "These are selected creative values. A document edit does not change them. "
-        "Use update_creative_field or save_creative_proposal only when the user asks to change a field."
-    )
-    text = "\n".join(lines)
-    if len(text) > _CREATIVE_CAP:
-        return text[: _CREATIVE_CAP - 1].rstrip() + "…"
-    return text
+                body.append(f"{stage}.{name}: {text}")
+    note = project.get("product_note") or {}
+    excerpt = (note.get("excerpt") or "").strip() if isinstance(note, dict) else ""
+    if excerpt:
+        body.append("Product profile:\n" + excerpt)
+    return _fit_creative_prompt(header, body)
 
 
 def document_ephemeral_context(session_id: str, profile: str | None = None) -> str:
@@ -437,10 +480,12 @@ def document_ephemeral_context(session_id: str, profile: str | None = None) -> s
         studio_bound = bool(studio_ephemeral_context(session_id, profile=profile))
     except Exception:
         studio_bound = False
-    creative_id = "" if studio_bound else attached_creative_id(session_id)
+    creative_id, bound_profile = attached_creative(session_id)
+    if studio_bound:
+        creative_id = ""
     if creative_id:
         try:
-            parts.append(_creative_lines(creative_id))
+            parts.append(_creative_lines(creative_id, bound_profile or profile))
         except Exception:
             parts.append(f"Attached creative id: {creative_id}.")
     document_id = active_document_id(session_id)
