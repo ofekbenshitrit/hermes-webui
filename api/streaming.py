@@ -13420,6 +13420,15 @@ def _run_agent_streaming(
                 )
             except Exception:
                 logger.debug("creative studio context skipped", exc_info=True)
+            try:
+                from api.chat_documents import append_document_ephemeral
+                agent.ephemeral_system_prompt = append_document_ephemeral(
+                    agent.ephemeral_system_prompt,
+                    session_id,
+                    profile=_resolved_profile_name,
+                )
+            except Exception:
+                logger.debug("chat document context skipped", exc_info=True)
             _pending_started_at = getattr(s, 'pending_started_at', None)
             meter().set_pending_started_at(stream_id, _pending_started_at)
             # Normal chat-start sets pending_started_at before spawning this thread;

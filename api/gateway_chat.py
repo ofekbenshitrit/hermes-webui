@@ -2126,6 +2126,15 @@ def _run_gateway_chat_streaming(
                 )
             except Exception:
                 logger.debug("creative studio context skipped", exc_info=True)
+            try:
+                from api.chat_documents import append_document_ephemeral
+                _gateway_system_prompt = append_document_ephemeral(
+                    _gateway_system_prompt,
+                    session_id,
+                    profile=getattr(s, "profile", None),
+                )
+            except Exception:
+                logger.debug("chat document context skipped", exc_info=True)
             prefill_messages = _prefill_messages_with_webui_context(prefill_context, cfg)
             prefill_messages = _normalize_prefill_messages_before_user_turn(prefill_messages)
             prefill_messages = [

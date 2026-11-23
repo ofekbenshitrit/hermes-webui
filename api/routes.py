@@ -14842,6 +14842,13 @@ def handle_get(handler, parsed) -> bool:
     if parsed.path == "/api/project-os/dashboard":
         return _handle_project_os_dashboard(handler, parsed)
 
+    if parsed.path.startswith("/api/chat-documents") or parsed.path.startswith("/api/chat-bindings"):
+        from api.chat_documents import handle_document_get
+
+        result = handle_document_get(handler, parsed)
+        if result is False:
+            return bad(handler, "unknown document endpoint", status=404)
+        return True
     if parsed.path.startswith("/api/creative-studio/"):
         from api.creative_studio import handle_creative_get
 
@@ -16413,6 +16420,13 @@ def handle_post(handler, parsed) -> bool:
         result = repair_safe_session_recovery(SESSION_DIR, state_db_path=_active_state_db_path())
         return j(handler, result, status=200 if result.get("clean") else 409)
 
+    if parsed.path.startswith("/api/chat-documents") or parsed.path == "/api/chat-bindings":
+        from api.chat_documents import handle_document_post
+
+        result = handle_document_post(handler, parsed, body)
+        if result is False:
+            return bad(handler, "unknown document endpoint", status=404)
+        return True
     if parsed.path.startswith("/api/creative-studio/"):
         from api.creative_studio import handle_creative_post
 

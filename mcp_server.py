@@ -712,6 +712,42 @@ async def handle_create_creative_project(arguments: dict) -> list[TextContent]:
     return _creative_text(payload)
 
 
+async def handle_open_chat_document(arguments: dict) -> list[TextContent]:
+    from api.chat_documents import DocumentError, create_document
+
+    try:
+        payload = create_document(
+            str(arguments.get("session_id") or ""),
+            title=str(arguments.get("title") or ""),
+            text=str(arguments.get("text") or ""),
+            kind=str(arguments.get("kind") or "document"),
+        )
+    except DocumentError as exc:
+        payload = {"error": str(exc)}
+    return _creative_text(payload)
+
+
+async def handle_apply_chat_document(arguments: dict) -> list[TextContent]:
+    from api.chat_documents import DocumentError, apply_document_event
+
+    event = {
+        "type": "apply",
+        "text": arguments.get("text") if arguments.get("text") is not None else "",
+        "scope": arguments.get("scope") or "document",
+        "source": "agent",
+    }
+    if arguments.get("selection_start") is not None and arguments.get("selection_end") is not None:
+        event["selection"] = {
+            "start": arguments.get("selection_start"),
+            "end": arguments.get("selection_end"),
+        }
+    try:
+        payload = apply_document_event(str(arguments.get("document_id") or ""), event)
+    except DocumentError as exc:
+        payload = {"error": str(exc)}
+    return _creative_text(payload)
+
+
 async def handle_update_creative_field(arguments: dict) -> list[TextContent]:
     from api.creative_studio import update_field
 
@@ -1182,6 +1218,42 @@ TOOLS = [
             "required": ["project_id"],
         },
     ),
+    Tool(
+        name="open_chat_document",
+        description=(
+            "Open a persistent text document on the current chat. Use this for a substantial document, "
+            "an explicit request to edit in a document, or pasted text the user wants to keep editing. "
+            "A short answer stays in the chat. Does not change Creative Studio fields."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string"},
+                "title": {"type": "string"},
+                "text": {"type": "string"},
+                "kind": {"type": "string", "enum": ["document", "script"]},
+            },
+            "required": ["session_id"],
+        },
+    ),
+    Tool(
+        name="apply_chat_document",
+        description=(
+            "Replace the open document, or the selected passage when scope is selection. "
+            "Pass the full replacement text. A question about the document is not an edit."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "document_id": {"type": "string"},
+                "text": {"type": "string"},
+                "scope": {"type": "string", "enum": ["document", "selection"]},
+                "selection_start": {"type": "integer"},
+                "selection_end": {"type": "integer"},
+            },
+            "required": ["document_id", "text"],
+        },
+    ),
 ]
 
 HANDLERS = {
@@ -1206,6 +1278,8 @@ HANDLERS = {
     "record_creative_decision": handle_record_creative_decision,
     "set_creative_stage_status": handle_set_creative_stage_status,
     "export_creative_project": handle_export_creative_project,
+    "open_chat_document": handle_open_chat_document,
+    "apply_chat_document": handle_apply_chat_document,
 }
 
 

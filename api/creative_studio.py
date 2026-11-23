@@ -629,6 +629,7 @@ def _blank_project(name: str, product: str = "") -> dict:
         "chat_session_id": "",
         "chat_stage": "",
         "chat_field": "",
+        "links": [],
     }
 
 
@@ -848,7 +849,11 @@ def _migrate_hook_concept(project: dict) -> bool:
 def _prepare_project(project: dict) -> bool:
     if not isinstance(project.get("chat"), list):
         project["chat"] = []
-    changed = _ensure_fields(project)
+    changed = False
+    if not isinstance(project.get("links"), list):
+        project["links"] = []
+        changed = True
+    changed = _ensure_fields(project) or changed
     changed = _migrate_hook_concept(project) or changed
     changed = _migrate_format_to_execution(project) or changed
     changed = _ensure_threads(project) or changed
@@ -1516,6 +1521,158 @@ def rename_project(project_id: str, name: str) -> dict:
         return _save(project)
 
 
+def _image_dir(project_id: str) -> Path:
+    return _state_dir() / "creative_studio" / "images" / project_id
+
+
+def _remove_image_dir(project_id: str) -> None:
+    import shutil
+
+    folder = _image_dir(project_id)
+    if folder.is_dir():
+        shutil.rmtree(folder, ignore_errors=True)
+
+
+def _link_row(kind: str, ref: str, title: str) -> dict:
+    return {
+        "id": _new_id(),
+        "kind": kind,
+        "ref": ref,
+        "title": (title or "").strip()[:160] or "Untitled",
+        "updated_at": _now(),
+    }
+
+
+def add_project_link(project_id: str, kind: str, ref: str, title: str = "") -> dict:
+    if kind not in {"document", "script", "image"}:
+        raise StudioError("unknown link kind")
+    ref = (ref or "").strip()
+    if not ref:
+        raise StudioError("link ref is required")
+    with _studio_lock():
+        project = _load(project_id)
+        links = project.setdefault("links", [])
+        for row in links:
+            if row.get("kind") == kind and row.get("ref") == ref:
+                row["title"] = (title or row.get("title") or "Untitled").strip()[:160]
+                row["updated_at"] = _now()
+                project["updated_at"] = row["updated_at"]
+                _save(project)
+                return _public_project(project)
+        links.append(_link_row(kind, ref, title))
+        project["updated_at"] = _now()
+        _save(project)
+        return _public_project(project)
+
+
+def touch_project_link(project_id: str, ref: str, title: str) -> None:
+    with _studio_lock():
+        try:
+            project = _load(project_id)
+        except StudioError:
+            return
+        changed = False
+        for row in project.get("links") or []:
+            if row.get("ref") == ref:
+                row["title"] = (title or row.get("title") or "Untitled").strip()[:160]
+                row["updated_at"] = _now()
+                changed = True
+        if changed:
+            project["updated_at"] = _now()
+            _save(project)
+
+
+def remove_project_link(project_id: str, link_id: str) -> dict:
+    with _studio_lock():
+        project = _load(project_id)
+        kept = []
+        removed = None
+        for row in project.get("links") or []:
+            if row.get("id") == link_id:
+                removed = row
+            else:
+                kept.append(row)
+        if removed is None:
+            raise StudioError("link not found", status=404)
+        project["links"] = kept
+        project["updated_at"] = _now()
+        _save(project)
+    if removed and removed.get("kind") == "image":
+        for path in _image_dir(project_id).glob(removed.get("ref", "") + ".*"):
+            try:
+                path.unlink()
+            except OSError:
+                pass
+    return get_project(project_id)
+
+
+def _clone_links(links: list, source_id: str, project_id: str) -> list:
+    cloned = []
+    for row in links:
+        if not isinstance(row, dict):
+            continue
+        kind = row.get("kind")
+        if kind in {"document", "script"}:
+            try:
+                from api.chat_documents import clone_document
+
+                copy = clone_document(str(row.get("ref") or ""), project_id)
+            except Exception:
+                copy = None
+            if not copy:
+                continue
+            cloned.append(_link_row(kind, copy["id"], copy.get("title") or row.get("title") or ""))
+        elif kind == "image":
+            ref = str(row.get("ref") or "")
+            found = next(_image_dir(source_id).glob(ref + ".*"), None) if ref else None
+            if found is None or not found.is_file():
+                continue
+            new_ref = _new_id()
+            dest_dir = _image_dir(project_id)
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            (dest_dir / f"{new_ref}{found.suffix}").write_bytes(found.read_bytes())
+            cloned.append(_link_row("image", new_ref, row.get("title") or "Image"))
+    return cloned
+
+
+_IMAGE_TYPES = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/webp": ".webp",
+    "image/gif": ".gif",
+}
+
+
+def save_project_image(project_id: str, title: str, media_type: str, data_base64: str) -> dict:
+    import base64
+
+    suffix = _IMAGE_TYPES.get((media_type or "").split(";")[0].strip().lower())
+    if not suffix:
+        raise StudioError("unsupported image type")
+    try:
+        raw = base64.b64decode((data_base64 or "").strip(), validate=True)
+    except Exception as exc:
+        raise StudioError("invalid image data") from exc
+    if not raw or len(raw) > 4_000_000:
+        raise StudioError("image is empty or too large")
+    ref = _new_id()
+    folder = _image_dir(project_id)
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / f"{ref}{suffix}").write_bytes(raw)
+    return add_project_link(project_id, "image", ref, title or "Image")
+
+
+def read_project_image(project_id: str, ref: str) -> tuple[bytes, str]:
+    if not re.fullmatch(r"[a-f0-9]{12}", ref or ""):
+        raise StudioError("invalid image", status=404)
+    folder = _image_dir(project_id)
+    found = next(folder.glob(ref + ".*"), None) if folder.is_dir() else None
+    if found is None or not found.is_file():
+        raise StudioError("image not found", status=404)
+    media = {value: key for key, value in _IMAGE_TYPES.items()}.get(found.suffix.lower(), "application/octet-stream")
+    return found.read_bytes(), media
+
+
 def delete_project(project_id: str) -> dict:
     with _studio_lock():
         store = _read_store()
@@ -1525,7 +1682,14 @@ def delete_project(project_id: str) -> dict:
         if store["active_project_id"] == project_id:
             store["active_project_id"] = ""
         _write_store(store)
-        return {"ok": True, "id": project_id}
+    _remove_image_dir(project_id)
+    try:
+        from api.chat_documents import clear_creative_bindings
+
+        clear_creative_bindings(project_id)
+    except Exception:
+        logger.debug("creative binding cleanup skipped", exc_info=True)
+    return {"ok": True, "id": project_id}
 
 
 def duplicate_project(project_id: str, name: str | None = None) -> dict:
@@ -1547,6 +1711,7 @@ def duplicate_project(project_id: str, name: str | None = None) -> dict:
         for stage in project.get("stages", {}).values():
             for slot in (stage.get("fields") or {}).values():
                 slot.pop("chat_session_id", None)
+        project["links"] = _clone_links(source.get("links") or [], source["id"], project["id"])
         _save(project)
         return project
 
@@ -2262,6 +2427,20 @@ def handle_creative_get(handler, parsed):
     if parsed.query:
         from urllib.parse import parse_qs
         qs = {key: values[-1] for key, values in parse_qs(parsed.query).items()}
+    if tail.startswith("/images/"):
+        ref = tail[len("/images/"):]
+        try:
+            data, media = read_project_image(project_id, ref)
+        except StudioError as exc:
+            from api.helpers import j
+            return j(handler, exc.payload if hasattr(exc, "payload") else {"error": str(exc)}, status=exc.status)
+        handler.send_response(200)
+        handler.send_header("Content-Type", media)
+        handler.send_header("Content-Length", str(len(data)))
+        handler.send_header("Cache-Control", "private, max-age=3600")
+        handler.end_headers()
+        handler.wfile.write(data)
+        return True
     if tail in {"", "/"}:
         return _http_call(handler, lambda: get_project(
             project_id,
@@ -2406,6 +2585,22 @@ def handle_creative_post(handler, parsed, body: dict):
             str(body.get("stage") or ""),
             str(body.get("field") or ""),
             body.get("text") or "",
+        ))
+    if tail == "/links":
+        return _http_call(handler, lambda: add_project_link(
+            project_id,
+            str(body.get("kind") or ""),
+            str(body.get("ref") or ""),
+            str(body.get("title") or ""),
+        ))
+    if tail == "/links/remove":
+        return _http_call(handler, lambda: remove_project_link(project_id, str(body.get("link_id") or "")))
+    if tail == "/images":
+        return _http_call(handler, lambda: save_project_image(
+            project_id,
+            str(body.get("title") or ""),
+            str(body.get("media_type") or ""),
+            str(body.get("data_base64") or ""),
         ))
     if tail == "/checks":
         return _http_call(handler, lambda: update_concept_checks(project_id, body.get("checks") or {}))

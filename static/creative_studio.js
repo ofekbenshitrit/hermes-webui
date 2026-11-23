@@ -157,6 +157,7 @@ const CREATIVE_PREREQ_FIELDS = {
 let _creativeProjects = [];
 let _creativeProject = null;
 let _creativeStage = 'brief';
+let _creativeView = 'overview';
 let _creativeChatOpen = true;
 let _creativeFocusField = '';
 let _creativeChatWidth = 480;
@@ -327,6 +328,7 @@ async function creativeOpenProject(id, opts){
   const storedMode = project.export_options && project.export_options.mode;
   if(storedMode === 'full' || storedMode === 'handoff') _creativeExportMode = storedMode;
   if(!(opts && opts.keepStage) || !CREATIVE_STEPS.some(stage => stage.id === _creativeStage)) _creativeStage = 'brief';
+  _creativeView = opts && opts.editor ? 'editor' : 'overview';
   _creativeCreating = false;
   _creativeBrowsing = false;
   _creativeStrategyPrompt = '';
@@ -448,6 +450,105 @@ function _creativeRestoreOpenDetails(){
   });
 }
 
+function creativeShowOverview(){
+  _creativeView = 'overview';
+  creativeRenderWorkspace();
+}
+
+function creativeEditCreative(){
+  _creativeView = 'editor';
+  creativeRenderWorkspace();
+  void _creativeShowBoundChat();
+}
+
+function _creativeLinkRows(kind){
+  const links = (_creativeProject && _creativeProject.links) || [];
+  return links.filter(row => row && row.kind === kind);
+}
+
+function _creativeOverviewMarkup(){
+  const project = _creativeProject;
+  const steps = CREATIVE_STEPS.map(item => {
+    const stage = project.stages && project.stages[item.id];
+    const status = _creativeShownStatus((stage && stage.status) || 'not_started');
+    return `<li><span>${_creativeEsc(item.label || item.id)}</span><small>${_creativeEsc(_creativeStatusLabel(status))}</small></li>`;
+  }).join('');
+  const documents = _creativeLinkRows('document').map(row => _creativeLinkRow(row)).join('') || '<p class="creative-overview-empty">No documents linked yet.</p>';
+  const scripts = _creativeLinkRows('script').map(row => _creativeLinkRow(row)).join('') || '<p class="creative-overview-empty">No scripts yet.</p>';
+  const images = _creativeLinkRows('image').map(row => {
+    const src = '/api/creative-studio/projects/' + project.id + '/images/' + encodeURIComponent(row.ref);
+    return `<figure class="creative-overview-image"><img src="${src}" alt="${_creativeEsc(row.title || 'Image')}"><figcaption>${_creativeEsc(row.title || 'Image')}</figcaption><button type="button" onclick="creativeRemoveLink('${row.id}')">Remove</button></figure>`;
+  }).join('') || '<p class="creative-overview-empty">No images yet.</p>';
+  return `<div class="creative-overview">${_creativePageHeader(project.name, _creativeNewButton())}
+    <div class="creative-overview-body">
+      <section class="creative-overview-hero">
+        <p class="creative-wizard-kicker">${_creativeEsc((project.product || project.stages && project.stages.brief && project.stages.brief.fields.product_offer.text) || 'Creative')}</p>
+        <h2>${_creativeEsc(project.name)}</h2>
+        <p>The creative, its scripts, documents, and images live here. Open one to edit it.</p>
+        <button type="button" class="creative-primary" onclick="creativeEditCreative()">Edit creative</button>
+      </section>
+      <section><h3>Creative</h3><ul class="creative-overview-steps">${steps}</ul></section>
+      <section><div class="creative-overview-head"><h3>Documents</h3></div>${documents}</section>
+      <section><div class="creative-overview-head"><h3>Scripts</h3><button type="button" class="creative-ghost" onclick="creativeAddScript()">New script</button></div>${scripts}</section>
+      <section><div class="creative-overview-head"><h3>Images</h3><button type="button" class="creative-ghost" onclick="document.getElementById('creativeImageInput').click()">Add image</button></div>
+        <input id="creativeImageInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden onchange="creativeUploadImage(this)">
+        <div class="creative-overview-images">${images}</div>
+      </section>
+    </div>
+  </div>`;
+}
+
+function _creativeLinkRow(row){
+  return `<button type="button" class="creative-overview-link" onclick="creativeOpenLink('${row.kind}','${row.ref}')"><strong>${_creativeEsc(row.title || 'Untitled')}</strong><small>${_creativeEsc(row.kind)}</small></button>`;
+}
+
+async function creativeOpenLink(kind, ref){
+  if(kind === 'image') return;
+  if(typeof switchPanel === 'function') await switchPanel('chat');
+  if(typeof openChatDocument === 'function') await openChatDocument(ref);
+}
+
+async function creativeAddScript(){
+  if(!_creativeProject) return;
+  const sessionId = (_creativeProject.chat_session_id) || (typeof S !== 'undefined' && S.session && S.session.session_id) || ('creative' + _creativeProject.id);
+  const doc = await api('/api/chat-documents', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({session_id:sessionId, title:'Script', kind:'script', creative_id:_creativeProject.id, text:''}),
+  });
+  _creativeProject = await api('/api/creative-studio/projects/' + _creativeProject.id);
+  if(typeof switchPanel === 'function') await switchPanel('chat');
+  if(typeof openChatDocument === 'function') await openChatDocument(doc.id);
+}
+
+async function creativeUploadImage(input){
+  const file = input.files && input.files[0];
+  input.value = '';
+  if(!file || !_creativeProject) return;
+  const data = await file.arrayBuffer();
+  const bytes = new Uint8Array(data);
+  let binary = '';
+  for(let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
+  const fresh = await api('/api/creative-studio/projects/' + _creativeProject.id + '/images', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({title:file.name, media_type:file.type, data_base64:btoa(binary)}),
+  });
+  _creativeProject = fresh;
+  creativeRenderWorkspace();
+}
+
+async function creativeRemoveLink(linkId){
+  if(!_creativeProject) return;
+  const fresh = await api('/api/creative-studio/projects/' + _creativeProject.id + '/links/remove', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({link_id:linkId}),
+  });
+  _creativeProject = fresh;
+  creativeRenderWorkspace();
+}
+
 function creativeRenderWorkspace(){
   const root = document.getElementById('creativeWorkspace');
   if(!root) return;
@@ -461,6 +562,11 @@ function creativeRenderWorkspace(){
   if(_creativeBrowsing || !_creativeProject){
     _creativeBrowsing = true;
     root.innerHTML = _creativeIndexMarkup();
+    void creativeReleaseChat();
+    return;
+  }
+  if(_creativeView !== 'editor'){
+    root.innerHTML = _creativeOverviewMarkup();
     void creativeReleaseChat();
     return;
   }
@@ -490,6 +596,7 @@ function creativeRenderWorkspace(){
         </div>
       </div>
       <div class="creative-header-tools">
+        <button type="button" class="creative-ghost" onclick="creativeShowOverview()">Overview</button>
         <button type="button" class="creative-icon-btn${_creativeChatOpen ? ' on' : ''}" aria-label="${_creativeChatOpen ? 'Hide chat' : 'Show chat'}" aria-pressed="${_creativeChatOpen ? 'true' : 'false'}" onclick="creativeToggleChat()">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M14 4v16"/></svg>
         </button>
@@ -2371,9 +2478,11 @@ function _creativeStartPoll(){
   }, 1000);
 }
 
-document.addEventListener('input', event => {
-  const node = event.target;
-  if(!node || node.tagName !== 'TEXTAREA' || !node.closest || !node.closest('#mainCreative')) return;
-  _creativeFitTextarea(node);
-});
-window.addEventListener('resize', () => _creativeFitTextareas());
+if(typeof document !== 'undefined'){
+  document.addEventListener('input', event => {
+    const node = event.target;
+    if(!node || node.tagName !== 'TEXTAREA' || !node.closest || !node.closest('#mainCreative')) return;
+    _creativeFitTextarea(node);
+  });
+  window.addEventListener('resize', () => _creativeFitTextareas());
+}

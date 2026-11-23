@@ -72,6 +72,7 @@
   }
 })()</script>
 <link rel="stylesheet" href="static/style.css?v=__WEBUI_VERSION__-mono">
+  <link rel="stylesheet" href="static/chat_documents.css?v=__WEBUI_VERSION__">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" integrity="sha384-LJcOxlx9IMbNXDqJ2axpfEQKkAYbFjJfhXexLfiRJhjDU81mzgkiQq8rkV0j6dVh" crossorigin="anonymous">
   <!-- KaTeX math rendering CSS (loaded eagerly from vendored assets to prevent font CSP noise) -->
   <link rel="stylesheet" href="static/vendor/katex/0.16.22/katex.min.css">
@@ -512,6 +513,7 @@
       <div id="liveToolCards" style="display:none;max-width:800px;margin:0 auto;width:100%;padding:0 24px;"></div>
     </div>
     </div>
+    <aside id="chatDocumentPanel" class="chat-document-panel" hidden aria-label="Document"></aside>
     <div class="reconnect-banner" id="reconnectBanner">
       <span id="reconnectMsg"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-1px"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg> A response may have been in progress when you last left. Reload messages?</span>
       <div style="display:flex;gap:8px;flex-shrink:0">
@@ -662,9 +664,13 @@
         <div class="composer-footer">
           <div class="composer-left">
             <input type="file" id="fileInput" class="file-input-visually-hidden" multiple accept="image/*,text/*,application/pdf,application/json,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.md,.py,.js,.ts,.yaml,.yml,.toml,.csv,.sh,.txt,.log,.env,.xls,.xlsx,.doc,.docx,.zip,.tar,.gz,.tgz,.bz2,.xz">
-            <button type="button" class="icon-btn has-tooltip" id="btnAttach" data-tooltip="Attach files" data-i18n-title="composer_control_attach" data-i18n-aria-label="composer_control_attach" aria-label="Attach files">
+            <div class="composer-attach-wrap">
+            <button type="button" class="icon-btn has-tooltip" id="btnAttach" data-tooltip="Attach" data-i18n-title="composer_control_attach" data-i18n-aria-label="composer_control_attach" aria-label="Attach" aria-haspopup="menu" aria-expanded="false" aria-controls="composerAttachMenu">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
             </button>
+            <div id="composerAttachMenu" class="composer-attach-menu" role="menu" hidden></div>
+            </div>
+            <button type="button" id="composerCreativeChip" class="composer-creative-chip" hidden></button>
             <button class="icon-btn voice-mode-btn has-tooltip" id="btnVoiceMode" data-tooltip="Voice mode" data-i18n-title="voice_mode_toggle" style="display:none">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <!-- Lucide audio-lines: signals two-way voice conversation, matches ChatGPT/Gemini convention. -->
@@ -1895,6 +1901,7 @@
 <script src="static/panels.js?v=__WEBUI_VERSION__" defer></script>
 <script src="static/creative_guide.js?v=__WEBUI_VERSION__" defer></script>
 <script src="static/creative_studio.js?v=__WEBUI_VERSION__" defer></script>
+<script src="static/chat_documents.js?v=__WEBUI_VERSION__" defer></script>
 <script src="static/onboarding.js?v=__WEBUI_VERSION__" defer></script>
 <script src="static/boot.js?v=__WEBUI_VERSION__" defer></script>
 <script src="static/outline.js?v=__WEBUI_VERSION__" defer></script>

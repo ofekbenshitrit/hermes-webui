@@ -1067,7 +1067,11 @@ $('btnSend').onclick=()=>{
   send();
 };
 $('mainChat')?.addEventListener('pointerdown', closeMobileWorkspacePanelFromChat);
-$('btnAttach').onclick=e=>{if(e&&e.preventDefault)e.preventDefault();$('fileInput').value='';$('fileInput').click();};
+$('btnAttach').onclick=e=>{
+  if(e&&e.preventDefault)e.preventDefault();
+  if(typeof openComposerAttachMenu==='function') openComposerAttachMenu(e);
+  else {$('fileInput').value='';$('fileInput').click();}
+};
 
 // ── Voice input (Web Speech API + MediaRecorder fallback) ───────────────────
 function _micIsLocalhostOrLoopback(hostname){
